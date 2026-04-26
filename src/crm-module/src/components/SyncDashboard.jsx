@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getUnsyncedSubmissions, markSynced } from '../services/backendApi.js'
+import { getUnsyncedSubmissions, getAllSubmissions, markSynced } from '../services/backendApi.js'
 import { createCrmProject, isSimulationMode } from '../services/crmApi.js'
+import { exportSubmissionsToExcel } from '../utils/exportExcel.js'
 import FilterBar from './FilterBar.jsx'
 import SubmissionsTable from './SubmissionsTable.jsx'
 import SyncReport from './SyncReport.jsx'
@@ -14,6 +15,7 @@ export default function SyncDashboard({ token, onLogout }) {
   const [isSyncing, setIsSyncing] = useState(false)
   const [report, setReport] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [error, setError] = useState(null)
 
   const fetchSubmissions = useCallback(async () => {
@@ -85,6 +87,25 @@ export default function SyncDashboard({ token, onLogout }) {
     setIsSyncing(false)
   }
 
+  async function handleExport() {
+    setIsExporting(true)
+    setError(null)
+    try {
+      const data = await getAllSubmissions(token)
+      const all = data.data || []
+      if (all.length === 0) {
+        setError('Aucune soumission à exporter.')
+        return
+      }
+      exportSubmissionsToExcel(all)
+    } catch (err) {
+      if (err.message.includes('401')) onLogout()
+      else setError(err.message)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const selectedIds = [...selected]
   const canSync = selectedIds.length > 0 && !isSyncing
 
@@ -140,7 +161,7 @@ export default function SyncDashboard({ token, onLogout }) {
 
         {/* Barre d'actions */}
         <div style={{
-          display: 'flex', gap: 12, marginBottom: 16,
+          display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center',
           padding: '12px 0', borderTop: '1px solid #F0EBFF'
         }}>
           <button
@@ -166,6 +187,19 @@ export default function SyncDashboard({ token, onLogout }) {
               Synchronisation en cours…
             </span>
           )}
+          <button
+            onClick={handleExport}
+            className="btn-secondary"
+            disabled={isExporting || isSyncing}
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {isExporting ? 'Export…' : 'Export Excel'}
+          </button>
         </div>
 
         {/* Erreur */}

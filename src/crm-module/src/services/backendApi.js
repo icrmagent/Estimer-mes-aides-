@@ -11,6 +11,16 @@ export async function getUnsyncedSubmissions(token, params = new URLSearchParams
   return res.json()
 }
 
+export async function getAllSubmissions(token) {
+  const params = new URLSearchParams({ limit: '200', page: '1' })
+  const res = await fetch(`${BASE_URL}/api/submissions?${params}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  if (res.status === 401) throw new Error('Token invalide ou expiré')
+  if (!res.ok) throw new Error(`Erreur serveur: ${res.status}`)
+  return res.json()
+}
+
 export async function markSynced(token, id, crmProjectId) {
   const res = await fetch(`${BASE_URL}/api/submissions/${id}/sync`, {
     method: 'PUT',
