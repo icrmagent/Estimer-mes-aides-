@@ -206,3 +206,60 @@ export function IconLoader({ size = 24, className = '' }) {
     </svg>
   )
 }
+
+export function IconBuilding({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <rect x="4" y="2" width="16" height="20" rx="2" ry="2" />
+      <path d="M9 22v-4h6v4" />
+      <path d="M8 6h.01" /><path d="M16 6h.01" />
+      <path d="M12 6h.01" /><path d="M12 10h.01" />
+      <path d="M12 14h.01" /><path d="M16 10h.01" />
+      <path d="M16 14h.01" /><path d="M8 10h.01" />
+      <path d="M8 14h.01" />
+    </svg>
+  )
+}
+
+export function IconDroplet({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <path d="M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5S12.5 6 12 3c-.5 3-2 5.4-4 7C6 11.1 5 13 5 15a7 7 0 0 0 7 7z" />
+    </svg>
+  )
+}
+
+export function IconWind({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2" />
+      <path d="M9.6 4.6A2 2 0 1 1 11 8H2" />
+      <path d="M12.6 19.4A2 2 0 1 0 14 16H2" />
+    </svg>
+  )
+}
+
+export function IconMoon({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+    </svg>
+  )
+}
+
+export function IconThermometer({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z" />
+    </svg>
+  )
+}
+
+export function IconTree({ size = 24, className = '' }) {
+  return (
+    <svg {...base} width={size} height={size} viewBox="0 0 24 24" className={className}>
+      <path d="m17 14 3 3.1a1 1 0 0 1-.7 1.7H4.7a1 1 0 0 1-.7-1.7L7 14h-.3a1 1 0 0 1-.7-1.7L9 9h-.2A1 1 0 0 1 8 7.3L12 3l4 4.3A1 1 0 0 1 15.2 9H15l3 3.3a1 1 0 0 1-.7 1.7H17z" />
+      <path d="M12 22v-3" />
+    </svg>
+  )
+}

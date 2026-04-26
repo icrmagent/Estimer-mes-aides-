@@ -963,47 +963,8 @@ html, body {
   pointer-events: none;
 }
 
-/* ═══════════════════════════════════════════
-   TEL SPLIT — indicatif + numéro
-═══════════════════════════════════════════ */
+/* TEL SPLIT — base row (DialCodePicker handles the dial side) */
 .tel-row { display: flex; gap: 10px; align-items: stretch; }
-
-.tel-dial-wrap { position: relative; flex-shrink: 0; }
-
-.tel-dial-select {
-  height: var(--touch);
-  padding: 0 30px 0 12px;
-  border: 2px solid var(--c-border);
-  border-radius: var(--radius-md);
-  font-family: var(--font-body);
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--c-text);
-  background: var(--c-primary-bg);
-  appearance: none;
-  -webkit-appearance: none;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 150ms var(--ease);
-  width: 100px;
-}
-
-.tel-dial-select:focus { border-color: var(--c-primary); }
-
-.tel-dial-wrap::after {
-  content: '';
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid var(--c-primary);
-  pointer-events: none;
-}
-
 .tel-row .field-input { flex: 1; min-width: 0; }
 
 /* ═══════════════════════════════════════════
@@ -1062,4 +1023,238 @@ html, body {
     row-gap: 20px;
     align-items: start;
   }
+}
+
+/* ═══════════════════════════════════════════
+   TEL ROW — DialCodePicker replaces dial-wrap
+═══════════════════════════════════════════ */
+.tel-row { display: flex; gap: 10px; align-items: stretch; }
+.tel-row .field-input { flex: 1; min-width: 0; }
+
+/* ═══════════════════════════════════════════
+   DIAL CODE PICKER — selector indicatif complet
+═══════════════════════════════════════════ */
+.dial-picker { flex-shrink: 0; position: relative; }
+
+.dial-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--touch);
+  padding: 0 10px 0 10px;
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-primary-bg);
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--c-text);
+  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+.dial-trigger:hover       { border-color: var(--c-primary); }
+.dial-trigger--open       { border-color: var(--c-primary); box-shadow: 0 0 0 3px var(--c-primary-muted); }
+
+.dial-flag-lg  { font-size: 20px; line-height: 1; }
+.dial-code-txt { font-size: 13px; font-weight: 800; color: var(--c-primary); }
+.dial-caret    { font-size: 10px; color: var(--c-primary); margin-left: 2px; }
+
+/* Dropdown — portal, position:fixed */
+.dial-dropdown {
+  position: fixed;
+  z-index: 9999;
+  background: var(--c-surface);
+  border: 1.5px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 340px;
+}
+
+/* Search */
+.dial-search-wrap {
+  position: relative;
+  padding: 10px 10px 6px;
+  border-bottom: 1px solid var(--c-border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dial-search-icon { color: var(--c-text-2); flex-shrink: 0; }
+
+.dial-search {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-text);
+  background: transparent;
+  padding: 4px 0;
+}
+
+.dial-search::placeholder { color: #bbb; }
+
+.dial-search-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--c-text-2);
+  font-size: 12px;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+
+/* List */
+.dial-list {
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+  padding: 4px 0;
+  overscroll-behavior: contain;
+}
+
+.dial-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  text-align: left;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dial-option:hover         { background: var(--c-primary-bg); }
+.dial-option--on           { background: var(--c-primary-bg); }
+.dial-option--on .dial-country-name { color: var(--c-primary); font-weight: 800; }
+
+.dial-country-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dial-country-code {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-primary);
+  flex-shrink: 0;
+}
+
+.dial-empty {
+  padding: 16px 14px;
+  font-size: 13px;
+  color: var(--c-text-2);
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════
+   OPTION CARDS — avec icône illustrative
+═══════════════════════════════════════════ */
+.option-card--icon {
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  min-width: 110px;
+  min-height: 76px;
+}
+
+.option-icon {
+  flex-shrink: 0;
+  color: var(--c-primary);
+  transition: color 0.18s;
+}
+
+.option-label {
+  display: block;
+  line-height: 1.3;
+}
+
+.option-card--on .option-icon       { color: white; }
+.option-card--checkbox-on .option-icon { color: white; }
+
+@media (min-width: 640px) {
+  .option-card--icon { min-width: 120px; padding: 16px 18px; }
+}
+
+@media (min-width: 1024px) {
+  .option-card--icon { min-width: 130px; min-height: 84px; }
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE IMPROVEMENTS
+═══════════════════════════════════════════ */
+
+/* Prevent iOS scroll bounce + improve performance */
+html { scroll-behavior: smooth; }
+body { overscroll-behavior: none; }
+
+/* Compact header on landscape mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .app-header        { padding: 8px 16px 10px; }
+  .app-header-h1     { font-size: 16px; }
+  .app-header-sub    { display: none; }
+  .app-header-logo-img { height: 28px; }
+  .app-header-flag svg { width: 28px; height: 18px; }
+  .step-bar          { padding: 8px 16px 0; }
+  .step-name         { font-size: 13px; }
+  .step-dots         { display: none; }
+  .form-scrollable   { padding: 14px 16px 88px; }
+}
+
+/* Tablet portrait (640-1023px) — centred content with max-width */
+@media (min-width: 640px) and (max-width: 1023px) {
+  .step-content    { max-width: 520px; margin: 0 auto; }
+  .welcome-body    { gap: 32px; }
+  .welcome-hero-icon { width: 108px; height: 108px; }
+
+  /* Slightly wider option pills */
+  .option-card     { min-width: 150px; }
+
+  /* Confirmation card wider */
+  .confirmation-card { max-width: 420px; }
+}
+
+/* Fix nav-bar width tracking root on all sizes */
+@media (min-width: 480px) {
+  .nav-bar { max-width: min(100vw, 480px); }
+}
+@media (min-width: 640px)  { .nav-bar { max-width: 640px; } }
+@media (min-width: 1024px) { .nav-bar { max-width: 960px; } }
+
+/* Safe area for iOS notch (bottom) */
+.nav-bar {
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+}
+
+/* Slightly taller touch targets on tablet */
+@media (min-width: 640px) {
+  :root { --touch: 54px; }
+}
+
+/* Ensure option grid doesn't overflow on small phones */
+@media (max-width: 380px) {
+  .option-card          { min-width: 120px; font-size: 13px; padding: 11px 14px; }
+  .option-card--icon    { min-width: 100px; min-height: 68px; padding: 11px 12px; }
+  .option-icon          { width: 18px !important; height: 18px !important; }
+  .welcome-stats        { gap: 8px; }
+  .stat-badge           { font-size: 12px; padding: 7px 11px; }
 }

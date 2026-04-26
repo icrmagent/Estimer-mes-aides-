@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useForm } from '../context/FormContext'
+import { DialCodePicker } from './DialCodePicker'
 import {
   IconUser, IconMapPin, IconPhone, IconMail,
   IconEuro, IconHome, IconCalendar, IconRuler,
   IconFlame, IconWrench, IconClipboard, IconLoader,
+  IconBuilding, IconDroplet, IconWind, IconMoon,
+  IconThermometer, IconTree, IconSun, IconBolt,
+  IconCheckCircle, IconXCircle,
 } from './Icons'
 
+/* ── Field label icons ───────────────────────────────── */
 export const FIELD_ICONS = {
   2262: IconUser,    2087: IconUser,     2088: IconUser,
   2217: IconMapPin,  2089: IconMapPin,   2090: IconMapPin,
@@ -18,6 +23,24 @@ export const FIELD_ICONS = {
   2303: IconWrench,  2304: IconCalendar, 2305: IconClipboard,
 }
 
+/* ── Option illustrative icons ───────────────────────── */
+export const OPTION_ICONS = {
+  2292: [IconBuilding,  IconHome],
+  2293: [IconHome,      IconHome,        IconHome,      IconUser],
+  2294: [IconEuro,      IconEuro,        IconEuro,      IconEuro],
+  2296: [IconHome,      IconWrench],
+  2297: [IconWrench,    IconWrench,      IconWrench,    IconWrench],
+  2298: [IconTree,      IconWrench,      IconWrench,    IconWrench,    IconWrench],
+  2299: [IconWrench,    IconWind],
+  2300: [IconXCircle,   IconCheckCircle],
+  2301: [IconTree,      IconDroplet,     IconFlame,     IconThermometer, IconBolt],
+  2303: [IconWrench,    IconFlame,       IconWind,      IconSun,       IconHome],
+  2304: [IconSun,       IconSun,         IconMoon,      IconCalendar],
+  2306: [IconCalendar,  IconCalendar],
+  2307: [IconRuler,     IconRuler,       IconRuler,     IconRuler],
+}
+
+/* ── Label with contextual icon ─────────────────────── */
 function Label({ field, htmlFor }) {
   if (!field.name) return null
   const Icon = FIELD_ICONS[field.id]
@@ -55,33 +78,23 @@ function SelectField({ field }) {
   )
 }
 
-/* ── Téléphone — indicatif + numéro ─────────────────── */
-const DIAL_CODES = [
-  { code: '+33',  flag: '🇫🇷', label: '+33'  },
-  { code: '+32',  flag: '🇧🇪', label: '+32'  },
-  { code: '+41',  flag: '🇨🇭', label: '+41'  },
-  { code: '+352', flag: '🇱🇺', label: '+352' },
-  { code: '+212', flag: '🇲🇦', label: '+212' },
-  { code: '+213', flag: '🇩🇿', label: '+213' },
-  { code: '+216', flag: '🇹🇳', label: '+216' },
-  { code: '+1',   flag: '🇨🇦', label: '+1'   },
-]
-
+/* ── Téléphone — indicatif pays + numéro ────────────── */
 function TelSplitField({ field }) {
   const { values, setValue } = useForm()
   const raw = values[field.id] ?? ''
 
-  const [dialCode, setDialCode] = useState(() => {
-    for (const d of DIAL_CODES) {
-      if (raw.startsWith(d.code + ' ')) return d.code
+  const parseDialCode = r => {
+    for (const n of ['+1869', '+1868', '+1876', '+1809', '+1784', '+1758', '+1473', '+1268', '+1246', '+1242']) {
+      if (r.startsWith(n + ' ')) return n
     }
-    return '+33'
-  })
-  const [number, setNumber] = useState(() => {
-    for (const d of DIAL_CODES) {
-      if (raw.startsWith(d.code + ' ')) return raw.slice(d.code.length + 1)
-    }
-    return raw
+    const m = r.match(/^(\+\d{1,4}) /)
+    return m ? m[1] : '+33'
+  }
+
+  const [dialCode, setDialCode] = useState(() => parseDialCode(raw))
+  const [number,   setNumber]   = useState(() => {
+    const dc = parseDialCode(raw)
+    return raw.startsWith(dc + ' ') ? raw.slice(dc.length + 1) : raw
   })
 
   const update = (dc, nb) => setValue(field.id, nb ? `${dc} ${nb}` : '')
@@ -90,17 +103,10 @@ function TelSplitField({ field }) {
     <div className="field-group">
       <Label field={field} htmlFor="f-tel-num" />
       <div className="tel-row">
-        <div className="tel-dial-wrap">
-          <select
-            className="tel-dial-select"
-            value={dialCode}
-            onChange={e => { setDialCode(e.target.value); update(e.target.value, number) }}
-          >
-            {DIAL_CODES.map(d => (
-              <option key={d.code} value={d.code}>{d.flag} {d.label}</option>
-            ))}
-          </select>
-        </div>
+        <DialCodePicker
+          value={dialCode}
+          onChange={dc => { setDialCode(dc); update(dc, number) }}
+        />
         <input
           id="f-tel-num"
           type="tel"
@@ -233,20 +239,26 @@ function TextareaField({ field }) {
 function RadioField({ field }) {
   const { values, setValue } = useForm()
   const selected = values[field.id] ?? ''
+  const icons    = OPTION_ICONS[field.id] ?? []
+
   return (
     <div className="field-group">
       <Label field={field} />
       <div className="option-grid">
-        {field.options?.map(opt => (
-          <button
-            key={opt.id}
-            type="button"
-            className={`option-card${selected === opt.id ? ' option-card--on' : ''}`}
-            onClick={() => setValue(field.id, opt.id)}
-          >
-            {opt.name}
-          </button>
-        ))}
+        {field.options?.map((opt, idx) => {
+          const Icon = icons[idx]
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              className={`option-card${Icon ? ' option-card--icon' : ''}${selected === opt.id ? ' option-card--on' : ''}`}
+              onClick={() => setValue(field.id, opt.id)}
+            >
+              {Icon && <Icon size={22} className="option-icon" />}
+              <span className="option-label">{opt.name}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -254,8 +266,9 @@ function RadioField({ field }) {
 
 function CheckboxField({ field }) {
   const { values, setValue } = useForm()
-  const raw = values[field.id]
+  const raw      = values[field.id]
   const selected = Array.isArray(raw) ? raw : raw ? [raw] : []
+  const icons    = OPTION_ICONS[field.id] ?? []
 
   const toggle = id => {
     const next = selected.includes(id)
@@ -268,16 +281,20 @@ function CheckboxField({ field }) {
     <div className="field-group">
       <Label field={field} />
       <div className="option-grid">
-        {field.options?.map(opt => (
-          <button
-            key={opt.id}
-            type="button"
-            className={`option-card${selected.includes(opt.id) ? ' option-card--checkbox-on' : ''}`}
-            onClick={() => toggle(opt.id)}
-          >
-            {opt.name}
-          </button>
-        ))}
+        {field.options?.map((opt, idx) => {
+          const Icon = icons[idx]
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              className={`option-card${Icon ? ' option-card--icon' : ''}${selected.includes(opt.id) ? ' option-card--checkbox-on' : ''}`}
+              onClick={() => toggle(opt.id)}
+            >
+              {Icon && <Icon size={22} className="option-icon" />}
+              <span className="option-label">{opt.name}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )
