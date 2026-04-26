@@ -27,7 +27,7 @@ const FIELDS = [
 ]
 
 function getVal(values, fieldId) {
-  const sv = (values || []).find(v => v.field_id === fieldId)
+  const sv = (values || []).find(v => v.fieldId === fieldId)
   return sv?.value ?? ''
 }
 
@@ -35,11 +35,11 @@ export function exportSubmissionsToExcel(submissions) {
   const rows = submissions.map(sub => {
     const row = {
       ID: sub.id,
-      Date: new Date(sub.created_at).toLocaleString('fr-FR'),
+      Date: new Date(sub.createdAt).toLocaleString('fr-FR'),
       Synchronisé: sub.synced ? 'Oui' : 'Non',
     }
     for (const { id, label } of FIELDS) {
-      row[label] = getVal(sub.submission_values, id)
+      row[label] = getVal(sub.values, id)
     }
     return row
   })

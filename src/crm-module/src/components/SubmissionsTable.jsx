@@ -1,5 +1,5 @@
-function getFieldValue(submissionValues, fieldId) {
-  const sv = (submissionValues || []).find(v => v.field_id === fieldId)
+function getFieldValue(values, fieldId) {
+  const sv = (values || []).find(v => v.fieldId === fieldId)
   return sv?.value || '—'
 }
 
@@ -44,12 +44,12 @@ export default function SubmissionsTable({ submissions, selected, onToggle, onTo
             </tr>
           )}
           {submissions.map(sub => {
-            const prenom = getFieldValue(sub.submission_values, 2088)
-            const nom = getFieldValue(sub.submission_values, 2087)
-            const email = getFieldValue(sub.submission_values, 2016)
-            const cp = getFieldValue(sub.submission_values, 2089)
-            const ville = getFieldValue(sub.submission_values, 2090)
-            const nbChamps = (sub.submission_values || []).length
+            const prenom = getFieldValue(sub.values, 2088)
+            const nom = getFieldValue(sub.values, 2087)
+            const email = getFieldValue(sub.values, 2016)
+            const cp = getFieldValue(sub.values, 2089)
+            const ville = getFieldValue(sub.values, 2090)
+            const nbChamps = (sub.values || []).length
             const progress = syncProgress[sub.id]
             const isSelected = selected.has(sub.id)
 
@@ -72,7 +72,7 @@ export default function SubmissionsTable({ submissions, selected, onToggle, onTo
                   />
                 </td>
                 <td style={{ padding: '12px 16px', color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>
-                  {formatDate(sub.created_at)}
+                  {formatDate(sub.createdAt)}
                 </td>
                 <td style={{ padding: '12px 16px', fontWeight: 500 }}>
                   {prenom !== '—' || nom !== '—' ? `${prenom} ${nom}`.trim() : '—'}
