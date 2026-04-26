@@ -1,6 +1,7 @@
 import { useForm } from '../context/FormContext'
 
 function Label({ field, htmlFor }) {
+  if (!field.name) return null
   return (
     <label className="field-label" htmlFor={htmlFor}>
       {field.name}
@@ -11,7 +12,6 @@ function Label({ field, htmlFor }) {
 
 function TextField({ field }) {
   const { values, setValue } = useForm()
-  const val = values[field.id] ?? ''
   return (
     <div className="field-group">
       <Label field={field} htmlFor={`f-${field.id}`} />
@@ -19,7 +19,7 @@ function TextField({ field }) {
         id={`f-${field.id}`}
         type="text"
         className="field-input"
-        value={val}
+        value={values[field.id] ?? ''}
         placeholder={field.name}
         autoComplete="off"
         onChange={e => setValue(field.id, field.uppercase ? e.target.value.toUpperCase() : e.target.value)}
@@ -62,23 +62,22 @@ function TextareaField({ field }) {
   )
 }
 
-// fieldtype_id 4 & 50 → single-select card buttons
+// fieldtype_id 4 & 50 → single-select card buttons (centered, no dot)
 function RadioField({ field }) {
   const { values, setValue } = useForm()
   const selected = values[field.id] ?? ''
   return (
     <div className="field-group">
-      {field.name && <Label field={field} />}
+      <Label field={field} />
       <div className="option-grid">
         {field.options?.map(opt => (
           <button
             key={opt.id}
             type="button"
-            className={`option-card ${selected === opt.id ? 'option-card--on' : ''}`}
+            className={`option-card${selected === opt.id ? ' option-card--on' : ''}`}
             onClick={() => setValue(field.id, opt.id)}
           >
-            <span className="option-dot" />
-            <span className="option-label">{opt.name}</span>
+            {opt.name}
           </button>
         ))}
       </div>
@@ -86,7 +85,7 @@ function RadioField({ field }) {
   )
 }
 
-// fieldtype_id 5 → multi-select checkboxes
+// fieldtype_id 5 → multi-select (teal when selected)
 function CheckboxField({ field }) {
   const { values, setValue } = useForm()
   const raw = values[field.id]
@@ -99,17 +98,16 @@ function CheckboxField({ field }) {
 
   return (
     <div className="field-group">
-      {field.name && <Label field={field} />}
+      <Label field={field} />
       <div className="option-grid">
         {field.options?.map(opt => (
           <button
             key={opt.id}
             type="button"
-            className={`option-card ${selected.includes(opt.id) ? 'option-card--on' : ''}`}
+            className={`option-card${selected.includes(opt.id) ? ' option-card--checkbox-on' : ''}`}
             onClick={() => toggle(opt.id)}
           >
-            <span className={`option-check ${selected.includes(opt.id) ? 'option-check--on' : ''}`} />
-            <span className="option-label">{opt.name}</span>
+            {opt.name}
           </button>
         ))}
       </div>
@@ -119,12 +117,12 @@ function CheckboxField({ field }) {
 
 export function FieldRenderer({ field }) {
   switch (field.fieldtype_id) {
-    case 1:  return <TextField    field={field} />
+    case 1:  return <TextField     field={field} />
     case 2:  return <TextareaField field={field} />
-    case 4:  return <RadioField   field={field} />
+    case 4:  return <RadioField    field={field} />
     case 5:  return <CheckboxField field={field} />
-    case 6:  return <TelField     field={field} />
-    case 50: return <RadioField   field={field} />
-    default: return <TextField    field={field} />
+    case 6:  return <TelField      field={field} />
+    case 50: return <RadioField    field={field} />
+    default: return <TextField     field={field} />
   }
 }

@@ -1,6 +1,16 @@
 # Secrets et fichiers sensibles
 bd.txt
 *.env.local
+git ssh
+git ssh.pub
+
+# Fichiers temporaires / prototypes (racine uniquement)
+estimer-vos-aides.html
+estimermesaidesapp/
+/Capture*.png
+/flag-of-france.png
+/image_fr.png
+/logo-ila26-blanc.*.png
 
 # Claude Code (paramètres locaux)
 .claude/
@@ -11,6 +21,10 @@ node_modules/
 # Build
 dist/
 dist-ssr/
+
+# Playwright
+tests/e2e/playwright-report/
+tests/e2e/test-results/
 
 # Logs
 *.log

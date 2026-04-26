@@ -4,18 +4,16 @@ export function ProgressBar() {
   const { currentStep, totalSteps, currentSub } = useForm()
   if (!currentSub) return null
 
-  const pct      = Math.round(((currentStep + 1) / totalSteps) * 100)
-  const stepInCat = (currentSub.order ?? 0) + 1
-
   return (
-    <div className="progress-header">
-      <div className="progress-info">
-        <span className="progress-category">{currentSub.categoryName}</span>
-        <span className="progress-step">{stepInCat}/{currentSub.totalInCat}</span>
+    <>
+      <div className="step-indicator">
+        <div className="step-badge">{currentStep + 1}</div>
+        <span className="step-name">{currentSub.categoryName}</span>
       </div>
-      <div className="progress-track">
-        <div className="progress-fill" style={{ width: `${pct}%` }} />
+      <div className="step-line" />
+      <div className="step-progress-row">
+        <span className="step-counter">étape {currentStep + 1} / {totalSteps}</span>
       </div>
-    </div>
+    </>
   )
 }

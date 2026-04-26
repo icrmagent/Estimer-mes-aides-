@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useFormConfig } from '../hooks/useFormConfig'
 import { useForm } from '../context/FormContext'
 import { submitForm } from '../services/api'
+import { AppHeader } from '../components/AppHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { FieldRenderer } from '../components/FieldRenderer'
 import { NavigationBar } from '../components/NavigationBar'
@@ -52,6 +53,7 @@ export function FormPage() {
 
   return (
     <div className="form-page">
+      <AppHeader />
       <ProgressBar />
 
       <div className="form-scrollable">

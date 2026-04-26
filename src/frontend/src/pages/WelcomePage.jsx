@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useForm } from '../context/FormContext'
+import { AppHeader } from '../components/AppHeader'
 
 export function WelcomePage() {
   const navigate = useNavigate()
@@ -12,11 +13,12 @@ export function WelcomePage() {
 
   return (
     <div className="welcome-page">
-      <div className="welcome-card">
-        <div className="welcome-logo">🏠</div>
+      <AppHeader />
 
-        <div className="welcome-text">
-          <h1 className="welcome-title">Estimer Mes Aides</h1>
+      <div className="welcome-body">
+        <div className="welcome-hero">
+          <div className="welcome-icon">🏠</div>
+          <h2 className="welcome-title">Estimez vos aides en 5 minutes</h2>
           <p className="welcome-subtitle">
             Découvrez les aides auxquelles vous avez droit pour financer vos travaux de rénovation énergétique.
           </p>
