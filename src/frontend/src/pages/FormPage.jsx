@@ -5,7 +5,7 @@ import { useForm } from '../context/FormContext'
 import { submitForm } from '../services/api'
 import { AppHeader } from '../components/AppHeader'
 import { ProgressBar } from '../components/ProgressBar'
-import { FieldRenderer } from '../components/FieldRenderer'
+import { FieldRenderer, FIELD_ICONS } from '../components/FieldRenderer'
 import { NavigationBar } from '../components/NavigationBar'
 import { IconLoader } from '../components/Icons'
 
@@ -51,6 +51,8 @@ export function FormPage() {
   }
 
   const isSingleQuestion = currentSub.fields.length === 1 && currentSub.fields[0].options?.length > 0
+  const isGrid = currentSub.fields.length >= 6
+  const QuestionIcon = isSingleQuestion ? FIELD_ICONS[currentSub.fields[0].id] : null
 
   return (
     <div className="form-page">
@@ -60,12 +62,19 @@ export function FormPage() {
       <div className="form-scrollable">
         <div className="step-content" key={currentStep}>
           {isSingleQuestion ? (
-            <h2 className="step-title step-title--question">{currentSub.fields[0].name}</h2>
+            <>
+              {QuestionIcon && (
+                <div className="question-icon-wrap">
+                  <QuestionIcon size={32} className="question-icon" />
+                </div>
+              )}
+              <h2 className="step-title step-title--question">{currentSub.fields[0].name}</h2>
+            </>
           ) : (
             <h2 className="step-title">{currentSub.name}</h2>
           )}
 
-          <div className="fields-container">
+          <div className={`fields-container${isGrid ? ' fields-container--grid' : ''}`}>
             {currentSub.fields.map(field => (
               <FieldRenderer
                 key={field.id}

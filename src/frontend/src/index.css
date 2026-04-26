@@ -850,3 +850,216 @@ html, body {
   .confirmation-title { font-size: 32px; }
   .confirmation-text  { font-size: 16px; max-width: 360px; }
 }
+
+/* ═══════════════════════════════════════════
+   COUNTDOWN — retour auto après 10s
+═══════════════════════════════════════════ */
+.countdown-wrap {
+  width: 100%;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.countdown-bar {
+  width: 100%;
+  height: 5px;
+  background: var(--c-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.countdown-fill {
+  height: 100%;
+  background: var(--c-gradient);
+  border-radius: 3px;
+  transition: width 1s linear;
+}
+
+.countdown-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--c-text-2);
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════
+   FIELD LABEL ICONS
+═══════════════════════════════════════════ */
+.field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-label-icon {
+  color: var(--c-primary);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+/* ═══════════════════════════════════════════
+   QUESTION ICON — avant titre étape unique
+═══════════════════════════════════════════ */
+.question-icon-wrap {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: var(--c-primary-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 18px;
+  box-shadow: var(--shadow-sm);
+}
+
+.question-icon { color: var(--c-primary); }
+
+@media (min-width: 1024px) {
+  .question-icon-wrap { width: 80px; height: 80px; margin-bottom: 22px; }
+}
+
+/* ═══════════════════════════════════════════
+   SELECT — Civilité
+═══════════════════════════════════════════ */
+.select-wrap { position: relative; }
+
+.field-select {
+  width: 100%;
+  height: var(--touch);
+  padding: 0 42px 0 14px;
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--c-text);
+  background: var(--c-surface);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+
+.field-select:focus {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3px var(--c-primary-muted);
+}
+
+.select-wrap::after {
+  content: '';
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid var(--c-primary);
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════
+   TEL SPLIT — indicatif + numéro
+═══════════════════════════════════════════ */
+.tel-row { display: flex; gap: 10px; align-items: stretch; }
+
+.tel-dial-wrap { position: relative; flex-shrink: 0; }
+
+.tel-dial-select {
+  height: var(--touch);
+  padding: 0 30px 0 12px;
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--c-text);
+  background: var(--c-primary-bg);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 150ms var(--ease);
+  width: 100px;
+}
+
+.tel-dial-select:focus { border-color: var(--c-primary); }
+
+.tel-dial-wrap::after {
+  content: '';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--c-primary);
+  pointer-events: none;
+}
+
+.tel-row .field-input { flex: 1; min-width: 0; }
+
+/* ═══════════════════════════════════════════
+   POSTAL CODE — auto-complétion ville
+═══════════════════════════════════════════ */
+.cp-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.cp-input-wrap .field-input { flex: 1; }
+
+.cp-spinner {
+  position: absolute;
+  right: 14px;
+  color: var(--c-primary);
+}
+
+.cp-city-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cp-city-btn {
+  padding: 7px 14px;
+  border: 1.5px solid var(--c-primary);
+  border-radius: var(--radius-pill);
+  background: white;
+  color: var(--c-primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cp-city-btn:hover { background: var(--c-primary-bg); }
+
+.cp-city-btn--on {
+  background: var(--c-primary);
+  color: white;
+}
+
+/* ═══════════════════════════════════════════
+   FIELDS CONTAINER GRID — étape 1 (≥6 champs)
+═══════════════════════════════════════════ */
+@media (min-width: 1024px) {
+  .fields-container--grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+    row-gap: 20px;
+    align-items: start;
+  }
+}

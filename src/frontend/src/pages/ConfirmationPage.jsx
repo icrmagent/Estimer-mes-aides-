@@ -1,16 +1,29 @@
 import { useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from '../context/FormContext'
 import { AppHeader } from '../components/AppHeader'
 import { IconCheckCircle, IconXCircle, IconRefresh, IconHome } from '../components/Icons'
 
+const REDIRECT_DELAY = 10
+
 export function ConfirmationPage() {
   const navigate = useNavigate()
   const { result } = useForm()
+  const [countdown, setCountdown] = useState(REDIRECT_DELAY)
 
   useEffect(() => {
     if (!result) navigate('/')
   }, [result])
+
+  useEffect(() => {
+    if (!result?.ok) return
+    if (countdown === 0) {
+      navigate('/')
+      return
+    }
+    const timer = setTimeout(() => setCountdown(c => c - 1), 1000)
+    return () => clearTimeout(timer)
+  }, [result?.ok, countdown, navigate])
 
   if (!result) return null
 
@@ -23,7 +36,6 @@ export function ConfirmationPage() {
       <div className="confirmation-body">
         <div className="confirmation-card">
 
-          {/* Icône SVG */}
           <div className={`confirmation-icon ${isSuccess ? 'confirmation-icon--ok' : 'confirmation-icon--err'}`}>
             {isSuccess
               ? <IconCheckCircle size={52} className="conf-icon-ok"  />
@@ -64,6 +76,21 @@ export function ConfirmationPage() {
               Réessayer
             </button>
           )}
+
+          {isSuccess && (
+            <div className="countdown-wrap">
+              <div className="countdown-bar">
+                <div
+                  className="countdown-fill"
+                  style={{ width: `${(countdown / REDIRECT_DELAY) * 100}%` }}
+                />
+              </div>
+              <p className="countdown-label">
+                Retour automatique dans {countdown} seconde{countdown !== 1 ? 's' : ''}
+              </p>
+            </div>
+          )}
+
         </div>
       </div>
     </div>
