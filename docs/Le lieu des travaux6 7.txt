@@ -1,0 +1,2 @@
+
+    {"field_id":2300,"field_key":"projets_Accs_aux_combles_il_existe_une_trappe_daccs_","possible_values":[{"id":"NON","name":"NON"},{"id":"OUI","name":"OUI"}],"pagination":{"current_page":1,"per_page":10,"total":2,"last_page":1,"from":1,"to":2}}

@@ -1,0 +1,382 @@
+Cahier des Charges – Application Mobile « Estimer mes aides »
+Version 2.0 – Architecture avec base séparée et synchronisation CRM
+Date : 25 avril 2026
+
+Table des matières
+Présentation du projet
+
+Objectifs généraux
+
+Spécifications fonctionnelles
+
+3.1 Architecture de l’information et parcours utilisateur
+
+3.2 Gestion dynamique des catégories, questions et choix
+
+3.3 Typologie des champs et affichage
+
+3.4 Récupération et pré-remplissage des données
+
+3.5 Enregistrement local et base de données mobile
+
+3.6 Synchronisation avec le CRM
+
+Structure complète du formulaire (référence actuelle)
+
+4.1 Onglet « ESTIMER VOS AIDES »
+
+4.2 Catégorie Informations Personnelles
+
+4.3 Catégorie Le Lieu des Travaux
+
+4.4 Catégorie Vos Besoins
+
+Spécifications techniques
+
+5.1 Architecture générale
+
+5.2 Base de données mobile
+
+5.3 API exposée pour la synchronisation
+
+5.4 Module CRM – Récupération et intégration des enregistrements
+
+5.5 Intégration mobile (WebView)
+
+5.6 Performance et sécurité
+
+Ergonomie et interface utilisateur
+
+Contraintes et hypothèses
+
+Livrables et planning
+
+1. Présentation du projet
+L’application « Estimer mes aides » est un formulaire interactif destiné aux utilisateurs finaux souhaitant estimer des aides pour des travaux de rénovation énergétique. Elle se présente sous la forme d’une application mobile (développée en web et embarquée via WebView) entièrement autonome, avec sa propre base de stockage des réponses.
+
+Contrairement à une intégration directe, les données saisies ne sont pas envoyées immédiatement au CRM. Elles sont enregistrées localement dans une base de données dédiée (SQLite côté mobile ou une base cloud légère). Le CRM existant dispose d’un module de synchronisation : un bouton « Récupérer les enregistrements » interroge une API exposée par l’application mobile pour rapatrier les soumissions et les intégrer sous forme de projets dans le CRM, avec la même structure que celle du projet exemple fourni (projet 933).
+
+Cette architecture permet une utilisation nominale même sans connexion directe au CRM, et garantit que le CRM reste le système maître pour la configuration du formulaire. La configuration (catégories, champs, options) est administrable depuis le CRM et sera poussée vers l’application mobile à intervalles réguliers (ou lors d’une première ouverture) afin de maintenir une cohérence dynamique.
+
+Le présent document détaille les besoins fonctionnels et techniques de l’application mobile, ainsi que le module de synchronisation côté CRM.
+
+2. Objectifs généraux
+Application mobile autonome : l’utilisateur peut saisir ses informations dans un parcours guidé, sans dépendre d’une connexion permanente avec le CRM.
+
+Base de données séparée : toutes les soumissions sont stockées localement sur l’appareil ou dans une base cloud dédiée à l’application (indépendante du CRM).
+
+Synchronisation manuelle par le CRM : un opérateur, depuis l’interface CRM, déclenche la récupération des enregistrements via une API REST exposée par l’application mobile (ou son backend).
+
+Configuration dynamique depuis le CRM : la structure du formulaire (onglets, catégories, champs, options) est chargée depuis le CRM au démarrage de l’application et peut être mise à jour périodiquement.
+
+Parcours utilisateur fluide : navigation en pipeline (étape par étape), avec validation et retour arrière possibles.
+
+Données normalisées : à la synchronisation, les enregistrements sont convertis dans le format exact attendu par le CRM (field_value), préservant l’intégrité des données.
+
+3. Spécifications fonctionnelles
+3.1 Architecture de l’information et parcours utilisateur
+Le formulaire est structuré en un ou plusieurs onglets (tabs). Pour la version initiale, un seul onglet « ESTIMER VOS AIDES » existe, contenant trois catégories principales, elles-mêmes divisées en sous-catégories (étapes).
+Chaque sous-catégorie regroupe un ensemble de champs. L’utilisateur progresse sous-catégorie par sous-catégorie, avec indication de sa position (ex. « Information Personnelle 1/3 »).
+
+Écran d’accueil : titre, éventuelle barre de navigation entre onglets (si plusieurs) ou entre catégories.
+
+Navigation étapes : un bouton « Suivant » valide l’étape en cours (champs obligatoires remplis) et passe à l’étape suivante. Un bouton « Précédent » permet de revenir en arrière. Un indicateur visuel de progression (barre ou texte) est affiché.
+
+Fin de parcours : un écran récapitulatif optionnel peut être présenté avant l’enregistrement final. L’appui sur « Enregistrer » sauvegarde la soumission dans la base locale.
+
+3.2 Gestion dynamique des catégories, questions et choix
+L’application reçoit du CRM une définition JSON décrivant l’intégralité du formulaire : onglets, catégories, sous-catégories, champs avec leurs propriétés (type, libellé, ordre, obligatoire, options possibles). Cette configuration est stockée localement (cache) et peut être mise à jour à chaque lancement ou sur action manuelle.
+
+Les listes de choix des champs de type one_select, multiple_select, etc. font partie intégrante de cette définition ou sont récupérées via un endpoint dédié (ex. /fields/{field_id}/options). Aucune saisie de choix n’est autorisée en dehors de ces listes.
+
+Comportement conditionnel : Si des champs sont conditionnés par la réponse à une question précédente, cette logique doit être reflétée dans la configuration renvoyée par le CRM (propriété visibility_rule). En l’absence de cette fonctionnalité, la V1 affichera tous les champs, quitte à ce que certains restent non pertinents selon le contexte.
+
+3.3 Typologie des champs et affichage
+Les types d’input sont identiques à ceux du CRM. L’application mobile assure le rendu adapté au tactile.
+
+fieldtype_id (CRM)	Type d’affichage	Rendu
+1	Texte court	<input type="text"> (majuscules si uppercase=1)
+2	Texte long	<textarea>
+4	Options multiples	Cases à cocher
+5	Option unique (boutons radio)	Liste de boutons radio
+6	Téléphone	<input type="tel">
+50	Liste à choix unique (enum)	Liste de boutons radio
+Tous les libellés (name) sont extraits de la configuration. Les champs obligatoires sont marqués d’une astérisque et bloquent la progression tant qu’ils ne sont pas remplis.
+
+3.4 Récupération et pré-remplissage des données
+Si l’application est utilisée dans un contexte où l’utilisateur est reconnu (ex. lien avec un identifiant unique), il est possible de charger une soumission existante (brouillon) depuis la base mobile afin de permettre une reprise de saisie.
+
+En l’absence d’authentification, l’utilisateur repart d’un formulaire vierge.
+
+3.5 Enregistrement local et base de données mobile
+À la fin du parcours (ou après validation de la dernière étape), l’application génère un enregistrement contenant :
+
+Un identifiant unique local (UUID)
+
+La date de soumission
+
+La version de la configuration du formulaire utilisée
+
+La liste de toutes les paires field_id / value pour les champs du formulaire.
+
+Stockage : les enregistrements sont sauvegardés dans une table submissions de la base locale (SQLite pour un fonctionnement offline, ou Firebase/autre si l’on souhaite une base cloud accessible sans passer par un serveur applicatif).
+
+Si l’application utilise un backend cloud dédié (recommandé pour la récupération par le CRM), les soumissions sont envoyées vers ce backend et persistent dans une base de données type PostgreSQL/MySQL exposée via API.
+Dans tous les cas, l’internaute n’interagit jamais directement avec le CRM.
+
+3.6 Synchronisation avec le CRM
+Côté CRM, une nouvelle fonctionnalité est ajoutée : un bouton « Synchroniser les enregistrements » (ou un écran dédié).
+
+Un opérateur CRM déclenche la synchronisation.
+
+Le CRM appelle une API REST exposée par le backend de l’application mobile (ou directement l’API exposée par la base mobile si cloud). Cette API renvoie la liste des soumissions non encore synchronisées (par exemple, avec un flag synced = false ou par plage de dates).
+
+Pour chaque soumission, le CRM :
+
+Crée un nouveau projet (ou identifie un projet existant si un identifiant de projet est déjà associé).
+
+Insère les valeurs (field_value) correspondant aux champs du formulaire, en respectant la structure { project_id, field_id, value }.
+
+Marque la soumission comme synchronisée côté application mobile (via un second appel API ou en mettant à jour le flag via l’API).
+
+L’interface CRM affiche un rapport de synchronisation (nombre de nouveaux projets intégrés, erreurs éventuelles).
+
+La synchronisation peut être configurée pour une exécution périodique automatique (cron) ou rester manuelle.
+
+4. Structure complète du formulaire (référence actuelle)
+Cette section détaille la hiérarchie du formulaire tel qu’il existe dans la configuration CRM fournie (projet 933). Elle servira de base pour l’implémentation initiale et la création des API de configuration.
+
+4.1 Onglet « ESTIMER VOS AIDES »
+ID onglet : 22
+
+Nom affiché : ESTIMER VOS AIDES
+
+Catégories incluses : Informations Personnelles (id 37), Le Lieu des Travaux (id 36), Vos Besoins (id 38).
+
+4.2 Catégorie Informations Personnelles
+Sous‑catégorie 1 : Information Personnelle 1/ (id 63)
+
+Ordre	Champ (name)	Clé (key)	Type	Obligatoire	Options possibles
+0	Civilité	projets_Civilit	Texte (1)	Non	-
+1	Nom	projets_Nombre	Texte (1)	Non	-
+2	Prénom	projets_Apellidos	Texte (1)	Non	-
+3	ADRESSE	projets_ADRESSE	Texte (1)	Non	-
+4	Code postal	projets_Cdigo_postal	Texte (1)	Non	-
+5	Ville	projets_Ciudad	Texte (1)	Non	-
+6	Num. de Téléphone	projets_Telfono_Propietario_inicia	Tél (6)	Non	-
+7	Adresse Email	projets_Correo_electrnico_Propietario_inicia	Texte (1)	Non	-
+Sous‑catégorie 2 : Information Personnelle 2/3 (id 65)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	À combien s'élève le revenu total de votre foyer fiscal	projets__combien_slve_le_revenu_total_de_votre_foyer_fiscal	Liste option unique (50)	Non	1‑ Inférieur à 23734€
+2‑ Entre 23734€ et 30427€
+3‑ Entre 30428€ et 42848€
+4‑ Supérieur à 42849€
+Sous‑catégorie 3 : Information Personnelle 3/3 (id 75)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Dans ce logement vous êtes	projets_Dans_ce_logement_vous_tes	Liste option unique (50)	Non	Propriétaire Bailleur
+Propriétaire d’une résidence secondaire
+Propriétaire occupant
+Résident
+4.3 Catégorie Le Lieu des Travaux
+Sous‑catégorie 1 : 1- Le lieu des travaux 1/7 (id 59)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Votre projet concerne	projets_Votre_projet_concerne	Liste option unique (50)	Non	Appartement
+Maison
+Sous‑catégorie 2 : 1- Le lieu des travaux 2/7 (id 60)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Date de construction de votre logement	projets_Date_de_construction_de_votre_logement	Option unique (5)	Non	1‑ Entre 2 ans et 15 ans
+2‑ Plus de 15 ans
+Sous‑catégorie 3 : 1- Le lieu des travaux 3/7 (id 61)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Quelle est la surface habitable de votre logement	projets_Quelle_est_la_surface_habitable_de_votre_logement	Option unique (5)	Non	1‑ 0 à 70 m²
+2‑ 71 à 120 m²
+3‑ 121 à 200 m²
+4‑ + de 200 m²
+Sous‑catégorie 4 : 1- Le lieu des travaux 4/ (id 62)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Quel type de combles avez-vous	projets_Quel_type_de_combles_avez-vous	Option unique (5)	Non	Combles aménagés / habitables
+Combles perdus / non habitables
+Sous‑catégorie 5 : 1- Le lieu des travaux 5/7 (id 66)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Si vos combles sont non habitables : Type de plancher	projets_Si_vos_combles_sont_non_habitables__Type_de_plancher	Option unique (5)	Non	Bois
+Béton
+Je ne sais pas (besoin de conseil)
+Plafond en placo / faux plafond
+Structure métallique
+Sous‑catégorie 6 : 1- Le lieu des travaux 6/7 (id 71)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Accès aux combles, il existe une trappe d'accès ?	projets_Accs_aux_combles_il_existe_une_trappe_daccs_	Option unique (5)	Non	NON
+OUI
+Sous‑catégorie 7 : 1- Le lieu des travaux 7/7 (id 72)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Type de chauffage principal	projets_Type_de_chauffage_principal	Option unique (5)	Non	Bois
+Fioul
+Gaz
+Pompe à chaleur
+Électrique
+1	Autre Type de chauffage principal	projets_Autre_Type_de_chauffage_principal	Texte (1)	Non	-
+4.4 Catégorie Vos Besoins
+Sous‑catégorie 1 : Vos Besoin 1/5 (id 64)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Si vos combles sont habitables : Que souhaitez-vous isoler ?	projets_Si_vos_combles_sont_habitables__Que_souhaitez-vous_isoler_	Option unique (5)	Non	1‑ Rampants de toiture
+2‑ Plafond intérieur
+3‑ Murs latéraux
+4‑ Je ne sais pas
+Sous‑catégorie 2 : Vos Besoin 2/5 (id 68)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Si vos combles sont non habitables : Type de plancher	projets_Si_vos_combles_sont_non_habitables__Type_de_plancher	Option unique (5)	Non	Bois
+Béton
+Je ne sais pas
+Plafond en placo
+Structure métallique
+Sous‑catégorie 3 : Vos Besoins 3/5 (id 70)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Type d'isolation souhaité	projets_Type_disolation_souhait	Options multiples (4)	Non	Isolation en rouleaux
+Isolation soufflée
+Sous‑catégorie 4 : Vos Besoins 4/5 (id 73)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Quels travaux souhaitez-vous réaliser dans votre logement ?	projets_Quels_travaux_souhaitez-vous_raliser_dans_votre_logement_	Options multiples (4)	Non	1‑ Isolation thermique
+2‑ Chauffage et ECS
+3‑ Ventilation
+4‑ Energie Solaire
+5‑ Rénovation Globale
+Sous‑catégorie 5 : Vos Besoins 5/5 (id 74)
+
+Ordre	Champ	Clé (key)	Type	Obligatoire	Options possibles
+0	Disponibilité pour être contacté	projets_Disponibilit_pour_tre_contact	Option unique (5)	Non	1‑ Matin
+2‑ Après‑midi
+3‑ Soir
+4‑ A tout moment
+1	Commentaires ou informations complémentaires	projets_Commentaires_ou_informations_complmentaires	Texte long (2)	Non	-
+5. Spécifications techniques
+5.1 Architecture générale
+L’application mobile est une SPA web responsive exécutée dans une WebView. Elle peut s’appuyer sur un backend cloud léger (Node.js / Python / Firebase Functions) qui gère :
+
+L’exposition des APIs de configuration et de soumission à destination du CRM.
+
+La persistance des soumissions (base de données).
+
+La synchronisation de la configuration du formulaire depuis le CRM (pull depuis le CRM à intervalles réguliers).
+
+Schéma des flux :
+
+Configuration : CRM → (API exposée par le CRM) → Backend mobile → App mobile (via API). Le backend mobile met en cache la configuration.
+
+Saisie utilisateur : App mobile → Backend mobile (POST /submissions) → stockage en base.
+
+Synchronisation CRM : CRM (bouton) → appel API Backend mobile (GET /submissions/new) → récupère les soumissions non synchronisées → les intègre dans les tables projects et field_values → confirme la synchronisation (PUT /submissions/{id}/sync).
+
+5.2 Base de données mobile
+Modèle de données principal (côté backend mobile) :
+
+Table configurations
+
+id (int PK)
+
+form_definition (JSON) : arborescence complète du formulaire
+
+version (string)
+
+updated_at (datetime)
+
+Table submissions
+
+id (UUID PK)
+
+created_at (datetime)
+
+config_version (string)
+
+synced (boolean, false par défaut)
+
+synced_at (datetime nullable)
+
+Table submission_values (ou stockage JSON dans submissions.data)
+Pour une flexibilité maximale, on peut stocker les valeurs sous forme d’un champ JSON data contenant un tableau d’objets { field_id, value }.
+Cependant, une approche normalisée facilite les requêtes :
+
+id (int PK)
+
+submission_id (FK)
+
+field_id (int)
+
+value (text)
+
+Le choix sera validé en fonction des performances attendues et de la simplicité de désérialisation côté CRM.
+
+5.3 API exposée pour la synchronisation
+Le backend mobile doit exposer des endpoints REST sécurisés (HTTPS + clé API ou JWT). Les grandes lignes :
+
+GET /api/configuration → fournit la dernière configuration du formulaire (peut être appelée par l’App mobile au lancement, et par le CRM s’il veut vérifier la version).
+
+POST /api/submissions → enregistre une nouvelle soumission (appelé par l’App mobile).
+
+GET /api/submissions?synced=false&since=YYYY-MM-DD → retourne les soumissions non synchronisées (appelé par le CRM).
+
+PUT /api/submissions/{id}/sync → marque une soumission comme synchronisée (appelé par le CRM après intégration réussie).
+
+Les réponses doivent inclure les valeurs sous une forme facilement convertible en field_value CRM.
+
+5.4 Module CRM – Récupération et intégration des enregistrements
+Côté CRM, il faudra développer :
+
+Un écran « Synchronisation » avec la liste des soumissions disponibles (date, nombre de champs, éventuellement un résumé).
+
+Un processus de récupération : le CRM interroge l’API mobile, affiche les enregistrements, et propose de les intégrer un par un ou en masse.
+
+Pour chaque soumission, le CRM crée un projet (projects) et insère les valeurs (field_values) en utilisant le même mécanisme que lors d’une saisie directe, garantissant que toutes les règles métier existantes (calculs, validations) s’appliquent.
+
+Une fois intégrées, les soumissions sont marquées comme synchronisées via l’API mobile.
+
+5.5 Intégration mobile (WebView)
+L’application mobile native se contente d’afficher la WebView pointant vers l’URL de l’application web. Les spécifications de responsive design et de taille des éléments interactifs (cf. §6) restent identiques à la version précédente. Aucune fonctionnalité native n’est requise hormis l’ouverture de la WebView et éventuellement l’injection d’un token d’authentification si la sécurité l’exige.
+
+5.6 Performance et sécurité
+HTTPS obligatoire sur toutes les communications.
+
+Authentification : le backend mobile doit authentifier l’application mobile (clé API) et le CRM (JWT ou token dédié). Les endpoints de synchronisation doivent être protégés.
+
+Validation : les données sont validées côté application mobile avant soumission, et de nouveau côté backend mobile.
+
+Cache : la configuration du formulaire est mise en cache localement (App mobile) pour éviter des chargements répétés.
+
+6. Ergonomie et interface utilisateur
+Reprise des principes de la V1 : interface épurée, navigation par étapes, mise en évidence de l’étape courante, boutons tactiles spacieux. Les couleurs institutionnelles (#5C2DD3) sont conservées. L’affichage des champs doit s’adapter à la taille réduite d’un écran mobile (pas de scroll horizontal, libellés clairs, champs empilés verticalement).
+
+Pour la partie CRM, l’interface de synchronisation doit être simple : un tableau listant les soumissions avec possibilité de les sélectionner et un bouton « Importer ».
+
+7. Contraintes et hypothèses
+La configuration du formulaire est figée en V1 mais l’architecture permettra de la rendre dynamique ultérieurement.
+
+Le backend mobile sera hébergé sur une infrastructure cloud accessible publiquement (ou via VPN selon les exigences de sécurité).
+
+Le CRM reste le système maître : c’est lui qui pousse la configuration et qui tire les données.
+
+La synchronisation est manuelle (déclenchée par un opérateur CRM). L’automatisation pourra être ajoutée en V2.
+
+8. Livrables et planning
+Livrables :
+
+Backend mobile (API de configuration, soumission, synchronisation) avec base de données.
+
+Application web mobile (SPA) responsive, packagée pour déploiement web.
+
+Intégration WebView simple (fichiers web + documentation pour intégration native).
+
+Module CRM : écran et logique de récupération / intégration des soumissions.
+
+Documentation technique et fonctionnelle.

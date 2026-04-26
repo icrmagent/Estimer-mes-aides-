@@ -1,0 +1,2 @@
+
+    {"field_id":2294,"field_key":"projets__combien_slve_le_revenu_total_de_votre_foyer_fiscal","possible_values":[{"id":"1- Inf\u00e9rieur \u00e0 23734\u20ac","name":"1- Inf\u00e9rieur \u00e0 23734\u20ac"},{"id":"2- Entre 23734\u20ac et 30427\u20ac","name":"2- Entre 23734\u20ac et 30427\u20ac"},{"id":"3- Entre 30428\u20ac et 42848\u20ac","name":"3- Entre 30428\u20ac et 42848\u20ac"},{"id":"4- Sup\u00e9rieur \u00e0 42849\u20ac","name":"4- Sup\u00e9rieur \u00e0 42849\u20ac"}],"pagination":{"current_page":1,"per_page":10,"total":4,"last_page":1,"from":1,"to":4}}

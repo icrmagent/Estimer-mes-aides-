@@ -1,0 +1,2 @@
+
+    {"field_id":2298,"field_key":"projets_Si_vos_combles_sont_non_habitables__Type_de_plancher","possible_values":[{"id":"Bois","name":"Bois"},{"id":"B\u00e9ton","name":"B\u00e9ton"},{"id":"Je ne sais pas (besoin de conseil)","name":"Je ne sais pas (besoin de conseil)"},{"id":"Plafond en placo \/ faux plafond","name":"Plafond en placo \/ faux plafond"},{"id":"Structure m\u00e9tallique","name":"Structure m\u00e9tallique"}],"pagination":{"current_page":1,"per_page":10,"total":5,"last_page":1,"from":1,"to":5}}

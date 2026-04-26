@@ -1,0 +1,2 @@
+
+    {"field_id":2307,"field_key":"projets_Quelle_est_la_surface_habitable_de_votre_logement","possible_values":[{"id":"1- 0 \u00e0 70 m2","name":"1- 0 \u00e0 70 m2"},{"id":"2- 71 \u00e0 120 m2","name":"2- 71 \u00e0 120 m2"},{"id":"3- 121 \u00e0 200 m2","name":"3- 121 \u00e0 200 m2"},{"id":"4- + de 200 m2","name":"4- + de 200 m2"}],"pagination":{"current_page":1,"per_page":10,"total":4,"last_page":1,"from":1,"to":4}}

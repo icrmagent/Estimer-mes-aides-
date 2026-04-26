@@ -1,0 +1,25 @@
+# Secrets et fichiers sensibles
+bd.txt
+*.env.local
+
+# Claude Code (paramètres locaux)
+.claude/
+
+# Dépendances
+node_modules/
+
+# Build
+dist/
+dist-ssr/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/
+.idea/

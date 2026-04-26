@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Configuration {
+  id             Int      @id @default(autoincrement())
+  formDefinition Json
+  version        String
+  updatedAt      DateTime @updatedAt
+
+  @@map("configurations")
+}
+
+model Submission {
+  id            String            @id @default(uuid())
+  createdAt     DateTime          @default(now())
+  configVersion String
+  synced        Boolean           @default(false)
+  syncedAt      DateTime?
+  crmProjectId  String?
+  values        SubmissionValue[]
+
+  @@index([synced, createdAt])
+  @@map("submissions")
+}
+
+model SubmissionValue {
+  id           Int        @id @default(autoincrement())
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  fieldId      Int
+  value        String
+
+  @@index([submissionId])
+  @@index([fieldId])
+  @@map("submission_values")
+}
