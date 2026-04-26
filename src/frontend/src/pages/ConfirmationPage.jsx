@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { useForm } from '../context/FormContext'
 import { AppHeader } from '../components/AppHeader'
+import { IconCheckCircle, IconXCircle, IconRefresh, IconHome } from '../components/Icons'
 
 export function ConfirmationPage() {
   const navigate = useNavigate()
@@ -21,8 +22,13 @@ export function ConfirmationPage() {
 
       <div className="confirmation-body">
         <div className="confirmation-card">
+
+          {/* Icône SVG */}
           <div className={`confirmation-icon ${isSuccess ? 'confirmation-icon--ok' : 'confirmation-icon--err'}`}>
-            {isSuccess ? '✓' : '✕'}
+            {isSuccess
+              ? <IconCheckCircle size={52} className="conf-icon-ok"  />
+              : <IconXCircle     size={52} className="conf-icon-err" />
+            }
           </div>
 
           {isSuccess ? (
@@ -47,9 +53,17 @@ export function ConfirmationPage() {
             </>
           )}
 
-          <button className="btn-primary btn-start" onClick={() => navigate('/')}>
-            Retour à l'accueil
-          </button>
+          {isSuccess ? (
+            <button className="btn-primary btn-start" onClick={() => navigate('/')}>
+              <IconHome size={18} />
+              Retour à l'accueil
+            </button>
+          ) : (
+            <button className="btn-primary btn-start" onClick={() => navigate(-1)}>
+              <IconRefresh size={18} />
+              Réessayer
+            </button>
+          )}
         </div>
       </div>
     </div>

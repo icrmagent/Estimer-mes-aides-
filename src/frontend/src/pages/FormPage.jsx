@@ -7,6 +7,7 @@ import { AppHeader } from '../components/AppHeader'
 import { ProgressBar } from '../components/ProgressBar'
 import { FieldRenderer } from '../components/FieldRenderer'
 import { NavigationBar } from '../components/NavigationBar'
+import { IconLoader } from '../components/Icons'
 
 export function FormPage() {
   const navigate  = useNavigate()
@@ -32,7 +33,7 @@ export function FormPage() {
   if (loading || (!currentSub && !error)) {
     return (
       <div className="loading-screen">
-        <div className="spinner" />
+        <IconLoader size={40} className="icon-spinner" />
         <p>Chargement du formulaire…</p>
       </div>
     )
@@ -77,7 +78,7 @@ export function FormPage() {
 
       {submitting && (
         <div className="loading-overlay">
-          <div className="spinner" />
+          <IconLoader size={40} className="icon-spinner" />
         </div>
       )}
 

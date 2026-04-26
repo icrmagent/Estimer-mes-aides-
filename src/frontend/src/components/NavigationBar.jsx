@@ -1,4 +1,5 @@
 import { useForm } from '../context/FormContext'
+import { IconArrowLeft, IconArrowRight, IconSend } from './Icons'
 
 export function NavigationBar({ onSubmit }) {
   const { currentStep, totalSteps, isStepValid, nextStep, prevStep, submitting } = useForm()
@@ -14,7 +15,8 @@ export function NavigationBar({ onSubmit }) {
         disabled={isFirst || submitting}
         aria-label="Étape précédente"
       >
-        ← Précédent
+        <IconArrowLeft size={18} />
+        Précédent
       </button>
 
       {isLast ? (
@@ -25,7 +27,14 @@ export function NavigationBar({ onSubmit }) {
           disabled={!isStepValid || submitting}
           aria-label="Envoyer le formulaire"
         >
-          {submitting ? 'Envoi…' : 'Envoyer ✓'}
+          {submitting ? (
+            <>Envoi…</>
+          ) : (
+            <>
+              Envoyer
+              <IconSend size={18} />
+            </>
+          )}
         </button>
       ) : (
         <button
@@ -35,7 +44,8 @@ export function NavigationBar({ onSubmit }) {
           disabled={!isStepValid || submitting}
           aria-label="Étape suivante"
         >
-          Suivant →
+          Suivant
+          <IconArrowRight size={18} />
         </button>
       )}
     </nav>
