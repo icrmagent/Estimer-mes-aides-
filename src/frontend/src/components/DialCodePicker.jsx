@@ -21,7 +21,7 @@ export function DialCodePicker({ value, onChange }) {
 
   const openDropdown = () => {
     const rect      = triggerRef.current.getBoundingClientRect()
-    const dropW     = Math.max(rect.width, 280)
+    const dropW     = Math.max(rect.width, 160)
     const spaceBelow = window.innerHeight - rect.bottom - 8
     const spaceAbove = rect.top - 8
     const dropH     = Math.min(340, window.innerHeight * 0.5)
@@ -121,9 +121,9 @@ export function DialCodePicker({ value, onChange }) {
                     type="button"
                     className={`dial-option${c.dial === value ? ' dial-option--on' : ''}`}
                     onClick={() => select(c)}
+                    title={c.name}
                   >
                     <span className="dial-flag-lg">{flag(c.code)}</span>
-                    <span className="dial-country-name">{c.name}</span>
                     <span className="dial-country-code">{c.dial}</span>
                   </button>
                 </li>
