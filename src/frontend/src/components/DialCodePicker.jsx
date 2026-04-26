@@ -78,6 +78,7 @@ export function DialCodePicker({ value, onChange }) {
         aria-expanded={open}
       >
         <span className="dial-flag-lg">{flag(selected.code)}</span>
+        <span className="dial-iso">{selected.code}</span>
         <span className="dial-code-txt">{selected.dial}</span>
         <span className="dial-caret" aria-hidden="true">▾</span>
       </button>
@@ -124,6 +125,7 @@ export function DialCodePicker({ value, onChange }) {
                     title={c.name}
                   >
                     <span className="dial-flag-lg">{flag(c.code)}</span>
+                    <span className="dial-iso">{c.code}</span>
                     <span className="dial-country-code">{c.dial}</span>
                   </button>
                 </li>

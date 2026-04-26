@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useForm } from '../context/FormContext'
-import { DialCodePicker } from './DialCodePicker'
+import { PhoneInput } from './PhoneInput'
 import {
   IconUser, IconMapPin, IconPhone, IconMail,
   IconEuro, IconHome, IconCalendar, IconRuler,
@@ -8,6 +8,7 @@ import {
   IconBuilding, IconDroplet, IconWind, IconMoon,
   IconThermometer, IconTree, IconSun, IconBolt,
   IconCheckCircle, IconXCircle,
+  IconKey, IconHelpCircle, IconSunrise, IconClock, IconUsers,
 } from './Icons'
 
 /* ── Field label icons ───────────────────────────────── */
@@ -25,19 +26,32 @@ export const FIELD_ICONS = {
 
 /* ── Option illustrative icons ───────────────────────── */
 export const OPTION_ICONS = {
-  2292: [IconBuilding,  IconHome],
-  2293: [IconHome,      IconHome,        IconHome,      IconUser],
-  2294: [IconEuro,      IconEuro,        IconEuro,      IconEuro],
-  2296: [IconHome,      IconWrench],
-  2297: [IconWrench,    IconWrench,      IconWrench,    IconWrench],
-  2298: [IconTree,      IconWrench,      IconWrench,    IconWrench,    IconWrench],
-  2299: [IconWrench,    IconWind],
-  2300: [IconXCircle,   IconCheckCircle],
-  2301: [IconTree,      IconDroplet,     IconFlame,     IconThermometer, IconBolt],
-  2303: [IconWrench,    IconFlame,       IconWind,      IconSun,       IconHome],
-  2304: [IconSun,       IconSun,         IconMoon,      IconCalendar],
-  2306: [IconCalendar,  IconCalendar],
-  2307: [IconRuler,     IconRuler,       IconRuler,     IconRuler],
+  // Type de logement : Appartement / Maison
+  2292: [IconBuilding,    IconHome],
+  // Statut occupant : Propriétaire occupant / Bailleur / Résidence secondaire / Locataire
+  2293: [IconHome,        IconKey,          IconSun,        IconUsers],
+  // Revenu fiscal : tranches (4×Euro avec contexte croissant)
+  2294: [IconEuro,        IconEuro,         IconEuro,       IconEuro],
+  // Travaux déjà réalisés : Non / Oui
+  2296: [IconXCircle,     IconCheckCircle],
+  // Isolation : Combles / Murs / Plancher / Je ne sais pas
+  2297: [IconHome,        IconBuilding,     IconRuler,      IconHelpCircle],
+  // Chauffage actuel : Bois / Fioul / Gaz / Électrique / Je ne sais pas
+  2298: [IconTree,        IconDroplet,      IconFlame,      IconBolt,       IconHelpCircle],
+  // Ventilation : Sans VMC / Avec VMC
+  2299: [IconWind,        IconCheckCircle],
+  // Chaudière ancienne : Non / Oui
+  2300: [IconXCircle,     IconCheckCircle],
+  // Énergie de remplacement : Bois/Pellet / Pompe eau / Pompe air / Thermodynamique / Solaire
+  2301: [IconTree,        IconDroplet,      IconWind,       IconThermometer, IconSun],
+  // Système envisagé : Chaudière / Poêle / PAC / Solaire / Isolation seule
+  2303: [IconFlame,       IconTree,         IconWind,       IconSun,        IconHome],
+  // Disponibilité : Matin / Après-midi / Soir / Indifférent
+  2304: [IconSunrise,     IconSun,          IconMoon,       IconClock],
+  // Année travaux : Cette année / Année prochaine
+  2306: [IconCalendar,    IconCalendar],
+  // Surface : < 50m² / 50-100 / 100-150 / > 150
+  2307: [IconRuler,       IconRuler,        IconRuler,      IconRuler],
 }
 
 /* ── Label with contextual icon ─────────────────────── */
@@ -78,44 +92,18 @@ function SelectField({ field }) {
   )
 }
 
-/* ── Téléphone — indicatif pays + numéro ────────────── */
+/* ── Téléphone — PhoneInput ──────────────────────────── */
 function TelSplitField({ field }) {
-  const { values, setValue } = useForm()
-  const raw = values[field.id] ?? ''
-
-  const parseDialCode = r => {
-    for (const n of ['+1869', '+1868', '+1876', '+1809', '+1784', '+1758', '+1473', '+1268', '+1246', '+1242']) {
-      if (r.startsWith(n + ' ')) return n
-    }
-    const m = r.match(/^(\+\d{1,4}) /)
-    return m ? m[1] : '+33'
-  }
-
-  const [dialCode, setDialCode] = useState(() => parseDialCode(raw))
-  const [number,   setNumber]   = useState(() => {
-    const dc = parseDialCode(raw)
-    return raw.startsWith(dc + ' ') ? raw.slice(dc.length + 1) : raw
-  })
-
-  const update = (dc, nb) => setValue(field.id, nb ? `${dc} ${nb}` : '')
-
+  const { setValue } = useForm()
   return (
     <div className="field-group">
       <Label field={field} htmlFor="f-tel-num" />
-      <div className="tel-row">
-        <DialCodePicker
-          value={dialCode}
-          onChange={dc => { setDialCode(dc); update(dc, number) }}
-        />
-        <input
-          id="f-tel-num"
-          type="tel"
-          className="field-input"
-          value={number}
-          placeholder="06 00 00 00 00"
-          onChange={e => { setNumber(e.target.value); update(dialCode, e.target.value) }}
-        />
-      </div>
+      <PhoneInput
+        inputId="f-tel-num"
+        defaultCountry="FR"
+        placeholder="06 00 00 00 00"
+        onChange={full => setValue(field.id, full)}
+      />
     </div>
   )
 }

@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'fr.ila26.estimermesaides'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "fr.ila26.estimermesaides"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        // Décommenter et remplir pour le build de release signé
+        // release {
+        //     storeFile     file("../keystore/release.keystore")
+        //     storePassword "VOTRE_MOT_DE_PASSE"
+        //     keyAlias      "release"
+        //     keyPassword   "VOTRE_MOT_DE_PASSE"
+        // }
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.activity:activity-ktx:1.9.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}
