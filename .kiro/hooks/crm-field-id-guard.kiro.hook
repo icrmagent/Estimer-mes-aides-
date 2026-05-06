@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "name": "CRM Field ID Guard",
+  "description": "Alerte si un field ID numérique non reconnu est utilisé dans le code (protection contre les IDs CRM inventés)",
+  "version": "2",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "src/frontend/src/**/*.js",
+      "src/frontend/src/**/*.jsx",
+      "src/backoffice/src/**/*.js",
+      "src/backoffice/src/**/*.jsx",
+      "src/backend/src/**/*.js",
+      "src/backend/prisma/seed.js"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Un fichier source vient d'être modifié. Scanne le code pour détecter des field IDs numériques qui ne font PAS partie de la liste officielle CRM.\n\n**IDs CRM valides :**\n2262, 2087, 2088, 2217, 2089, 2090, 2015, 2016, 2294, 2293, 2292, 2306, 2307, 2296, 2298, 2300, 2301, 2302, 2297, 2299, 2303, 2304, 2305\n\nSi tu vois un nombre à 4 chiffres utilisé comme `fieldId`, `field_id`, ou dans un tableau de valeurs CRM, et que ce nombre n'est PAS dans la liste, signale-le.\n\nIgnore : IDs de sous-catégories (59-75), catégories (36-38), valeurs CSS.\n\nRéponds uniquement si tu trouves un ID suspect. Format : \"🚨 Field ID suspect : [ID] — les IDs valides sont 2087-2305\""
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "name": "Session Start Reminder V2",
+  "description": "DISABLED — merged into task-context-reminder to avoid duplicate preTaskExecution hooks",
+  "version": "2.1",
+  "when": {
+    "type": "preTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Contexte du projet Estimer Mes Aides V2 — voir task-context-reminder hook."
+  }
+}

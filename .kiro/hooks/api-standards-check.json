@@ -1,0 +1,13 @@
+{
+  "name": "API Standards Check V2",
+  "version": "2.0.0",
+  "description": "Vérifie que les nouveaux endpoints API V2 respectent les standards (auth, Zod, format réponse, gestion erreurs)",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": ["write"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Une opération d'écriture est sur le point d'être effectuée sur un fichier backend. Si le fichier cible est dans `src/backend/src/routes/`, vérifie que le code respecte ces standards obligatoires :\n\n1. **Auth** : chaque route a-t-elle le bon middleware ? (`apiKeyAuth` pour les routes mobiles, `jwtAuth` pour les routes CRM, `jwtAuthV2 + requireRole` pour les routes V2)\n2. **Validation Zod** : le body/query est-il validé avec `z.object(...).safeParse()` avant traitement ?\n3. **Gestion d'erreurs** : y a-t-il un try/catch avec réponse 500 appropriée ?\n4. **synced=false** : si une nouvelle soumission est créée, `synced` est-il bien `false` par défaut ?\n5. **UUID** : si un ID est généré, utilise-t-on bien `uuid()` (pas `Math.random()` ni autre) ?\n\nSi le fichier n'est PAS dans `src/backend/src/routes/`, réponds \"OK - pas une route API, pas de vérification nécessaire.\" et laisse l'opération continuer.\n\nSi des violations sont trouvées, liste-les. Sinon, réponds \"✅ Standards API respectés.\" et laisse l'opération continuer."
+  }
+}

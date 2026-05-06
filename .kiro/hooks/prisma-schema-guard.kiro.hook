@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Prisma Schema Guard V2",
+  "description": "Vérifie que le schéma Prisma V2 reste cohérent (V1 + V2 models) quand schema.prisma est modifié",
+  "version": "2",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "src/backend/prisma/schema.prisma"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Le fichier `src/backend/prisma/schema.prisma` vient d'être modifié. Vérifie ces points :\n\n**Modèles V1 (ne jamais supprimer) :**\n1. `Configuration` avec `formDefinition Json`, `version String`, `updatedAt`\n2. `Submission` avec `synced Boolean @default(false)`, `id String @id @default(uuid())`, `borneId String?` (nullable V2)\n3. `SubmissionValue` avec `onDelete: Cascade` sur la relation submission\n\n**Modèles V2 (doivent être présents) :**\n4. `SuperAdmin` avec `passwordHash String`\n5. `AdminBorne` avec `passwordHash String`, `actif Boolean @default(true)`\n6. `Borne` avec `idBorne String @unique`, `statut String @default(\"actif\")`\n7. `Formulaire` avec `statut String @default(\"brouillon\")`, `pageDebutConfig Json`, `pageFinConfig Json`\n8. `Question` avec `libelleQuestion Json`, `typeOption String`, `onDelete: Cascade` sur formulaire\n9. `Enregistrement` avec `statutPartage String @default(\"en_attente\")`\n10. `PartageJob` avec `statut String @default(\"en_attente\")`\n\nSi une violation est trouvée : \"⚠️ Schéma Prisma : [description]\"\n\nToute modification nécessite : `cd src/backend && npx prisma migrate dev --name <nom>`"
+  }
+}

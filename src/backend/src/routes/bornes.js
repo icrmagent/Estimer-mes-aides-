@@ -1,0 +1,188 @@
+import { Router } from 'express'
+import { z } from 'zod'
+import { prisma } from '../lib/prisma.js'
+import { jwtAuthV2 } from '../middleware/jwtAuth.js'
+import { requireRole } from '../middleware/roleAuth.js'
+
+export const bornesRouter = Router()
+
+// ─── Zod schemas ─────────────────────────────────────────────────────────────
+
+const createBorneSchema = z.object({
+  idBorne: z.string().min(1),
+  langueDefaut: z.enum(['fr', 'es', 'en']).default('fr'),
+  adresse: z.string().min(1),
+  commercant: z.string().optional(),
+  regie: z.string().optional(),
+  installateur: z.string().optional(),
+  formulaireId: z.string().uuid().optional(),
+  adminBorneId: z.string().uuid().optional(),
+})
+
+const updateBorneSchema = createBorneSchema.partial()
+
+const updateStatutSchema = z.object({
+  statut: z.enum(['actif', 'inactif']),
+})
+
+const listQuerySchema = z.object({
+  statut: z.enum(['actif', 'inactif']).optional(),
+  adminBorneId: z.string().uuid().optional(),
+  formulaireId: z.string().uuid().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+})
+
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+function handlePrismaError(err, res) {
+  if (err.code === 'P2002') {
+    return res.status(409).json({
+      success: false,
+      error: {
+        code: 'DUPLICATE',
+        message: "L'identifiant de borne est déjà utilisé",
+      },
+    })
+  }
+  if (err.code === 'P2025') {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Borne introuvable' },
+    })
+  }
+  console.error('[BORNES ERROR]', err)
+  return res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },
+  })
+}
+
+// ─── GET /api/bornes ──────────────────────────────────────────────────────────
+
+bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = listQuerySchema.safeParse(req.query)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Paramètres invalides', details: parsed.error.flatten() },
+    })
+  }
+
+  const { statut, adminBorneId, formulaireId, page, limit } = parsed.data
+  const where = {}
+  if (statut) where.statut = statut
+  if (adminBorneId) where.adminBorneId = adminBorneId
+  if (formulaireId) where.formulaireId = formulaireId
+
+  const [bornes, total] = await Promise.all([
+    prisma.borne.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
+        formulaire: { select: { id: true, label: true, version: true, statut: true } },
+      },
+    }),
+    prisma.borne.count({ where }),
+  ])
+
+  return res.json({
+    success: true,
+    data: bornes,
+    meta: { page, limit, total },
+  })
+})
+
+// ─── POST /api/bornes ─────────────────────────────────────────────────────────
+
+bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = createBorneSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Données invalides', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const borne = await prisma.borne.create({ data: parsed.data })
+    return res.status(201).json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── GET /api/bornes/:id ──────────────────────────────────────────────────────
+
+bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const borne = await prisma.borne.findUniqueOrThrow({
+      where: { id },
+      include: {
+        adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
+        formulaire: { select: { id: true, label: true, version: true, statut: true } },
+      },
+    })
+
+    // AdminBorne can only see their own bornes
+    if (req.user.role === 'ADMIN_BORNE' && borne.adminBorneId !== req.user.sub) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Accès refusé' },
+      })
+    }
+
+    return res.json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── PUT /api/bornes/:id ──────────────────────────────────────────────────────
+
+bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = updateBorneSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Données invalides', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const borne = await prisma.borne.update({
+      where: { id: req.params.id },
+      data: parsed.data,
+    })
+    return res.json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── PATCH /api/bornes/:id/statut ─────────────────────────────────────────────
+
+bornesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = updateStatutSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Statut invalide', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const borne = await prisma.borne.update({
+      where: { id: req.params.id },
+      data: { statut: parsed.data.statut },
+    })
+    return res.json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})

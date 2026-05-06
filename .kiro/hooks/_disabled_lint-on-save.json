@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "name": "Lint on Save",
+  "description": "DISABLED — Windows incompatible (cd + tail). Run manually: cd src/frontend && npx eslint src",
+  "version": "2.0",
+  "when": {
+    "type": "fileEdited",
+    "patterns": ["src/frontend/src/**/*.jsx", "src/frontend/src/**/*.js", "src/crm-module/src/**/*.jsx"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "npx eslint src --max-warnings=0 --format=compact 2>&1",
+    "timeout": 60
+  }
+}

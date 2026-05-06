@@ -1,98 +1,106 @@
-import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { useForm } from '../context/FormContext'
-import { AppHeader } from '../components/AppHeader'
-import { IconCheckCircle, IconXCircle, IconRefresh, IconHome } from '../components/Icons'
+import { useNavigate } from 'react-router-dom'
+import { useBorne } from '../context/BorneContext.jsx'
+import { useForm } from '../context/FormContext.jsx'
+import { t } from '../utils/i18n.js'
+import { useOfflineSync } from '../hooks/useOfflineSync.js'
+import InactivityManager from '../components/InactivityManager.jsx'
 
-const REDIRECT_DELAY = 10
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
+/**
+ * ConfirmationPage V2 — affiche page_fin_config dans la langue du visiteur.
+ * Retour automatique à StartPage après duree_retour_accueil secondes (R3.7).
+ * Synchronise les enregistrements offline au retour en ligne.
+ */
 export function ConfirmationPage() {
   const navigate = useNavigate()
-  const { result } = useForm()
-  const [countdown, setCountdown] = useState(REDIRECT_DELAY)
+  const { formulaire, langue, resetLangue } = useBorne()
+  const { reset } = useForm()
+  const { syncPending } = useOfflineSync()
 
+  const config = formulaire?.pageFinConfig || {}
+  const titre = t(config.titre, langue) || 'Merci pour votre demande !'
+  const message = t(config.message, langue) || 'Un conseiller vous contactera dans les 48 heures.'
+  const duree = formulaire?.dureeRetourAccueil || 10
+
+  const [countdown, setCountdown] = useState(duree)
+
+  // Countdown retour accueil automatique (R3.7 critère 35)
   useEffect(() => {
-    if (!result) navigate('/')
-  }, [result])
+    const interval = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          handleRetour()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
 
+  // Synchroniser les enregistrements offline au retour en ligne
   useEffect(() => {
-    if (!result?.ok) return
-    if (countdown === 0) {
-      navigate('/')
-      return
-    }
-    const timer = setTimeout(() => setCountdown(c => c - 1), 1000)
-    return () => clearTimeout(timer)
-  }, [result?.ok, countdown, navigate])
+    const handleOnline = () => syncPending(API_URL)
+    window.addEventListener('online', handleOnline)
+    // Tenter une sync immédiate si déjà en ligne
+    syncPending(API_URL)
+    return () => window.removeEventListener('online', handleOnline)
+  }, [syncPending])
 
-  if (!result) return null
+  function handleRetour() {
+    reset()
+    resetLangue()
+    navigate('/start', { replace: true })
+  }
 
-  const isSuccess = result.ok
+  const progress = ((duree - countdown) / duree) * 100
 
   return (
-    <div className="confirmation-page">
-      <AppHeader />
-
-      <div className="confirmation-body">
-        <div className="confirmation-card">
-
-          <div className={`confirmation-icon ${isSuccess ? 'confirmation-icon--ok' : 'confirmation-icon--err'}`}>
-            {isSuccess
-              ? <IconCheckCircle size={52} className="conf-icon-ok"  />
-              : <IconXCircle     size={52} className="conf-icon-err" />
-            }
-          </div>
-
-          {isSuccess ? (
-            <>
-              <h1 className="confirmation-title">Demande envoyée !</h1>
-              {result.offline ? (
-                <p className="confirmation-text">
-                  Votre demande a été <strong>sauvegardée hors-ligne</strong>. Elle sera transmise automatiquement dès que vous retrouverez une connexion.
-                </p>
-              ) : (
-                <p className="confirmation-text">
-                  Votre dossier a bien été enregistré. Un conseiller vous contactera dans les <strong>48 heures</strong> pour vous présenter les aides disponibles.
-                </p>
-              )}
-            </>
-          ) : (
-            <>
-              <h1 className="confirmation-title">Une erreur est survenue</h1>
-              <p className="confirmation-text">
-                Impossible d'envoyer votre demande. Vérifiez votre connexion et réessayez.
-              </p>
-            </>
-          )}
-
-          {isSuccess ? (
-            <button className="btn-primary btn-start" onClick={() => navigate('/')}>
-              <IconHome size={18} />
-              Retour à l'accueil
-            </button>
-          ) : (
-            <button className="btn-primary btn-start" onClick={() => navigate(-1)}>
-              <IconRefresh size={18} />
-              Réessayer
-            </button>
-          )}
-
-          {isSuccess && (
-            <div className="countdown-wrap">
-              <div className="countdown-bar">
-                <div
-                  className="countdown-fill"
-                  style={{ width: `${(countdown / REDIRECT_DELAY) * 100}%` }}
-                />
-              </div>
-              <p className="countdown-label">
-                Retour automatique dans {countdown} seconde{countdown !== 1 ? 's' : ''}
-              </p>
-            </div>
-          )}
-
+    <InactivityManager>
+      <div
+        className="min-h-screen flex flex-col items-center justify-center px-6 py-12 text-center"
+        style={{ background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)' }}
+      >
+        {/* Icône succès */}
+        <div
+          className="w-24 h-24 rounded-full flex items-center justify-center mb-8"
+          style={{ background: 'rgba(255,255,255,0.2)' }}
+        >
+          <span className="text-5xl">✓</span>
         </div>
+
+        <h1 className="text-3xl font-bold text-white mb-4 leading-tight max-w-sm">
+          {titre}
+        </h1>
+
+        <p className="text-white/80 text-lg mb-12 leading-relaxed max-w-sm">
+          {message}
+        </p>
+
+        {/* Barre de progression countdown */}
+        <div className="w-full max-w-xs mb-4">
+          <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-white rounded-full transition-all duration-1000"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="text-white/60 text-sm mt-2">
+            Retour dans {countdown}s
+          </p>
+        </div>
+
+        <button
+          onClick={handleRetour}
+          className="text-white/70 text-sm underline mt-4"
+          style={{ minHeight: '48px', fontSize: '14px' }}
+        >
+          Retourner à l'accueil maintenant
+        </button>
       </div>
-    </div>
+    </InactivityManager>
   )
 }

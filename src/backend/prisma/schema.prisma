@@ -8,6 +8,8 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─── V1 models (conservés, rétrocompatibles) ────────────────────────────────
+
 model Configuration {
   id             Int      @id @default(autoincrement())
   formDefinition Json
@@ -18,13 +20,16 @@ model Configuration {
 }
 
 model Submission {
-  id            String            @id @default(uuid())
-  createdAt     DateTime          @default(now())
-  configVersion String
-  synced        Boolean           @default(false)
-  syncedAt      DateTime?
-  crmProjectId  String?
-  values        SubmissionValue[]
+  id             String            @id @default(uuid())
+  createdAt      DateTime          @default(now())
+  configVersion  String
+  synced         Boolean           @default(false)
+  syncedAt       DateTime?
+  crmProjectId   String?
+  borneId        String? // NOUVEAU — nullable, rétrocompat V1
+  borne          Borne?            @relation(fields: [borneId], references: [id])
+  values         SubmissionValue[]
+  enregistrement Enregistrement? // NOUVEAU — lien vers le modèle V2
 
   @@index([synced, createdAt])
   @@map("submissions")
@@ -40,4 +45,140 @@ model SubmissionValue {
   @@index([submissionId])
   @@index([fieldId])
   @@map("submission_values")
+}
+
+// ─── V2 models ───────────────────────────────────────────────────────────────
+
+model SuperAdmin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("super_admins")
+}
+
+model AdminBorne {
+  id            String   @id @default(uuid())
+  nom           String
+  prenom        String
+  email         String   @unique
+  passwordHash  String
+  raisonSociale String
+  siret         String
+  actif         Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  bornes        Borne[]
+
+  @@map("admin_bornes")
+}
+
+model Borne {
+  id              String           @id @default(uuid())
+  idBorne         String           @unique
+  langueDefaut    String           @default("fr")
+  adresse         String
+  commercant      String?
+  regie           String?
+  installateur    String?
+  statut          String           @default("actif")
+  formulaireId    String?
+  formulaire      Formulaire?      @relation(fields: [formulaireId], references: [id])
+  adminBorneId    String?
+  adminBorne      AdminBorne?      @relation(fields: [adminBorneId], references: [id])
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  submissions     Submission[]
+  enregistrements Enregistrement[]
+
+  @@index([statut])
+  @@index([adminBorneId])
+  @@map("bornes")
+}
+
+model Formulaire {
+  id                   String           @id @default(uuid())
+  label                String
+  version              String           @default("1.0.0")
+  statut               String           @default("brouillon")
+  dureeRetourAccueil   Int              @default(30)
+  annulationInactivite Int              @default(120)
+  pageDebutConfig      Json
+  pageFinConfig        Json
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  questions            Question[]
+  bornes               Borne[]
+  enregistrements      Enregistrement[]
+
+  @@index([statut])
+  @@map("formulaires")
+}
+
+model Question {
+  id              String                  @id @default(uuid())
+  formulaireId    String
+  formulaire      Formulaire              @relation(fields: [formulaireId], references: [id], onDelete: Cascade)
+  libelleQuestion Json
+  typeOption      String
+  options         Json?
+  orderPage       Int
+  obligatoire     Boolean                 @default(false)
+  paragrapheInfo  Json?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  reponses        EnregistrementReponse[]
+
+  @@index([formulaireId, orderPage])
+  @@map("questions")
+}
+
+model Enregistrement {
+  id             String                  @id @default(uuid())
+  borneId        String
+  borne          Borne                   @relation(fields: [borneId], references: [id])
+  formulaireId   String
+  formulaire     Formulaire              @relation(fields: [formulaireId], references: [id])
+  langueUtilisee String                  @default("fr")
+  statutPartage  String                  @default("en_attente")
+  tentatives     Int                     @default(0)
+  derniereErreur String?
+  partageAt      DateTime?
+  submissionId   String?                 @unique
+  submission     Submission?             @relation(fields: [submissionId], references: [id])
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  reponses       EnregistrementReponse[]
+
+  @@index([borneId, createdAt])
+  @@index([statutPartage])
+  @@map("enregistrements")
+}
+
+model EnregistrementReponse {
+  id               Int            @id @default(autoincrement())
+  enregistrementId String
+  enregistrement   Enregistrement @relation(fields: [enregistrementId], references: [id], onDelete: Cascade)
+  questionId       String
+  question         Question       @relation(fields: [questionId], references: [id])
+  valeur           String
+
+  @@index([enregistrementId])
+  @@map("enregistrement_reponses")
+}
+
+model PartageJob {
+  id               String    @id @default(uuid())
+  enregistrementId String
+  statut           String    @default("en_attente")
+  tentatives       Int       @default(0)
+  prochainEssai    DateTime?
+  erreur           String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([statut, prochainEssai])
+  @@map("partage_jobs")
 }

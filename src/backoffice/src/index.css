@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #5B2D8E;
+  --color-secondary: #1A56A0;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: system-ui, sans-serif; font-size: 16px; background: #f5f6fa; color: #1a1a2e; }
