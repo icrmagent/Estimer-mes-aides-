@@ -1,7 +1,8 @@
-import { createContext, useContext, useReducer, useMemo } from 'react'
+import { createContext, useContext, useReducer, useMemo, useState, useEffect } from 'react'
 
 /**
- * BorneContext — gère la config borne V2, la langue active et le formulaire dynamique.
+ * BorneContext — gère la config borne V2, la langue active, le formulaire dynamique
+ * et le statut de connexion réseau (online/offline).
  * Remplace useFormConfig pour le front-office borne V2.
  *
  * Structure config borne (depuis GET /api/bornes/:id/config) :
@@ -52,13 +53,28 @@ function reducer(state, action) {
 export function BorneProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initial)
 
+  // Suivi du statut réseau (online/offline)
+  const [isOnline, setIsOnline] = useState(navigator.onLine)
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
   const ctx = useMemo(() => ({
     ...state,
+    isOnline,
     setConfig: (borne, formulaire) => dispatch({ type: 'SET_CONFIG', borne, formulaire }),
     setLangue: (langue) => dispatch({ type: 'SET_LANGUE', langue }),
     setError: (error) => dispatch({ type: 'SET_ERROR', error }),
     resetLangue: () => dispatch({ type: 'RESET_LANGUE' }),
-  }), [state])
+  }), [state, isOnline])
 
   return <BorneContext.Provider value={ctx}>{children}</BorneContext.Provider>
 }

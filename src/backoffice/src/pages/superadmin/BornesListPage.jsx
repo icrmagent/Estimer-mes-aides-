@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
@@ -23,18 +23,44 @@ export default function BornesListPage() {
   const [total, setTotal] = useState(0)
   const limit = 20
 
-  function fetchBornes(p = 1) {
+  const [filters, setFilters] = useState({
+    search: '',
+    statut: '',
+  })
+
+  const fetchBornes = useCallback((p = 1, f = filters) => {
     setLoading(true)
-    api.get('/api/bornes', { params: { page: p, limit } })
+    const params = { page: p, limit }
+    if (f.search) params.search = f.search
+    if (f.statut) params.statut = f.statut
+
+    api.get('/api/bornes', { params })
       .then(res => {
         setBornes(res.data.bornes || res.data.data || res.data || [])
         setTotal(res.data.total || 0)
       })
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))
-  }
+  }, [filters])
 
   useEffect(() => { fetchBornes(page) }, [page])
+
+  function handleFilterChange(field, value) {
+    setFilters(prev => ({ ...prev, [field]: value }))
+  }
+
+  function handleSearch(e) {
+    e.preventDefault()
+    setPage(1)
+    fetchBornes(1, filters)
+  }
+
+  function handleReset() {
+    const reset = { search: '', statut: '' }
+    setFilters(reset)
+    setPage(1)
+    fetchBornes(1, reset)
+  }
 
   async function toggleStatut(borne) {
     const newStatut = borne.statut === 'actif' ? 'inactif' : 'actif'
@@ -45,6 +71,9 @@ export default function BornesListPage() {
       setError(err.response?.data?.error || 'Erreur lors de la mise à jour')
     }
   }
+
+  const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent'
+  const inputStyle = { minHeight: '40px', fontSize: '14px' }
 
   return (
     <AppLayout>
@@ -64,8 +93,56 @@ export default function BornesListPage() {
         </div>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">{error}</div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+          </div>
         )}
+
+        {/* Search & Filter */}
+        <form onSubmit={handleSearch} className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Recherche</label>
+              <input
+                type="text"
+                value={filters.search}
+                onChange={e => handleFilterChange('search', e.target.value)}
+                className={inputClass + ' w-full'}
+                style={inputStyle}
+                placeholder="ID borne, adresse, commerçant..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Statut</label>
+              <select
+                value={filters.statut}
+                onChange={e => handleFilterChange('statut', e.target.value)}
+                className={inputClass}
+                style={inputStyle}
+              >
+                <option value="">Tous</option>
+                <option value="actif">Actif</option>
+                <option value="inactif">Inactif</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-semibold rounded-xl text-white"
+              style={{ background: '#5B2D8E', minHeight: '40px' }}
+            >
+              Filtrer
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
+              style={{ minHeight: '40px' }}
+            >
+              Réinitialiser
+            </button>
+          </div>
+        </form>
 
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
           {loading ? (

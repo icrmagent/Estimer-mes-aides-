@@ -18,22 +18,38 @@ function StatutBadge({ statut }) {
 
 export default function FormulairesListPage() {
   const [formulaires, setFormulaires] = useState([])
+  const [allFormulaires, setAllFormulaires] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [duplicating, setDuplicating] = useState(null)
+  const [statutFilter, setStatutFilter] = useState('')
 
   useEffect(() => {
     api.get('/api/formulaires')
-      .then(res => setFormulaires(res.data.formulaires || res.data.data || res.data || []))
+      .then(res => {
+        const data = res.data.formulaires || res.data.data || res.data || []
+        setAllFormulaires(data)
+        setFormulaires(data)
+      })
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))
   }, [])
+
+  function handleStatutFilter(statut) {
+    setStatutFilter(statut)
+    if (!statut) {
+      setFormulaires(allFormulaires)
+    } else {
+      setFormulaires(allFormulaires.filter(f => f.statut === statut))
+    }
+  }
 
   async function handleDuplicate(formulaire) {
     setDuplicating(formulaire.id)
     try {
       const res = await api.post(`/api/formulaires/${formulaire.id}/dupliquer`)
       const newForm = res.data.formulaire || res.data
+      setAllFormulaires(prev => [newForm, ...prev])
       setFormulaires(prev => [newForm, ...prev])
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la duplication')
@@ -45,7 +61,9 @@ export default function FormulairesListPage() {
   async function handleChangeStatut(formulaire, newStatut) {
     try {
       await api.patch(`/api/formulaires/${formulaire.id}/statut`, { statut: newStatut })
-      setFormulaires(prev => prev.map(f => f.id === formulaire.id ? { ...f, statut: newStatut } : f))
+      const updater = prev => prev.map(f => f.id === formulaire.id ? { ...f, statut: newStatut } : f)
+      setAllFormulaires(updater)
+      setFormulaires(updater)
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors du changement de statut')
     }
@@ -58,6 +76,30 @@ export default function FormulairesListPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Formulaires</h1>
             <p className="text-gray-500 text-sm mt-1">{formulaires.length} formulaire{formulaires.length !== 1 ? 's' : ''}</p>
+          </div>
+        </div>
+
+        {/* Status filter */}
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-xs font-semibold text-gray-600 mr-1">Filtrer par statut :</span>
+            {['', 'brouillon', 'publie', 'archive'].map(s => (
+              <button
+                key={s}
+                onClick={() => handleStatutFilter(s)}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl border transition-colors ${
+                  statutFilter === s
+                    ? 'text-white border-transparent'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+                style={{
+                  minHeight: '36px',
+                  background: statutFilter === s ? '#5B2D8E' : undefined,
+                }}
+              >
+                {s === '' ? 'Tous' : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
+import logger from '../lib/logger.js'
 
 export const adminBornesRouter = Router()
 
@@ -56,7 +57,7 @@ function handlePrismaError(err, res) {
       error: { code: 'NOT_FOUND', message: 'AdminBorne introuvable' },
     })
   }
-  console.error('[ADMIN-BORNES ERROR]', err)
+  logger.error({ message: '[ADMIN-BORNES ERROR]', error: err.message, code: err.code })
   return res.status(500).json({
     success: false,
     error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },

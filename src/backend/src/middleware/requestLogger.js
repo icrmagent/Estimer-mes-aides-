@@ -1,11 +1,25 @@
+import logger from '../lib/logger.js'
+
 export const requestLogger = (req, res, next) => {
   const start = Date.now()
   res.on('finish', () => {
     const duration = Date.now() - start
-    if (duration > 500) {
-      console.warn(`SLOW: ${req.method} ${req.path} — ${duration}ms`)
+    const fields = {
+      timestamp: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      ip: req.ip || req.socket?.remoteAddress,
+      userAgent: typeof req.get === 'function' ? req.get('user-agent') : req.headers?.['user-agent'],
+      userId: req.user?.id ?? req.user?.sub ?? null,
+      duration,
+      statusCode: res.statusCode,
     }
-    console.log(`${req.method} ${req.path} ${res.statusCode} ${duration}ms`)
+
+    if (duration > 500) {
+      logger.warn({ ...fields, message: `SLOW request: ${req.method} ${req.path}` })
+    } else {
+      logger.info({ ...fields, message: `${req.method} ${req.path} ${res.statusCode} ${duration}ms` })
+    }
   })
   next()
 }

@@ -19,9 +19,11 @@ jest.unstable_mockModule('../src/lib/prisma.js', () => ({ prisma: mockPrisma }))
 
 const mockNotifySucces = jest.fn()
 const mockNotifyEchec = jest.fn()
+const mockPublishEvent = jest.fn().mockResolvedValue(undefined)
 jest.unstable_mockModule('../src/services/pusherService.js', () => ({
   notifyPartageSucces: mockNotifySucces,
   notifyPartageEchec: mockNotifyEchec,
+  publishEvent: mockPublishEvent,
 }))
 
 // Mock global fetch for CRM API calls
@@ -29,7 +31,7 @@ global.fetch = jest.fn()
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
-const { processJob, MAX_TENTATIVES, RETRY_DELAYS } = await import('../src/services/queueWorker.js')
+const { processJob, MAX_TENTATIVES, computeNextRetry } = await import('../src/services/queueWorker.js')
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 
@@ -130,20 +132,21 @@ describe('queueWorker — processJob', () => {
         })
       )
 
-      // Vérifier que le délai est ~1 minute
+      // Vérifier que le délai est ~2 minutes (2^1 = 2min) + jitter (0-60s)
       const updateCall = mockPrisma.partageJob.update.mock.calls.find(
         c => c[0].data?.statut === 'echec_temporaire'
       )
       const prochainEssai = updateCall[0].data.prochainEssai
       const delaiMs = prochainEssai.getTime() - Date.now()
-      expect(delaiMs).toBeGreaterThan(RETRY_DELAYS[0] - 5000)
-      expect(delaiMs).toBeLessThan(RETRY_DELAYS[0] + 5000)
+      // 2^1 min = 120s, + jitter 0-60s → range: 120s to 180s
+      expect(delaiMs).toBeGreaterThan(2 * 60 * 1000 - 5000)
+      expect(delaiMs).toBeLessThan(3 * 60 * 1000 + 5000)
 
       // Pas de notification Pusher pour un échec temporaire
       expect(mockNotifyEchec).not.toHaveBeenCalled()
     })
 
-    it('utilise le délai de 5 minutes pour la 2ème tentative', async () => {
+    it('utilise le délai de 4 minutes pour la 2ème tentative', async () => {
       global.fetch.mockResolvedValue({ ok: false, status: 503, text: async () => 'Unavailable' })
 
       const job = makeJob({ tentatives: 1 })
@@ -154,8 +157,9 @@ describe('queueWorker — processJob', () => {
       )
       const prochainEssai = updateCall[0].data.prochainEssai
       const delaiMs = prochainEssai.getTime() - Date.now()
-      expect(delaiMs).toBeGreaterThan(RETRY_DELAYS[1] - 5000)
-      expect(delaiMs).toBeLessThan(RETRY_DELAYS[1] + 5000)
+      // 2^2 min = 240s, + jitter 0-60s → range: 240s to 300s
+      expect(delaiMs).toBeGreaterThan(4 * 60 * 1000 - 5000)
+      expect(delaiMs).toBeLessThan(5 * 60 * 1000 + 5000)
     })
   })
 
@@ -210,14 +214,20 @@ describe('queueWorker — processJob', () => {
   })
 
   describe('Constantes', () => {
-    it('MAX_TENTATIVES est 3', () => {
-      expect(MAX_TENTATIVES).toBe(3)
+    it('MAX_TENTATIVES est 5', () => {
+      expect(MAX_TENTATIVES).toBe(5)
     })
 
-    it('RETRY_DELAYS suit la progression exponentielle 1min → 5min → 15min', () => {
-      expect(RETRY_DELAYS[0]).toBe(60 * 1000)
-      expect(RETRY_DELAYS[1]).toBe(5 * 60 * 1000)
-      expect(RETRY_DELAYS[2]).toBe(15 * 60 * 1000)
+    it('computeNextRetry retourne un délai exponentiel croissant', () => {
+      const delay1 = computeNextRetry(1).getTime() - Date.now()
+      const delay2 = computeNextRetry(2).getTime() - Date.now()
+      const delay3 = computeNextRetry(3).getTime() - Date.now()
+      // 2^1=2min, 2^2=4min, 2^3=8min (+ jitter)
+      expect(delay1).toBeGreaterThan(2 * 60 * 1000 - 1000)
+      expect(delay2).toBeGreaterThan(4 * 60 * 1000 - 1000)
+      expect(delay3).toBeGreaterThan(8 * 60 * 1000 - 1000)
+      expect(delay2).toBeGreaterThan(delay1)
+      expect(delay3).toBeGreaterThan(delay2)
     })
   })
 })

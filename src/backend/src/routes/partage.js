@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
+import logger from '../lib/logger.js'
 
 export const partageRouter = Router()
 
@@ -87,7 +88,7 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
         error: { code: 'NOT_FOUND', message: 'Job introuvable' },
       })
     }
-    console.error('[PARTAGE] Erreur relancer:', err)
+    logger.error({ message: '[PARTAGE] Erreur relancer', error: err.message, jobId: id })
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },

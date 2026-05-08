@@ -2,3 +2,8 @@ node_modules/
 .env
 dist/
 *.log
+coverage/
+
+# V1 migration backups (may contain sensitive data)
+prisma/backups/v1-backup-*.json
+migration-report.json

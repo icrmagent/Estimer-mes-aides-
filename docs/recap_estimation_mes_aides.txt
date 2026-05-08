@@ -1,0 +1,32 @@
+**************************************************************
+url APK estimer mes aide : https://drive.google.com/file/d/1tNM4fC7PuEi2wN21EZzUB9SX0BEwxwjF/view?usp=sharing
+**************************************************************
+url de formulaire web : https://estimer-mes-aides.vercel.app
+**************************************************************
+
+url backoffice : https://crm-module-ivory.vercel.app
+Token JWT CRM (valable 24h) : 
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY3JtIiwiaWF0IjoxNzc3MjA4NDkyLCJleHAiOjE3NzcyOTQ4OTJ9.V6q4jZDFXVAfyuHf6Pg457vglxWvHdumBy53MipEOso
+
+************************************************
+- distincté les onglet duppliqué à celui l'originale soit pour les doc et photo 
+- demande de l'acces serveur azur 
+- vérification des document récupéré depuis wattaudit soit garder la dernière version 
+- dans le cas ou le contact est pro alors on doit récupéré le raison social (comunidad) et le cif dans la fiche convention lot appliqué le mm principe dans l'export excel lot 
+- il faut remplir ces champs pour les anciennes opportunités déja dans le system
+
+"material_name"  -->  Matériel Utilisé
+"e_aislante_excel" -->  isolant
+"number_of_owners": NOM DE LA COMMUNIDAD
+    "building_name":  Nombre de propriétaires
+    "comunidad_cif":  CIF COMUNIDAD
+"conductividad": Conductivité
+    "conductividad lamda": Conductivité LAMDA
+
+
+
+
+
+
+
+

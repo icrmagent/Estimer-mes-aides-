@@ -886,58 +886,197 @@ const questionsV2 = [
   },
 ]
 
-async function main() {
-  console.log('🌱 Seeding V2...')
+// ─── Valid CRM Field IDs (source of truth — Requirement 7.4) ─────────────────
+// These are the ONLY valid field IDs for CRM synchronization.
+// Never use invented IDs — they will fail during CRM sync.
+const VALID_CRM_FIELD_IDS = [
+  2262, 2087, 2088, 2217, 2089, 2090, 2015, 2016,
+  2294, 2293, 2292, 2306, 2307, 2296, 2298, 2300,
+  2301, 2302, 2297, 2299, 2303, 2304, 2305,
+]
 
-  // ─── 1. V1 Configuration (preserved) ───────────────────────────────────────
-  console.log('  → Seeding V1 Configuration...')
-  await prisma.configuration.deleteMany()
-  await prisma.configuration.create({
-    data: {
-      formDefinition,
-      version: '1.0.0',
-    },
-  })
-  console.log('  ✅ V1 Configuration seeded (15 étapes, 23 champs, Tab ID 22)')
+// ─── V2 Primary Color (Requirement 3.4 — must be #5B2D8E, NOT #5C2DD3) ──────
+const PRIMARY_COLOR_V2 = process.env.PRIMARY_COLOR ?? '#5B2D8E'
 
-  // ─── 2. SuperAdmin ──────────────────────────────────────────────────────────
-  console.log('  → Seeding SuperAdmin...')
+/**
+ * Validate that all CRM field IDs used in questionsV2 are in the approved list.
+ * Throws if any invalid ID is found (Requirement 7.12).
+ */
+function validateCrmFieldIds() {
+  const invalidIds = []
+  for (const question of questionsV2) {
+    for (const fieldId of question.crmFieldIds) {
+      if (!VALID_CRM_FIELD_IDS.includes(fieldId)) {
+        invalidIds.push(fieldId)
+      }
+    }
+  }
+  if (invalidIds.length > 0) {
+    throw new Error(
+      `Invalid CRM field IDs detected: [${invalidIds.join(', ')}]. ` +
+      `Only these IDs are valid: [${VALID_CRM_FIELD_IDS.join(', ')}]`
+    )
+  }
+  console.log(`  ✅ CRM field ID validation passed (${VALID_CRM_FIELD_IDS.length} valid IDs checked)`)
+}
+
+/**
+ * Check whether seed data already exists.
+ * Returns true if the SuperAdmin and demo borne are already present.
+ * Requirement 3.8 — skip creation and log "Data already exists" if data is found.
+ */
+async function dataAlreadyExists() {
   const superAdminEmail = process.env.SUPERADMIN_EMAIL || 'admin@estimer-mes-aides.fr'
-  const superAdminPassword = process.env.SUPERADMIN_PASSWORD_TEMP || 'Admin2026!'
-  // bcrypt cost factor 12 (R6.3, R1.3 critère 12)
-  const superAdminHash = await bcrypt.hash(superAdminPassword, 12)
+  const [superAdmin, borne] = await Promise.all([
+    prisma.superAdmin.findUnique({ where: { email: superAdminEmail } }),
+    prisma.borne.findUnique({ where: { idBorne: 'BORNE-DEMO-001' } }),
+  ])
+  return superAdmin !== null && borne !== null
+}
+
+/**
+ * Seed the V1 Configuration record (preserved for backward compatibility).
+ * Uses upsert so it is safe to run multiple times.
+ */
+async function seedV1Configuration() {
+  console.log('  → Seeding V1 Configuration...')
+  // V1 config preserves the original V1 color (#5C2DD3) — this is intentional
+  // for backward compatibility with the V1 CRM module. Do NOT change to #5B2D8E here.
+  const existing = await prisma.configuration.findFirst()
+  if (existing) {
+    await prisma.configuration.update({
+      where: { id: existing.id },
+      data: { formDefinition, version: '1.0.0' },
+    })
+  } else {
+    await prisma.configuration.create({
+      data: { formDefinition, version: '1.0.0' },
+    })
+  }
+  console.log('  ✅ V1 Configuration seeded (15 étapes, 23 champs, Tab ID 22)')
+}
+
+/**
+ * Seed the SuperAdmin account.
+ * Email from SUPERADMIN_EMAIL env var, password from SUPERADMIN_PASSWORD_TEMP.
+ * bcrypt cost factor 12 (Requirement 3.1, project rule).
+ * Task 7.2
+ */
+async function seedSuperAdmin() {
+  console.log('  → Seeding SuperAdmin...')
+  const email = process.env.SUPERADMIN_EMAIL || 'admin@estimer-mes-aides.fr'
+  const password = process.env.SUPERADMIN_PASSWORD_TEMP || 'Admin2026!'
+  const passwordHash = await bcrypt.hash(password, 12)
 
   await prisma.superAdmin.upsert({
-    where: { email: superAdminEmail },
-    update: { passwordHash: superAdminHash },
+    where: { email },
+    update: { passwordHash },
+    create: { email, passwordHash },
+  })
+  console.log(`  ✅ SuperAdmin seeded: ${email}`)
+  return email
+}
+
+/**
+ * Seed the demo AdminBorne account.
+ * bcrypt cost factor 12 (project rule).
+ * Task 7.3
+ */
+async function seedAdminBorne() {
+  console.log('  → Seeding AdminBorne de démonstration...')
+  const email = 'demo-admin@estimer-mes-aides.fr'
+  const password = 'Demo2026!'
+  const passwordHash = await bcrypt.hash(password, 12)
+
+  const adminBorne = await prisma.adminBorne.upsert({
+    where: { email },
+    update: {
+      passwordHash,
+      nom: 'Démo',
+      prenom: 'AdminBorne',
+      raisonSociale: 'Société Démo SAS',
+      siret: '12345678901234',
+      actif: true,
+    },
     create: {
-      email: superAdminEmail,
-      passwordHash: superAdminHash,
+      nom: 'Démo',
+      prenom: 'AdminBorne',
+      email,
+      passwordHash,
+      raisonSociale: 'Société Démo SAS',
+      siret: '12345678901234',
+      actif: true,
     },
   })
-  console.log(`  ✅ SuperAdmin seeded: ${superAdminEmail}`)
+  console.log(`  ✅ AdminBorne seeded: ${email}`)
+  return adminBorne
+}
 
-  // ─── 3. Formulaire V2 (15 questions trilingues) ─────────────────────────────
-  console.log('  → Seeding Formulaire V2...')
+/**
+ * Seed the demo Formulaire with all 15 steps and correct CRM field IDs.
+ * Uses couleurPrimaire #5B2D8E (V2 color — Requirement 3.4).
+ * Tasks 7.4, 7.5, 7.6, 7.7, 7.8, 7.9
+ */
+async function seedFormulaire() {
+  console.log('  → Seeding Formulaire V2 (15 étapes)...')
 
-  // Delete existing demo formulaire and its questions (idempotent)
-  const existingFormulaire = await prisma.formulaire.findFirst({
-    where: { label: 'Estimer Mes Aides V2 — Formulaire de démonstration' },
+  const DEMO_LABEL = 'Estimer Mes Aides V2 — Formulaire de démonstration'
+
+  // Build pageDebutConfig and pageFinConfig with correct V2 primary color
+  const pageDebutConfigV2 = {
+    couleurPrimaire: PRIMARY_COLOR_V2,
+    ...pageDebutConfig,
+  }
+  const pageFinConfigV2 = {
+    couleurPrimaire: PRIMARY_COLOR_V2,
+    ...pageFinConfig,
+  }
+
+  // Check if demo formulaire already exists
+  const existing = await prisma.formulaire.findFirst({
+    where: { label: DEMO_LABEL },
+    include: { questions: true },
   })
-  if (existingFormulaire) {
-    // Questions are cascade-deleted via onDelete: Cascade
-    await prisma.formulaire.delete({ where: { id: existingFormulaire.id } })
+
+  if (existing) {
+    // Update the formulaire in place — delete old questions and recreate
+    // (questions are cascade-deleted via onDelete: Cascade in schema)
+    await prisma.question.deleteMany({ where: { formulaireId: existing.id } })
+    const formulaire = await prisma.formulaire.update({
+      where: { id: existing.id },
+      data: {
+        version: '1.0.0',
+        statut: 'publie',
+        dureeRetourAccueil: 30,
+        annulationInactivite: 120,
+        pageDebutConfig: pageDebutConfigV2,
+        pageFinConfig: pageFinConfigV2,
+        questions: {
+          create: questionsV2.map(({ orderPage, obligatoire, typeOption, libelleQuestion, paragrapheInfo, options }) => ({
+            orderPage,
+            obligatoire,
+            typeOption,
+            libelleQuestion,
+            paragrapheInfo,
+            options,
+          })),
+        },
+      },
+      include: { questions: true },
+    })
+    console.log(`  ✅ Formulaire V2 updated: ${formulaire.id} (${formulaire.questions.length} questions)`)
+    return formulaire
   }
 
   const formulaire = await prisma.formulaire.create({
     data: {
-      label: 'Estimer Mes Aides V2 — Formulaire de démonstration',
-      version: '2.0.0',
+      label: DEMO_LABEL,
+      version: '1.0.0',
       statut: 'publie',
       dureeRetourAccueil: 30,
       annulationInactivite: 120,
-      pageDebutConfig,
-      pageFinConfig,
+      pageDebutConfig: pageDebutConfigV2,
+      pageFinConfig: pageFinConfigV2,
       questions: {
         create: questionsV2.map(({ orderPage, obligatoire, typeOption, libelleQuestion, paragrapheInfo, options }) => ({
           orderPage,
@@ -952,41 +1091,19 @@ async function main() {
     include: { questions: true },
   })
   console.log(`  ✅ Formulaire V2 seeded: ${formulaire.id} (${formulaire.questions.length} questions)`)
+  return formulaire
+}
 
-  // ─── 4. AdminBorne de démonstration ────────────────────────────────────────
-  console.log('  → Seeding AdminBorne de démonstration...')
-  const adminBorneEmail = 'demo-admin@estimer-mes-aides.fr'
-  const adminBornePassword = 'Demo2026!'
-  const adminBorneHash = await bcrypt.hash(adminBornePassword, 12)
-
-  const adminBorne = await prisma.adminBorne.upsert({
-    where: { email: adminBorneEmail },
-    update: {
-      passwordHash: adminBorneHash,
-      nom: 'Démo',
-      prenom: 'AdminBorne',
-      raisonSociale: 'Société Démo SAS',
-      siret: '12345678901234',
-      actif: true,
-    },
-    create: {
-      nom: 'Démo',
-      prenom: 'AdminBorne',
-      email: adminBorneEmail,
-      passwordHash: adminBorneHash,
-      raisonSociale: 'Société Démo SAS',
-      siret: '12345678901234',
-      actif: true,
-    },
-  })
-  console.log(`  ✅ AdminBorne seeded: ${adminBorneEmail}`)
-
-  // ─── 5. Borne de démonstration ──────────────────────────────────────────────
+/**
+ * Seed the demo Borne assigned to the demo AdminBorne with the demo Formulaire.
+ * Task 7.10
+ */
+async function seedBorne(adminBorne, formulaire) {
   console.log('  → Seeding Borne de démonstration...')
+  const idBorne = 'BORNE-DEMO-001'
 
-  const borneIdBorne = 'BORNE-DEMO-001'
   await prisma.borne.upsert({
-    where: { idBorne: borneIdBorne },
+    where: { idBorne },
     update: {
       langueDefaut: 'fr',
       adresse: '1 Place de la Démo, 75001 Paris',
@@ -998,7 +1115,7 @@ async function main() {
       adminBorneId: adminBorne.id,
     },
     create: {
-      idBorne: borneIdBorne,
+      idBorne,
       langueDefaut: 'fr',
       adresse: '1 Place de la Démo, 75001 Paris',
       commercant: 'Brico Démo',
@@ -1009,17 +1126,72 @@ async function main() {
       adminBorneId: adminBorne.id,
     },
   })
-  console.log(`  ✅ Borne seeded: ${borneIdBorne}`)
+  console.log(`  ✅ Borne seeded: ${idBorne} → AdminBorne: ${adminBorne.email}, Formulaire: ${formulaire.id}`)
+  return idBorne
+}
 
+/**
+ * Main seed entry point.
+ *
+ * Execution order:
+ *   1. Validate all CRM field IDs (fail fast if any are invalid)
+ *   2. Seed V1 Configuration (always — backward compat)
+ *   3. Check idempotency — skip V2 seed if data already exists (log "Data already exists")
+ *   4. Seed SuperAdmin (task 7.2)
+ *   5. Seed demo AdminBorne (task 7.3)
+ *   6. Seed demo Formulaire with 15 steps (tasks 7.4–7.9)
+ *   7. Seed demo Borne assigned to AdminBorne + Formulaire (task 7.10)
+ *   8. Print summary
+ */
+async function main() {
+  console.log('🌱 Seeding V2...')
+  console.log(`   Primary color : ${PRIMARY_COLOR_V2}`)
+  console.log(`   SuperAdmin    : ${process.env.SUPERADMIN_EMAIL || 'admin@estimer-mes-aides.fr'}`)
+  console.log('')
+
+  // ─── Step 1: Validate CRM field IDs before any DB operation ────────────────
+  console.log('  → Validating CRM field IDs...')
+  validateCrmFieldIds()
+
+  // ─── Step 2: V1 Configuration (always seeded — backward compat) ────────────
+  await seedV1Configuration()
+
+  // ─── Step 3: Idempotency check for V2 data ─────────────────────────────────
+  const alreadySeeded = await dataAlreadyExists()
+  if (alreadySeeded) {
+    console.log('')
+    console.log('ℹ️  Data already exists — skipping V2 seed.')
+    console.log('   To re-seed, delete the SuperAdmin and BORNE-DEMO-001 records first.')
+    return
+  }
+
+  // ─── Step 4: SuperAdmin (task 7.2) ─────────────────────────────────────────
+  const superAdminEmail = await seedSuperAdmin()
+
+  // ─── Step 5: Demo AdminBorne (task 7.3) ────────────────────────────────────
+  const adminBorne = await seedAdminBorne()
+
+  // ─── Step 6: Demo Formulaire with 15 steps (tasks 7.4–7.9) ────────────────
+  const formulaire = await seedFormulaire()
+
+  // ─── Step 7: Demo Borne (task 7.10) ────────────────────────────────────────
+  const idBorne = await seedBorne(adminBorne, formulaire)
+
+  // ─── Step 8: Summary ───────────────────────────────────────────────────────
   console.log('')
   console.log('🎉 Seed V2 terminé avec succès !')
   console.log('   SuperAdmin    :', superAdminEmail)
-  console.log('   AdminBorne    :', adminBorneEmail, '/ Demo2026!')
-  console.log('   Borne         :', borneIdBorne)
+  console.log('   AdminBorne    :', adminBorne.email, '/ Demo2026!')
+  console.log('   Borne         :', idBorne)
   console.log('   Formulaire    :', formulaire.id)
   console.log('   Questions     :', formulaire.questions.length)
+  console.log('   Couleur V2    :', PRIMARY_COLOR_V2)
 }
 
 main()
-  .catch((e) => { console.error(e); process.exit(1) })
+  .catch((e) => {
+    console.error('❌ Seed failed:', e.message)
+    console.error(e)
+    process.exit(1)
+  })
   .finally(() => prisma.$disconnect())

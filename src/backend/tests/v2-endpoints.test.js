@@ -46,6 +46,10 @@ const mockPrisma = {
     count: jest.fn(),
     groupBy: jest.fn(),
   },
+  formulaireVersion: {
+    findMany: jest.fn(),
+    create: jest.fn(),
+  },
   partageJob: { create: jest.fn(), findMany: jest.fn(), update: jest.fn() },
   $transaction: jest.fn(),
 }
@@ -59,6 +63,23 @@ jest.unstable_mockModule('../src/lib/prisma.js', () => ({
 // Mock authService to prevent real DB calls from auth route
 jest.unstable_mockModule('../src/services/authService.js', () => ({
   loginUser: jest.fn(),
+  issueAccessToken: jest.fn(),
+}))
+
+// Mock refreshTokenService to prevent real DB calls
+jest.unstable_mockModule('../src/services/refreshTokenService.js', () => ({
+  createRefreshToken: jest.fn().mockResolvedValue('mock-refresh-token'),
+  refreshAccessToken: jest.fn(),
+  revokeRefreshToken: jest.fn(),
+  cleanupExpiredTokens: jest.fn(),
+}))
+
+// Mock tokenBlacklistService — isBlacklisted must return false so JWT tokens pass
+const mockIsBlacklisted = jest.fn().mockResolvedValue(false)
+jest.unstable_mockModule('../src/services/tokenBlacklistService.js', () => ({
+  addToBlacklist: jest.fn(),
+  isBlacklisted: mockIsBlacklisted,
+  cleanupExpired: jest.fn(),
 }))
 
 const { default: request } = await import('supertest')
@@ -387,7 +408,8 @@ describe('PATCH /api/formulaires/:id/statut', () => {
       ...mockFormulaire,
       questions: [mockQuestion],
     })
-    mockPrisma.formulaire.update.mockResolvedValue({ ...mockFormulaire, statut: 'publie' })
+    mockPrisma.formulaire.update.mockResolvedValue({ ...mockFormulaire, statut: 'publie', version: '2.0.0', questions: [mockQuestion] })
+    mockPrisma.formulaireVersion.create.mockResolvedValue({})
 
     const res = await request(app)
       .patch('/api/formulaires/uuid-form-1/statut')
@@ -465,8 +487,12 @@ describe('POST /api/formulaires/:id/questions', () => {
   })
 
   it('données valides → 201', async () => {
-    mockPrisma.formulaire.findUnique.mockResolvedValue(mockFormulaire)
+    mockPrisma.formulaire.findUnique
+      .mockResolvedValueOnce(mockFormulaire)   // getFormulaireOrFail
+      .mockResolvedValueOnce(mockFormulaire)   // incrementMinorVersionAndSnapshot
     mockPrisma.question.create.mockResolvedValue(mockQuestion)
+    mockPrisma.formulaire.update.mockResolvedValue({ ...mockFormulaire, version: '1.1.0', questions: [mockQuestion] })
+    mockPrisma.formulaireVersion.create.mockResolvedValue({})
 
     const res = await request(app)
       .post('/api/formulaires/uuid-form-1/questions')
@@ -496,8 +522,12 @@ describe('DELETE /api/formulaires/:id/questions/:qid', () => {
   })
 
   it('avec ?force=true → 200', async () => {
-    mockPrisma.formulaire.findUnique.mockResolvedValue({ ...mockFormulaire, statut: 'publie' })
+    mockPrisma.formulaire.findUnique
+      .mockResolvedValueOnce({ ...mockFormulaire, statut: 'publie' })   // getFormulaireOrFail
+      .mockResolvedValueOnce({ ...mockFormulaire, statut: 'publie' })   // incrementMinorVersionAndSnapshot
     mockPrisma.question.delete.mockResolvedValue(mockQuestion)
+    mockPrisma.formulaire.update.mockResolvedValue({ ...mockFormulaire, statut: 'publie', version: '1.1.0', questions: [] })
+    mockPrisma.formulaireVersion.create.mockResolvedValue({})
 
     const res = await request(app)
       .delete('/api/formulaires/uuid-form-1/questions/uuid-q-1?force=true')

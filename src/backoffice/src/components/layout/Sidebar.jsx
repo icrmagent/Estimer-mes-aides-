@@ -52,9 +52,9 @@ export default function Sidebar() {
         {isSuperAdmin ? (
           <>
             <NavItem to="/superadmin/dashboard" label="Tableau de bord" icon="📊" />
-            <NavItem to="/superadmin/bornes" label="Bornes" icon="🖥️" />
             <NavItem to="/superadmin/admin-bornes" label="AdminBornes" icon="👥" />
             <NavItem to="/superadmin/formulaires" label="Formulaires" icon="📋" />
+            <NavItem to="/superadmin/bornes" label="Bornes" icon="🖥️" />
             <NavItem to="/superadmin/enregistrements" label="Enregistrements" icon="📁" />
             <NavItem to="/superadmin/partage" label="Partage CRM" icon="🔄" />
           </>

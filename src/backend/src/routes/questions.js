@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
+import { validateCRMFieldIds } from '../lib/crmFieldIds.js'
+import { incrementVersion } from './formulaires.js'
+import logger from '../lib/logger.js'
 
 export const questionsRouter = Router({ mergeParams: true })
 
@@ -58,7 +61,7 @@ function handlePrismaError(err, res) {
       error: { code: 'NOT_FOUND', message: 'Ressource introuvable' },
     })
   }
-  console.error('[QUESTIONS ERROR]', err)
+  logger.error({ message: '[QUESTIONS ERROR]', error: err.message, code: err.code })
   return res.status(500).json({
     success: false,
     error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },
@@ -77,6 +80,33 @@ async function getFormulaireOrFail(formulaireId, res) {
   return formulaire
 }
 
+/**
+ * Task 37.5/37.6 — Increment minor version and create snapshot after question add/delete.
+ */
+async function incrementMinorVersionAndSnapshot(formulaireId, changedBy) {
+  const current = await prisma.formulaire.findUnique({
+    where: { id: formulaireId },
+    include: { questions: { orderBy: { orderPage: 'asc' } } },
+  })
+  if (!current) return
+
+  const newVersion = incrementVersion(current.version, 'minor')
+  const updated = await prisma.formulaire.update({
+    where: { id: formulaireId },
+    data: { version: newVersion },
+    include: { questions: { orderBy: { orderPage: 'asc' } } },
+  })
+
+  await prisma.formulaireVersion.create({
+    data: {
+      formulaireId,
+      version: updated.version,
+      snapshot: updated,
+      changedBy,
+    },
+  })
+}
+
 // ─── GET /api/formulaires/:id/questions ──────────────────────────────────────
 
 questionsRouter.get('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
@@ -92,6 +122,7 @@ questionsRouter.get('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), asy
 })
 
 // ─── POST /api/formulaires/:id/questions ─────────────────────────────────────
+// Task 37.5 — Increment minor version after adding a question
 
 questionsRouter.post('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const formulaire = await getFormulaireOrFail(req.params.id, res)
@@ -105,10 +136,29 @@ questionsRouter.post('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), as
     })
   }
 
+  // Validate CRM field ID if provided (task 8.4)
+  if (parsed.data.crmFieldId !== undefined && parsed.data.crmFieldId !== null) {
+    const invalidIds = validateCRMFieldIds([parsed.data.crmFieldId])
+    if (invalidIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_FIELD_ID',
+          message: `ID(s) CRM invalide(s) : ${invalidIds.join(', ')}`,
+          invalidIds,
+        },
+      })
+    }
+  }
+
   try {
     const question = await prisma.question.create({
       data: { ...parsed.data, formulaireId: req.params.id },
     })
+
+    // Task 37.5 — Increment minor version after adding a question
+    await incrementMinorVersionAndSnapshot(req.params.id, req.user.sub)
+
     return res.status(201).json({ success: true, data: question })
   } catch (err) {
     return handlePrismaError(err, res)
@@ -129,6 +179,21 @@ questionsRouter.put('/:id/questions/:qid', jwtAuthV2, requireRole('SUPER_ADMIN')
     })
   }
 
+  // Validate CRM field ID if provided in the update (task 8.5)
+  if (parsed.data.crmFieldId !== undefined && parsed.data.crmFieldId !== null) {
+    const invalidIds = validateCRMFieldIds([parsed.data.crmFieldId])
+    if (invalidIds.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_FIELD_ID',
+          message: `ID(s) CRM invalide(s) : ${invalidIds.join(', ')}`,
+          invalidIds,
+        },
+      })
+    }
+  }
+
   try {
     const question = await prisma.question.update({
       where: { id: req.params.qid, formulaireId: req.params.id },
@@ -142,6 +207,7 @@ questionsRouter.put('/:id/questions/:qid', jwtAuthV2, requireRole('SUPER_ADMIN')
 
 // ─── DELETE /api/formulaires/:id/questions/:qid ───────────────────────────────
 // Warn if formulaire is publie — require ?force=true to proceed
+// Task 37.6 — Increment minor version after deleting a question
 
 questionsRouter.delete('/:id/questions/:qid', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const formulaire = await getFormulaireOrFail(req.params.id, res)
@@ -163,6 +229,10 @@ questionsRouter.delete('/:id/questions/:qid', jwtAuthV2, requireRole('SUPER_ADMI
     await prisma.question.delete({
       where: { id: req.params.qid, formulaireId: req.params.id },
     })
+
+    // Task 37.6 — Increment minor version after deleting a question
+    await incrementMinorVersionAndSnapshot(req.params.id, req.user.sub)
+
     return res.json({ success: true, data: { deleted: true } })
   } catch (err) {
     return handlePrismaError(err, res)

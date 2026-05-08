@@ -1,5 +1,6 @@
 # Secrets et fichiers sensibles
 bd.txt
+*.env
 *.env.local
 git ssh
 git ssh.pub
@@ -14,6 +15,8 @@ estimermesaidesapp/
 
 # Claude Code (paramètres locaux)
 .claude/
+.cursor/
+.kiro/
 
 # Dépendances
 node_modules/

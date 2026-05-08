@@ -4,6 +4,8 @@ import ExcelJS from 'exceljs'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
+import { publishEvent } from '../services/pusherService.js'
+import logger from '../lib/logger.js'
 
 export const enregistrementsRouter = Router()
 
@@ -19,6 +21,11 @@ const createEnregistrementSchema = z.object({
       valeur: z.string(),
     })
   ),
+})
+
+// Task 36.3 — Schema for updating an enregistrement
+const updateEnregistrementSchema = z.object({
+  langueUtilisee: z.enum(['fr', 'es', 'en']).optional(),
 })
 
 const listQuerySchema = z.object({
@@ -42,7 +49,7 @@ function handlePrismaError(err, res) {
       error: { code: 'NOT_FOUND', message: 'Enregistrement introuvable' },
     })
   }
-  console.error('[ENREGISTREMENTS ERROR]', err)
+  logger.error({ message: '[ENREGISTREMENTS ERROR]', error: err.message, code: err.code })
   return res.status(500).json({
     success: false,
     error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },
@@ -54,7 +61,7 @@ function handlePrismaError(err, res) {
  * AdminBorne can only see enregistrements for their own bornes.
  */
 async function buildWhereClause(user, filters) {
-  const where = {}
+  const where = { deletedAt: null }
 
   if (filters.borneId) where.borneId = filters.borneId
   if (filters.formulaireId) where.formulaireId = filters.formulaireId
@@ -110,11 +117,18 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
   }
 
   try {
+    // Task 37.8 — Stamp formulaireVersion at submission time (ADR-5)
+    const formulaire = await prisma.formulaire.findUnique({
+      where: { id: formulaireId },
+      select: { version: true },
+    })
+
     const enregistrement = await prisma.enregistrement.create({
       data: {
         borneId,
         formulaireId,
         langueUtilisee,
+        formulaireVersion: formulaire?.version ?? '1.0.0',
         reponses: {
           create: reponses.map(({ questionId, valeur }) => ({ questionId, valeur })),
         },
@@ -126,6 +140,18 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
     await prisma.partageJob.create({
       data: { enregistrementId: enregistrement.id },
     })
+
+    // Task 13b.1 — Publish Pusher event after successful creation (ADR-5)
+    try {
+      await publishEvent('admin-notifications', 'new-enregistrement', {
+        enregistrementId: enregistrement.id,
+        borneId: enregistrement.borneId,
+        formulaireId: enregistrement.formulaireId,
+        createdAt: enregistrement.createdAt,
+      })
+    } catch (_pusherErr) {
+      // Pusher failure must not affect the 201 response
+    }
 
     return res.status(201).json({ success: true, data: enregistrement })
   } catch (err) {
@@ -212,7 +238,19 @@ enregistrementsRouter.get('/export', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMI
     for (const enr of enregistrements) {
       const repMap = {}
       for (const rep of enr.reponses) {
-        repMap[rep.questionId] = rep.valeur
+        // Task 36.6 — Handle options_multiples: convert JSON array string to comma-separated
+        let valeur = rep.valeur
+        if (valeur && valeur.startsWith('[')) {
+          try {
+            const parsedVal = JSON.parse(valeur)
+            if (Array.isArray(parsedVal)) {
+              valeur = parsedVal.join(', ')
+            }
+          } catch (_e) {
+            // Not valid JSON — keep original value
+          }
+        }
+        repMap[rep.questionId] = valeur
       }
 
       const row = {
@@ -243,7 +281,7 @@ enregistrementsRouter.get('/export', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMI
     await workbook.xlsx.write(res)
     res.end()
   } catch (err) {
-    console.error('[EXPORT ERROR]', err)
+    logger.error({ message: '[EXPORT ERROR]', error: err.message })
     return res.status(500).json({
       success: false,
       error: { code: 'INTERNAL_ERROR', message: 'Erreur lors de la génération du fichier Excel' },
@@ -298,7 +336,7 @@ enregistrementsRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORN
 enregistrementsRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
   try {
     const enregistrement = await prisma.enregistrement.findUniqueOrThrow({
-      where: { id: req.params.id },
+      where: { id: req.params.id, deletedAt: null },
       include: {
         borne: { select: { id: true, idBorne: true, adresse: true, adminBorneId: true } },
         formulaire: { select: { id: true, label: true, version: true } },
@@ -319,6 +357,44 @@ enregistrementsRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_B
       })
     }
 
+    return res.json({ success: true, data: enregistrement })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── PUT /api/enregistrements/:id ─────────────────────────────────────────────
+// Task 36.3 — Modify enregistrement (SuperAdmin only)
+
+enregistrementsRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = updateEnregistrementSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Données invalides', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const enregistrement = await prisma.enregistrement.update({
+      where: { id: req.params.id, deletedAt: null },
+      data: parsed.data,
+    })
+    return res.json({ success: true, data: enregistrement })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── DELETE /api/enregistrements/:id ──────────────────────────────────────────
+// Task 36.2 — Soft delete (set deletedAt) — SuperAdmin only
+
+enregistrementsRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  try {
+    const enregistrement = await prisma.enregistrement.update({
+      where: { id: req.params.id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    })
     return res.json({ success: true, data: enregistrement })
   } catch (err) {
     return handlePrismaError(err, res)

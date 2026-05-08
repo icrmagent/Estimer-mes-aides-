@@ -90,31 +90,49 @@ model Borne {
   adminBorne      AdminBorne?      @relation(fields: [adminBorneId], references: [id])
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
   submissions     Submission[]
   enregistrements Enregistrement[]
 
   @@index([statut])
   @@index([adminBorneId])
+  @@index([deletedAt])
   @@map("bornes")
 }
 
 model Formulaire {
-  id                   String           @id @default(uuid())
+  id                   String               @id @default(uuid())
   label                String
-  version              String           @default("1.0.0")
-  statut               String           @default("brouillon")
-  dureeRetourAccueil   Int              @default(30)
-  annulationInactivite Int              @default(120)
+  version              String               @default("1.0.0")
+  statut               String               @default("brouillon")
+  dureeRetourAccueil   Int                  @default(30)
+  annulationInactivite Int                  @default(120)
   pageDebutConfig      Json
   pageFinConfig        Json
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  deletedAt            DateTime?
   questions            Question[]
   bornes               Borne[]
   enregistrements      Enregistrement[]
+  versions             FormulaireVersion[]
 
   @@index([statut])
+  @@index([deletedAt])
   @@map("formulaires")
+}
+
+model FormulaireVersion {
+  id           String     @id @default(uuid())
+  formulaireId String
+  version      String     // semver e.g. "2.1.0"
+  snapshot     Json       // full formulaire JSON at this version
+  changedBy    String     // superAdminId
+  createdAt    DateTime   @default(now())
+  formulaire   Formulaire @relation(fields: [formulaireId], references: [id])
+
+  @@index([formulaireId, createdAt])
+  @@map("formulaire_versions")
 }
 
 model Question {
@@ -136,24 +154,28 @@ model Question {
 }
 
 model Enregistrement {
-  id             String                  @id @default(uuid())
-  borneId        String
-  borne          Borne                   @relation(fields: [borneId], references: [id])
-  formulaireId   String
-  formulaire     Formulaire              @relation(fields: [formulaireId], references: [id])
-  langueUtilisee String                  @default("fr")
-  statutPartage  String                  @default("en_attente")
-  tentatives     Int                     @default(0)
-  derniereErreur String?
-  partageAt      DateTime?
-  submissionId   String?                 @unique
-  submission     Submission?             @relation(fields: [submissionId], references: [id])
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  reponses       EnregistrementReponse[]
+  id                 String                  @id @default(uuid())
+  borneId            String
+  borne              Borne                   @relation(fields: [borneId], references: [id])
+  formulaireId       String
+  formulaire         Formulaire              @relation(fields: [formulaireId], references: [id])
+  formulaireVersion  String                  @default("1.0.0")
+  langueUtilisee     String                  @default("fr")
+  statutPartage      String                  @default("en_attente")
+  tentatives         Int                     @default(0)
+  derniereErreur     String?
+  partageAt          DateTime?
+  submissionId       String?                 @unique
+  submission         Submission?             @relation(fields: [submissionId], references: [id])
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  deletedAt          DateTime?
+  reponses           EnregistrementReponse[]
 
+  @@index([createdAt])
   @@index([borneId, createdAt])
   @@index([statutPartage])
+  @@index([deletedAt])
   @@map("enregistrements")
 }
 
@@ -164,6 +186,7 @@ model EnregistrementReponse {
   questionId       String
   question         Question       @relation(fields: [questionId], references: [id])
   valeur           String
+  legacyFieldId    Boolean        @default(false) // true = fieldId not in approved CRM list (ADR-7)
 
   @@index([enregistrementId])
   @@map("enregistrement_reponses")
@@ -181,4 +204,45 @@ model PartageJob {
 
   @@index([statut, prochainEssai])
   @@map("partage_jobs")
+}
+
+// ─── Security models ──────────────────────────────────────────────────────────
+
+// Refresh tokens (DB-persisted for rotation/revocation)
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String
+  userType  String    // 'superadmin' | 'adminborne'
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, userType])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// JWT blacklist — fast-path check for revoked access tokens
+model RevokedToken {
+  id        String   @id @default(uuid())
+  jti       String   @unique
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@map("revoked_tokens")
+}
+
+// Brute force protection — DB fallback when Redis is unavailable (ADR-3)
+model LoginAttempt {
+  id          String    @id @default(uuid())
+  ip          String    @unique
+  attempts    Int       @default(0)
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ip])
+  @@index([lockedUntil])
+  @@map("login_attempts")
 }

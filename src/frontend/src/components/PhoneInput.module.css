@@ -23,9 +23,9 @@
   flex-shrink: 0;
 }
 
-.trigger:hover  { border-color: var(--c-primary, #5c2dd3); }
-.triggerOpen    { border-color: var(--c-primary, #5c2dd3) !important;
-                  box-shadow: 0 0 0 3px var(--c-primary-muted, rgba(92,45,211,.12)); }
+.trigger:hover  { border-color: var(--c-primary, #5B2D8E); }
+.triggerOpen    { border-color: var(--c-primary, #5B2D8E) !important;
+                  box-shadow: 0 0 0 3px var(--c-primary-muted, rgba(91,45,142,.12)); }
 
 .flag {
   width: 24px;
@@ -46,12 +46,12 @@
 .triggerDial {
   font-size: 13px;
   font-weight: 800;
-  color: var(--c-primary, #5c2dd3);
+  color: var(--c-primary, #5B2D8E);
 }
 
 .caret {
   font-size: 10px;
-  color: var(--c-primary, #5c2dd3);
+  color: var(--c-primary, #5B2D8E);
   margin-left: 1px;
 }
 
@@ -73,8 +73,8 @@
 }
 
 .input:focus {
-  border-color: var(--c-primary, #5c2dd3);
-  box-shadow: 0 0 0 3px var(--c-primary-muted, rgba(92,45,211,.12));
+  border-color: var(--c-primary, #5B2D8E);
+  box-shadow: 0 0 0 3px var(--c-primary-muted, rgba(91,45,142,.12));
 }
 
 .input::placeholder {
@@ -89,7 +89,7 @@
   background: var(--c-surface, #fff);
   border: 1.5px solid var(--c-border, #e2dff0);
   border-radius: var(--radius-lg, 16px);
-  box-shadow: 0 8px 32px rgba(92,45,211,.14), 0 2px 8px rgba(0,0,0,.07);
+  box-shadow: 0 8px 32px rgba(91,45,142,.14), 0 2px 8px rgba(0,0,0,.07);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -137,7 +137,7 @@
 
 .searchClear:hover {
   background: var(--c-primary-bg, #f5f0ff);
-  color: var(--c-primary, #5c2dd3);
+  color: var(--c-primary, #5B2D8E);
 }
 
 /* ── Liste des pays ─────────────────────────────────────────── */
@@ -204,9 +204,9 @@
   margin-left: auto;
 }
 
-.optionOn .isoCode    { color: var(--c-primary, #5c2dd3); }
-.optionOn .dialCode   { color: var(--c-primary, #5c2dd3); font-weight: 800; }
-.optionOn .countryName{ color: var(--c-primary, #5c2dd3); }
+.optionOn .isoCode    { color: var(--c-primary, #5B2D8E); }
+.optionOn .dialCode   { color: var(--c-primary, #5B2D8E); font-weight: 800; }
+.optionOn .countryName{ color: var(--c-primary, #5B2D8E); }
 
 .empty {
   padding: 16px 14px;

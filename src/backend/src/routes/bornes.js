@@ -3,6 +3,9 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
+import { checkBorneOwnership } from '../middleware/borneOwnership.js'
+import logger from '../lib/logger.js'
+import { cacheService } from '../services/cacheService.js'
 
 export const bornesRouter = Router()
 
@@ -51,7 +54,7 @@ function handlePrismaError(err, res) {
       error: { code: 'NOT_FOUND', message: 'Borne introuvable' },
     })
   }
-  console.error('[BORNES ERROR]', err)
+  logger.error({ message: '[BORNES ERROR]', error: err.message, code: err.code })
   return res.status(500).json({
     success: false,
     error: { code: 'INTERNAL_ERROR', message: 'Erreur serveur' },
@@ -70,7 +73,7 @@ bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =>
   }
 
   const { statut, adminBorneId, formulaireId, page, limit } = parsed.data
-  const where = {}
+  const where = { deletedAt: null }
   if (statut) where.statut = statut
   if (adminBorneId) where.adminBorneId = adminBorneId
   if (formulaireId) where.formulaireId = formulaireId
@@ -117,25 +120,17 @@ bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =
 
 // ─── GET /api/bornes/:id ──────────────────────────────────────────────────────
 
-bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
+bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
   const { id } = req.params
 
   try {
     const borne = await prisma.borne.findUniqueOrThrow({
-      where: { id },
+      where: { id, deletedAt: null },
       include: {
         adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
         formulaire: { select: { id: true, label: true, version: true, statut: true } },
       },
     })
-
-    // AdminBorne can only see their own bornes
-    if (req.user.role === 'ADMIN_BORNE' && borne.adminBorneId !== req.user.sub) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Accès refusé' },
-      })
-    }
 
     return res.json({ success: true, data: borne })
   } catch (err) {
@@ -144,8 +139,10 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), a
 })
 
 // ─── PUT /api/bornes/:id ──────────────────────────────────────────────────────
+// Task 26.7 — Invalidate cache on PUT
+// Task 36.9 — Validate formulaire is "publie" before allowing borne assignment
 
-bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
   const parsed = updateBorneSchema.safeParse(req.body)
   if (!parsed.success) {
     return res.status(400).json({
@@ -154,11 +151,32 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res)
     })
   }
 
+  // Task 36.9 — If formulaireId is being set, verify the formulaire is published
+  if (parsed.data.formulaireId) {
+    const formulaire = await prisma.formulaire.findUnique({
+      where: { id: parsed.data.formulaireId },
+      select: { id: true, statut: true },
+    })
+    if (!formulaire || formulaire.statut !== 'publie') {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'FORMULAIRE_NOT_PUBLIE',
+          message: 'Le formulaire doit être publié pour être assigné à une borne',
+        },
+      })
+    }
+  }
+
   try {
     const borne = await prisma.borne.update({
       where: { id: req.params.id },
       data: parsed.data,
     })
+
+    // Invalidate borne config cache (task 26.7)
+    await cacheService.delete(`borne-config:${req.params.id}`)
+
     return res.json({ success: true, data: borne })
   } catch (err) {
     return handlePrismaError(err, res)
@@ -166,6 +184,7 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res)
 })
 
 // ─── PATCH /api/bornes/:id/statut ─────────────────────────────────────────────
+// Task 26.7 — Invalidate cache on PATCH statut
 
 bornesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const parsed = updateStatutSchema.safeParse(req.body)
@@ -180,6 +199,25 @@ bornesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
     const borne = await prisma.borne.update({
       where: { id: req.params.id },
       data: { statut: parsed.data.statut },
+    })
+
+    // Invalidate borne config cache (task 26.7)
+    await cacheService.delete(`borne-config:${req.params.id}`)
+
+    return res.json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── DELETE /api/bornes/:id ───────────────────────────────────────────────────
+// Task 10.11 — Soft delete: set deletedAt instead of prisma.delete()
+
+bornesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  try {
+    const borne = await prisma.borne.update({
+      where: { id: req.params.id, deletedAt: null },
+      data: { deletedAt: new Date() },
     })
     return res.json({ success: true, data: borne })
   } catch (err) {

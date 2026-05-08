@@ -6,8 +6,8 @@ export function PhoneInputDemo() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0ff', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-      <div style={{ background: '#fff', borderRadius: 20, padding: 32, maxWidth: 420, width: '100%', boxShadow: '0 8px 32px rgba(92,45,211,.12)' }}>
-        <h2 style={{ fontFamily: 'Nunito, sans-serif', color: '#5c2dd3', marginTop: 0, marginBottom: 24 }}>
+      <div style={{ background: '#fff', borderRadius: 20, padding: 32, maxWidth: 420, width: '100%', boxShadow: '0 8px 32px rgba(91,45,142,.12)' }}>
+        <h2 style={{ fontFamily: 'Nunito, sans-serif', color: '#5B2D8E', marginTop: 0, marginBottom: 24 }}>
           Démo — PhoneInput
         </h2>
 
@@ -24,7 +24,7 @@ export function PhoneInputDemo() {
 
         {value && (
           <p style={{ fontFamily: 'Nunito, sans-serif', fontSize: 13, color: '#8b7dae', marginTop: 12 }}>
-            Valeur : <strong style={{ color: '#5c2dd3' }}>{value}</strong>
+            Valeur : <strong style={{ color: '#5B2D8E' }}>{value}</strong>
           </p>
         )}
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
@@ -15,14 +15,41 @@ export default function AdminBornesListPage() {
   const [admins, setAdmins] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [tempPasswordAlert, setTempPasswordAlert] = useState(null) // { adminId, password }
+  const [tempPasswordAlert, setTempPasswordAlert] = useState(null)
 
-  useEffect(() => {
-    api.get('/api/admin-bornes')
+  const [filters, setFilters] = useState({
+    search: '',
+    actif: '',
+  })
+
+  const fetchAdmins = useCallback((f = filters) => {
+    setLoading(true)
+    const params = {}
+    if (f.search) params.search = f.search
+    if (f.actif !== '') params.actif = f.actif
+
+    api.get('/api/admin-bornes', { params })
       .then(res => setAdmins(res.data.adminBornes || res.data.data || res.data || []))
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [filters])
+
+  useEffect(() => { fetchAdmins() }, [])
+
+  function handleFilterChange(field, value) {
+    setFilters(prev => ({ ...prev, [field]: value }))
+  }
+
+  function handleSearch(e) {
+    e.preventDefault()
+    fetchAdmins(filters)
+  }
+
+  function handleReset() {
+    const reset = { search: '', actif: '' }
+    setFilters(reset)
+    fetchAdmins(reset)
+  }
 
   async function toggleActif(admin) {
     const newActif = !admin.actif
@@ -46,6 +73,9 @@ export default function AdminBornesListPage() {
       setError(err.response?.data?.error || 'Erreur lors de la réinitialisation')
     }
   }
+
+  const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent'
+  const inputStyle = { minHeight: '40px', fontSize: '14px' }
 
   return (
     <AppLayout>
@@ -94,6 +124,51 @@ export default function AdminBornesListPage() {
             </div>
           </div>
         )}
+
+        {/* Search & Filter */}
+        <form onSubmit={handleSearch} className="bg-white rounded-2xl shadow-sm p-4">
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Recherche</label>
+              <input
+                type="text"
+                value={filters.search}
+                onChange={e => handleFilterChange('search', e.target.value)}
+                className={inputClass + ' w-full'}
+                style={inputStyle}
+                placeholder="Nom, prénom, email, raison sociale..."
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Statut</label>
+              <select
+                value={filters.actif}
+                onChange={e => handleFilterChange('actif', e.target.value)}
+                className={inputClass}
+                style={inputStyle}
+              >
+                <option value="">Tous</option>
+                <option value="true">Actif</option>
+                <option value="false">Inactif</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-semibold rounded-xl text-white"
+              style={{ background: '#5B2D8E', minHeight: '40px' }}
+            >
+              Filtrer
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
+              style={{ minHeight: '40px' }}
+            >
+              Réinitialiser
+            </button>
+          </div>
+        </form>
 
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
           {loading ? (
