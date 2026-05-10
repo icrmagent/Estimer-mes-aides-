@@ -32,6 +32,7 @@ const questionSchema = z.object({
     .optional()
     .nullable(),
   orderPage: z.number().int().min(1),
+  ordreDansPage: z.number().int().min(0).optional().default(0),
   obligatoire: z.boolean().default(false),
   paragrapheInfo: z
     .object({
@@ -41,6 +42,9 @@ const questionSchema = z.object({
     })
     .optional()
     .nullable(),
+  crmFieldIds: z.array(z.number()).optional().nullable(),
+  categorieId: z.string().uuid().optional().nullable(),
+  sousCategorieId: z.string().uuid().optional().nullable(),
 })
 
 const reorderSchema = z.object({
@@ -86,7 +90,15 @@ async function getFormulaireOrFail(formulaireId, res) {
 async function incrementMinorVersionAndSnapshot(formulaireId, changedBy) {
   const current = await prisma.formulaire.findUnique({
     where: { id: formulaireId },
-    include: { questions: { orderBy: { orderPage: 'asc' } } },
+    include: {
+      questions: {
+        orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+        include: {
+          categorie: true,
+          sousCategorie: true,
+        },
+      },
+    },
   })
   if (!current) return
 
@@ -94,7 +106,15 @@ async function incrementMinorVersionAndSnapshot(formulaireId, changedBy) {
   const updated = await prisma.formulaire.update({
     where: { id: formulaireId },
     data: { version: newVersion },
-    include: { questions: { orderBy: { orderPage: 'asc' } } },
+    include: {
+      questions: {
+        orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+        include: {
+          categorie: true,
+          sousCategorie: true,
+        },
+      },
+    },
   })
 
   await prisma.formulaireVersion.create({
@@ -115,7 +135,11 @@ questionsRouter.get('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), asy
 
   const questions = await prisma.question.findMany({
     where: { formulaireId: req.params.id },
-    orderBy: { orderPage: 'asc' },
+    orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+    include: {
+      categorie: true,
+      sousCategorie: true,
+    },
   })
 
   return res.json({ success: true, data: questions })
@@ -136,9 +160,9 @@ questionsRouter.post('/:id/questions', jwtAuthV2, requireRole('SUPER_ADMIN'), as
     })
   }
 
-  // Validate CRM field ID if provided (task 8.4)
-  if (parsed.data.crmFieldId !== undefined && parsed.data.crmFieldId !== null) {
-    const invalidIds = validateCRMFieldIds([parsed.data.crmFieldId])
+  // Validate CRM field IDs if provided (task 8.4)
+  if (parsed.data.crmFieldIds && parsed.data.crmFieldIds.length > 0) {
+    const invalidIds = validateCRMFieldIds(parsed.data.crmFieldIds)
     if (invalidIds.length > 0) {
       return res.status(400).json({
         success: false,
@@ -179,9 +203,9 @@ questionsRouter.put('/:id/questions/:qid', jwtAuthV2, requireRole('SUPER_ADMIN')
     })
   }
 
-  // Validate CRM field ID if provided in the update (task 8.5)
-  if (parsed.data.crmFieldId !== undefined && parsed.data.crmFieldId !== null) {
-    const invalidIds = validateCRMFieldIds([parsed.data.crmFieldId])
+  // Validate CRM field IDs if provided in the update (task 8.5)
+  if (parsed.data.crmFieldIds && parsed.data.crmFieldIds.length > 0) {
+    const invalidIds = validateCRMFieldIds(parsed.data.crmFieldIds)
     if (invalidIds.length > 0) {
       return res.status(400).json({
         success: false,
@@ -266,7 +290,11 @@ questionsRouter.patch('/:id/questions/reorder', jwtAuthV2, requireRole('SUPER_AD
 
     const questions = await prisma.question.findMany({
       where: { formulaireId: req.params.id },
-      orderBy: { orderPage: 'asc' },
+      orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+      include: {
+        categorie: true,
+        sousCategorie: true,
+      },
     })
 
     return res.json({ success: true, data: questions })

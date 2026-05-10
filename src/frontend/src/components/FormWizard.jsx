@@ -7,6 +7,7 @@ import StepRenderer from './StepRenderer.jsx'
 import StepBadge from './StepBadge.jsx'
 import LanguageSelector from './LanguageSelector.jsx'
 import ExitButton from './ExitButton.jsx'
+import ilaLogo from '../assets/logo.png'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
@@ -30,7 +31,6 @@ export default function FormWizard() {
     currentStep,
     nextStep,
     prevStep,
-    reset,
     setResult,
     setSubmitting,
     submitting,
@@ -114,7 +114,7 @@ export default function FormWizard() {
   const isLast = currentStep === totalSteps - 1
 
   return (
-    <div className="form-wizard min-h-screen flex flex-col" style={{ background: '#f5f6fa' }}>
+    <div className="form-wizard min-h-screen flex flex-col">
       {/* Barre info borne */}
       <BorneInfoBar />
 
@@ -130,8 +130,8 @@ export default function FormWizard() {
       <StepBadge current={currentStep + 1} total={totalSteps} />
 
       {/* Rendu de l'étape courante */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 pb-32">
-        <div className="max-w-2xl mx-auto">
+      <div className="form-wizard-scroll">
+        <div className="form-wizard-panel">
           <StepRenderer
             question={currentQuestion}
             value={values[currentQuestion.id]}
@@ -145,20 +145,13 @@ export default function FormWizard() {
 
       {/* Barre de navigation */}
       <div
-        className="fixed bottom-0 left-0 right-0 flex items-center gap-3 px-4 py-4 bg-white border-t border-gray-200"
+        className="form-wizard-nav"
         style={{ paddingBottom: 'max(16px, env(safe-area-inset-bottom))' }}
       >
         {currentStep > 0 && (
           <button
             onClick={prevStep}
-            className="flex items-center justify-center rounded-2xl border-2 font-bold text-base transition-all active:scale-95"
-            style={{
-              minHeight: '52px',
-              minWidth: '52px',
-              borderColor: '#5B2D8E',
-              color: '#5B2D8E',
-              fontSize: '20px',
-            }}
+            className="form-wizard-back"
             aria-label="Question précédente"
           >
             ‹
@@ -168,18 +161,11 @@ export default function FormWizard() {
         <button
           onClick={handleNext}
           disabled={!isStepValid() || submitting}
-          className="flex-1 text-white font-bold rounded-2xl py-4 text-base transition-all active:scale-95 disabled:opacity-50"
-          style={{
-            background: '#5B2D8E',
-            minHeight: '52px',
-            fontSize: '16px',
-          }}
+          className="form-wizard-next"
         >
           {submitting ? 'Envoi...' : isLast ? 'Terminer' : 'Suivant →'}
         </button>
       </div>
-
-      <ExitButton />
     </div>
   )
 }
@@ -188,23 +174,40 @@ function BorneInfoBar() {
   const { borne, langue } = useBorne()
   if (!borne) return null
   const labels = {
-    fr: { master: 'Master Filiale', regie: 'régie', installateur: 'installateur' },
-    es: { master: 'Filial Master', regie: 'agencia', installateur: 'instalador' },
-    en: { master: 'Master Branch', regie: 'agency', installateur: 'installer' },
+    fr: { master: 'Master Filiale', regie: 'Régie', installateur: 'Installateur' },
+    es: { master: 'Filial Master', regie: 'Agencia', installateur: 'Instalador' },
+    en: { master: 'Master Branch', regie: 'Agency', installateur: 'Installer' },
   }
   const l = labels[langue] || labels.fr
   return (
     <div
-      className="flex items-center justify-between px-4 py-2 text-white text-xs font-medium"
-      style={{ background: '#1A1A2E', minHeight: '36px' }}
+      className="flex items-center justify-between px-10 py-2 text-xs font-bold uppercase tracking-wide w-full"
+      style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '40px' }}
     >
-      <span className="font-bold">ila26</span>
-      <span className="truncate mx-4">
-        {borne.commercant && `${l.master}: ${borne.commercant}`}
-        {borne.regie && ` · ${l.regie}: ${borne.regie}`}
-        {borne.installateur && ` · ${l.installateur}: ${borne.installateur}`}
-      </span>
-      <span className="text-white/60 shrink-0">{borne.adresse}</span>
+      {/* Logo — top left */}
+      <div className="flex items-center" style={{ width: '120px' }}>
+        <img src={ilaLogo} alt="ila 26" style={{ height: '24px', width: 'auto', objectFit: 'contain', marginLeft: '25px' }} />
+      </div>
+
+      {/* Center: Info Parts */}
+      <div className="flex-1 text-center text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-6">
+        {borne.commercant && <span>{l.master}: {borne.commercant}</span>}
+        {borne.regie && <span>{l.regie}: {borne.regie}</span>}
+        {borne.installateur && <span>{l.installateur}: {borne.installateur}</span>}
+      </div>
+
+      {/* Right: ExitButton */}
+      <div className="flex items-center justify-end" style={{ width: '120px' }}>
+        <ExitButton 
+          className="text-white hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer flex items-center justify-center" 
+          aria-label="Quitter le mode kiosque"
+          style={{ minHeight: 'auto', minWidth: 'auto', padding: '4px', marginRight: '20px' }}
+        >
+          <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+        </ExitButton>
+      </div>
     </div>
   )
 }

@@ -37,7 +37,21 @@ const emptyQuestion = () => ({
   paragrapheInfo: { fr: '', es: '', en: '' },
   obligatoire: true,
   orderPage: 1,
+  categorieId: '',
+  sousCategorieId: '',
 })
+
+function normalizeOptions(opts) {
+  if (!Array.isArray(opts)) return []
+  return opts.map(opt => {
+    if (opt && typeof opt === 'object' && opt.id && opt.label) return opt
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15)
+    return { id, label: opt.label || opt }
+  })
+}
+
 
 export default function FormulaireEditorPage() {
   const { id } = useParams()
@@ -45,6 +59,7 @@ export default function FormulaireEditorPage() {
 
   const [formulaire, setFormulaire] = useState(null)
   const [questions, setQuestions] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -66,9 +81,10 @@ export default function FormulaireEditorPage() {
     Promise.all([
       api.get(`/api/formulaires/${id}`),
       api.get(`/api/formulaires/${id}/questions`),
+      api.get('/api/categories-questions').catch(() => ({ data: { data: [] } })),
     ])
-      .then(([fRes, qRes]) => {
-        const f = fRes.data.formulaire || fRes.data
+      .then(([fRes, qRes, cRes]) => {
+        const f = fRes.data.formulaire || fRes.data.data || fRes.data
         setFormulaire(f)
         setMeta({
           label: f.label || '',
@@ -79,8 +95,13 @@ export default function FormulaireEditorPage() {
         })
         const qs = qRes.data.questions || qRes.data.data || qRes.data || []
         setQuestions(qs.sort((a, b) => (a.orderPage || 0) - (b.orderPage || 0)))
+        const cats = cRes.data.categories || cRes.data.data || cRes.data || []
+        setCategories(Array.isArray(cats) ? cats : [])
       })
-      .catch(() => setError('Formulaire introuvable'))
+      .catch((err) => {
+        console.error(err)
+        setError('Formulaire introuvable')
+      })
       .finally(() => setLoading(false))
   }, [id])
 
@@ -91,7 +112,8 @@ export default function FormulaireEditorPage() {
       await api.put(`/api/formulaires/${id}`, meta)
       setFormulaire(prev => ({ ...prev, ...meta }))
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la sauvegarde')
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la sauvegarde'))
     } finally {
       setSaving(false)
     }
@@ -130,12 +152,13 @@ export default function FormulaireEditorPage() {
       await api.delete(`/api/formulaires/${id}/questions/${questionId}`)
       setQuestions(prev => prev.filter(q => q.id !== questionId))
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la suppression')
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la suppression'))
     }
   }
 
   function handleEditQuestion(q) {
-    setEditingQuestion({ ...q })
+    setEditingQuestion({ ...q, options: normalizeOptions(q.options) })
     setShowAddQuestion(false)
   }
 
@@ -143,12 +166,17 @@ export default function FormulaireEditorPage() {
     if (!editingQuestion) return
     setSaving(true)
     try {
-      const res = await api.put(`/api/formulaires/${id}/questions/${editingQuestion.id}`, editingQuestion)
-      const updated = res.data.question || res.data
+      const payload = {
+        ...editingQuestion,
+        options: normalizeOptions(editingQuestion.options)
+      }
+      const res = await api.put(`/api/formulaires/${id}/questions/${editingQuestion.id}`, payload)
+      const updated = res.data.question || res.data.data || res.data
       setQuestions(prev => prev.map(q => q.id === editingQuestion.id ? updated : q))
       setEditingQuestion(null)
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la sauvegarde')
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la sauvegarde'))
     } finally {
       setSaving(false)
     }
@@ -159,15 +187,17 @@ export default function FormulaireEditorPage() {
     try {
       const payload = {
         ...newQuestion,
+        options: normalizeOptions(newQuestion.options),
         orderPage: questions.length + 1,
       }
       const res = await api.post(`/api/formulaires/${id}/questions`, payload)
-      const created = res.data.question || res.data
+      const created = res.data.question || res.data.data || res.data
       setQuestions(prev => [...prev, created])
       setNewQuestion(emptyQuestion())
       setShowAddQuestion(false)
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de l\'ajout')
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de l\'ajout'))
     } finally {
       setSaving(false)
     }
@@ -371,26 +401,28 @@ export default function FormulaireEditorPage() {
 
           {/* Add question inline form */}
           {showAddQuestion && (
-            <QuestionForm
-              question={newQuestion}
-              onChange={setNewQuestion}
-              onSave={handleAddQuestion}
-              onCancel={() => setShowAddQuestion(false)}
-              saving={saving}
-              title="Nouvelle question"
-            />
+          <QuestionForm
+            question={newQuestion}
+            onChange={setNewQuestion}
+            onSave={handleAddQuestion}
+            onCancel={() => setShowAddQuestion(false)}
+            saving={saving}
+            title="Nouvelle question"
+            categories={categories}
+          />
           )}
 
           {/* Edit question inline form */}
           {editingQuestion && (
-            <QuestionForm
-              question={editingQuestion}
-              onChange={setEditingQuestion}
-              onSave={handleSaveEditQuestion}
-              onCancel={() => setEditingQuestion(null)}
-              saving={saving}
-              title="Modifier la question"
-            />
+          <QuestionForm
+            question={editingQuestion}
+            onChange={setEditingQuestion}
+            onSave={handleSaveEditQuestion}
+            onCancel={() => setEditingQuestion(null)}
+            saving={saving}
+            title="Modifier la question"
+            categories={categories}
+          />
           )}
         </div>
       </div>
@@ -398,10 +430,12 @@ export default function FormulaireEditorPage() {
   )
 }
 
-function QuestionForm({ question, onChange, onSave, onCancel, saving, title }) {
+function QuestionForm({ question, onChange, onSave, onCancel, saving, title, categories = [] }) {
   const inputClass = 'w-full border border-gray-300 rounded-xl px-4 py-3 text-base focus:outline-none focus:ring-2 focus:border-transparent'
   const inputStyle = { minHeight: '48px', fontSize: '16px' }
   const needsOptions = NEEDS_OPTIONS.includes(question.typeOption)
+  const selectedCategory = categories.find(cat => cat.id === question.categorieId)
+  const sousCategories = selectedCategory?.sousCategories || []
 
   return (
     <div className="border-2 border-dashed rounded-2xl p-5 space-y-4" style={{ borderColor: '#5B2D8E' }}>
@@ -413,6 +447,38 @@ function QuestionForm({ question, onChange, onSave, onCancel, saving, title }) {
         onChange={v => onChange(q => ({ ...q, libelleQuestion: v }))}
         required
       />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Catégorie</label>
+          <select
+            value={question.categorieId || ''}
+            onChange={e => onChange(q => ({ ...q, categorieId: e.target.value, sousCategorieId: '' }))}
+            className={inputClass}
+            style={inputStyle}
+          >
+            <option value="">Aucune catégorie</option>
+            {categories.map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.nom}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-1">Sous-catégorie</label>
+          <select
+            value={question.sousCategorieId || ''}
+            onChange={e => onChange(q => ({ ...q, sousCategorieId: e.target.value }))}
+            className={inputClass}
+            style={inputStyle}
+            disabled={!question.categorieId}
+          >
+            <option value="">Aucune sous-catégorie</option>
+            {sousCategories.map(sub => (
+              <option key={sub.id} value={sub.id}>{sub.nom}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>

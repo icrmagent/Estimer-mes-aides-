@@ -83,6 +83,7 @@ model Borne {
   commercant      String?
   regie           String?
   installateur    String?
+  canalTransmission String?
   statut          String           @default("actif")
   formulaireId    String?
   formulaire      Formulaire?      @relation(fields: [formulaireId], references: [id])
@@ -93,6 +94,7 @@ model Borne {
   deletedAt       DateTime?
   submissions     Submission[]
   enregistrements Enregistrement[]
+  canaux          Canal[]
 
   @@index([statut])
   @@index([adminBorneId])
@@ -143,14 +145,47 @@ model Question {
   typeOption      String
   options         Json?
   orderPage       Int
+  ordreDansPage   Int                     @default(0)
   obligatoire     Boolean                 @default(false)
   paragrapheInfo  Json?
+  crmFieldIds     Json?
+  categorieId     String?
+  categorie       CategorieQuestion?      @relation(fields: [categorieId], references: [id])
+  sousCategorieId String?
+  sousCategorie   SousCategorieQuestion?  @relation(fields: [sousCategorieId], references: [id])
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
   reponses        EnregistrementReponse[]
 
   @@index([formulaireId, orderPage])
+  @@index([formulaireId, orderPage, ordreDansPage])
+  @@index([categorieId])
+  @@index([sousCategorieId])
   @@map("questions")
+}
+
+model CategorieQuestion {
+  id              String                  @id @default(uuid())
+  nom             String                  @unique
+  sousCategories  SousCategorieQuestion[]
+  questions       Question[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@map("categories_question")
+}
+
+model SousCategorieQuestion {
+  id              String                  @id @default(uuid())
+  nom             String
+  categorieId     String
+  categorie       CategorieQuestion       @relation(fields: [categorieId], references: [id], onDelete: Cascade)
+  questions       Question[]
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@index([categorieId])
+  @@map("sous_categories_question")
 }
 
 model Enregistrement {
@@ -171,6 +206,7 @@ model Enregistrement {
   updatedAt          DateTime                @updatedAt
   deletedAt          DateTime?
   reponses           EnregistrementReponse[]
+  partageJobs        PartageJob[]
 
   @@index([createdAt])
   @@index([borneId, createdAt])
@@ -195,6 +231,7 @@ model EnregistrementReponse {
 model PartageJob {
   id               String    @id @default(uuid())
   enregistrementId String
+  enregistrement   Enregistrement @relation(fields: [enregistrementId], references: [id], onDelete: Cascade)
   statut           String    @default("en_attente")
   tentatives       Int       @default(0)
   prochainEssai    DateTime?
@@ -203,7 +240,26 @@ model PartageJob {
   updatedAt        DateTime  @updatedAt
 
   @@index([statut, prochainEssai])
+  @@index([enregistrementId])
   @@map("partage_jobs")
+}
+
+// ─── Canal models ────────────────────────────────────────────────────────────
+
+model Canal {
+  id          String   @id @default(uuid())
+  label       String
+  apiUrl      String
+  apiKey      String
+  token       String
+  borneId     String
+  borne       Borne    @relation(fields: [borneId], references: [id], onDelete: Cascade)
+  actif       Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([borneId])
+  @@map("canaux")
 }
 
 // ─── Security models ──────────────────────────────────────────────────────────

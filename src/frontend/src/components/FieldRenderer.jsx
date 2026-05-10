@@ -1,4 +1,3 @@
-import { useBorne } from '../context/BorneContext.jsx'
 import { t, tOptions } from '../utils/i18n.js'
 
 /**
@@ -9,70 +8,104 @@ import { t, tOptions } from '../utils/i18n.js'
 export default function FieldRenderer({ question, value, onChange, langue }) {
   const { typeOption, options } = question
   const translatedOptions = tOptions(options, langue)
+  const useCompactTwoColumns = translatedOptions.length > 0 && translatedOptions.length <= 4
 
-  const inputStyle = {
-    width: '100%',
-    border: '2px solid #e5e7eb',
-    borderRadius: '12px',
-    padding: '14px 16px',
-    fontSize: '16px',
-    fontFamily: 'inherit',
-    outline: 'none',
-    minHeight: '52px',
-    transition: 'border-color 0.15s',
-  }
+  const fieldLabel = t(question.libelleQuestion, langue)
+  const normalizedLabel = fieldLabel
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+  const renderFrame = (control) => (
+    <div className="grad-border">
+      <div className="grad-border-inner">
+        {control}
+      </div>
+    </div>
+  )
 
   switch (typeOption) {
     case 'texte_court':
-      return (
+      return renderFrame(
         <input
           type="text"
+          aria-label={fieldLabel}
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={inputStyle}
-          className="focus:border-purple-600"
+          className="pf-input"
         />
       )
 
     case 'texte_long':
-      return (
+      return renderFrame(
         <textarea
+          aria-label={fieldLabel}
           value={value || ''}
           onChange={e => onChange(e.target.value)}
           rows={4}
-          style={{ ...inputStyle, minHeight: '120px', resize: 'vertical' }}
-          className="focus:border-purple-600"
+          className="pf-input pf-textarea"
         />
       )
 
     case 'telephone':
-      return (
+      return renderFrame(
         <input
           type="tel"
+          aria-label={fieldLabel}
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={inputStyle}
-          className="focus:border-purple-600"
+          className="pf-input"
           inputMode="tel"
         />
       )
 
     case 'email':
-      return (
+      return renderFrame(
         <input
           type="email"
+          aria-label={fieldLabel}
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={inputStyle}
-          className="focus:border-purple-600"
+          className="pf-input"
           inputMode="email"
           autoCapitalize="none"
         />
       )
 
     case 'option_unique':
+      if (normalizedLabel === 'civilite') {
+        return renderFrame(
+          <div className="pf-select-wrap">
+            <select
+              aria-label={fieldLabel}
+              value={value || ''}
+              onChange={e => onChange(e.target.value)}
+              className="pf-select"
+            >
+              <option value="" disabled>Sélectionner...</option>
+              {translatedOptions.map(opt => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <span className="pf-select-arrow" aria-hidden="true">
+              <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6l4 4 4-4" stroke="url(#arrGradCivilite)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <defs>
+                  <linearGradient id="arrGradCivilite" x1="4" y1="6" x2="12" y2="10" gradientUnits="userSpaceOnUse">
+                    <stop offset="0%" stopColor="#7B5EA7" />
+                    <stop offset="100%" stopColor="#3DBFA0" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </span>
+          </div>
+        )
+      }
+
       return (
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className={`pf-option-grid${useCompactTwoColumns ? ' pf-option-grid--compact-two' : ''}`}>
           {translatedOptions.map(opt => {
             const selected = value === opt.id
             return (
@@ -80,22 +113,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
                 key={opt.id}
                 type="button"
                 onClick={() => onChange(opt.id)}
-                className="transition-all active:scale-95"
-                style={{
-                  minHeight: '52px',
-                  minWidth: '140px',
-                  padding: '12px 20px',
-                  borderRadius: '50px',
-                  border: `2px solid #5B2D8E`,
-                  background: selected ? '#5B2D8E' : 'white',
-                  color: selected ? 'white' : '#5B2D8E',
-                  fontWeight: '700',
-                  fontSize: '15px',
-                  fontFamily: 'inherit',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  lineHeight: '1.4',
-                }}
+                className={`pf-option-card${selected ? ' is-selected' : ''}`}
               >
                 {opt.label}
               </button>
@@ -107,7 +125,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
     case 'options_multiples': {
       const selected = Array.isArray(value) ? value : []
       return (
-        <div className="flex flex-wrap gap-3 justify-center">
+        <div className={`pf-option-grid${useCompactTwoColumns ? ' pf-option-grid--compact-two' : ''}`}>
           {translatedOptions.map(opt => {
             const isSelected = selected.includes(opt.id)
             return (
@@ -121,22 +139,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
                     onChange([...selected, opt.id])
                   }
                 }}
-                className="transition-all active:scale-95"
-                style={{
-                  minHeight: '52px',
-                  minWidth: '140px',
-                  padding: '12px 20px',
-                  borderRadius: '50px',
-                  border: `2px solid ${isSelected ? '#27c4e2' : '#5B2D8E'}`,
-                  background: isSelected ? '#27c4e2' : 'white',
-                  color: isSelected ? 'white' : '#5B2D8E',
-                  fontWeight: '700',
-                  fontSize: '15px',
-                  fontFamily: 'inherit',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  lineHeight: '1.4',
-                }}
+                className={`pf-option-card${isSelected ? ' is-selected' : ''}`}
               >
                 {opt.label}
               </button>
@@ -147,12 +150,13 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
     }
 
     default:
-      return (
+      return renderFrame(
         <input
           type="text"
+          aria-label={fieldLabel}
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={inputStyle}
+          className="pf-input"
         />
       )
   }

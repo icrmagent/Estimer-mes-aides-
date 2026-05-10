@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
@@ -11,11 +11,91 @@ function StatusBadge({ actif }) {
   )
 }
 
+function AdminRowActions({ admin, onResetPassword, onToggleActif, onDelete }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  return (
+    <div className="relative inline-block text-left" ref={menuRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(prev => !prev);
+        }}
+        className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors focus:outline-none"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="1"/>
+          <circle cx="12" cy="5" r="1"/>
+          <circle cx="12" cy="19" r="1"/>
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 z-50 overflow-hidden">
+          <div className="py-1">
+            <button
+              onClick={() => { setIsOpen(false); onResetPassword(admin); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"></path></svg>
+              Réinit. MDP
+            </button>
+            <button
+              onClick={() => { setIsOpen(false); onToggleActif(admin); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {admin.actif ? (
+                  <><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></>
+                ) : (
+                  <><path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/></>
+                )}
+              </svg>
+              {admin.actif ? 'Désactiver' : 'Activer'}
+            </button>
+            <Link
+              to={`/superadmin/admin-bornes/${admin.id}/edit`}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Modifier
+            </Link>
+            {(!admin.bornes || admin.bornes.length === 0) && (
+              <button
+                onClick={() => { setIsOpen(false); onDelete(admin); }}
+                className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                Supprimer
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AdminBornesListPage() {
   const [admins, setAdmins] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [tempPasswordAlert, setTempPasswordAlert] = useState(null)
+  const [confirmModal, setConfirmModal] = useState({ isOpen: false, admin: null })
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, admin: null })
 
   const [filters, setFilters] = useState({
     search: '',
@@ -34,21 +114,18 @@ export default function AdminBornesListPage() {
       .finally(() => setLoading(false))
   }, [filters])
 
-  useEffect(() => { fetchAdmins() }, [])
+  useEffect(() => {
+    const timer = setTimeout(() => fetchAdmins(), 300)
+    return () => clearTimeout(timer)
+  }, [fetchAdmins])
 
   function handleFilterChange(field, value) {
     setFilters(prev => ({ ...prev, [field]: value }))
   }
 
-  function handleSearch(e) {
-    e.preventDefault()
-    fetchAdmins(filters)
-  }
-
   function handleReset() {
     const reset = { search: '', actif: '' }
     setFilters(reset)
-    fetchAdmins(reset)
   }
 
   async function toggleActif(admin) {
@@ -61,13 +138,38 @@ export default function AdminBornesListPage() {
     }
   }
 
-  async function resetPassword(admin) {
+  function handleDelete(admin) {
+    setDeleteModal({ isOpen: true, admin })
+  }
+
+  async function confirmDelete() {
+    const admin = deleteModal.admin
+    setDeleteModal({ isOpen: false, admin: null })
+    if (!admin) return
+    try {
+      await api.delete(`/api/admin-bornes/${admin.id}`)
+      setAdmins(prev => prev.filter(a => a.id !== admin.id))
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la suppression'))
+    }
+  }
+
+  function promptResetPassword(admin) {
+    setConfirmModal({ isOpen: true, admin })
+  }
+
+  async function confirmResetPassword() {
+    const admin = confirmModal.admin
+    setConfirmModal({ isOpen: false, admin: null })
+    if (!admin) return
+
     try {
       const res = await api.post(`/api/admin-bornes/${admin.id}/reset-password`)
       setTempPasswordAlert({
         adminId: admin.id,
         adminName: `${admin.nom} ${admin.prenom}`,
-        password: res.data.temporaryPassword || res.data.password || res.data.motDePasseTemporaire,
+        password: res.data.data?.tempPassword || res.data.temporaryPassword || res.data.password || res.data.motDePasseTemporaire,
       })
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la réinitialisation')
@@ -126,7 +228,7 @@ export default function AdminBornesListPage() {
         )}
 
         {/* Search & Filter */}
-        <form onSubmit={handleSearch} className="bg-white rounded-2xl shadow-sm p-4">
+        <form onSubmit={(e) => e.preventDefault()} className="bg-white rounded-2xl shadow-sm p-4">
           <div className="flex flex-wrap gap-3 items-end">
             <div className="flex-1 min-w-[200px]">
               <label className="block text-xs font-semibold text-gray-600 mb-1">Recherche</label>
@@ -153,16 +255,9 @@ export default function AdminBornesListPage() {
               </select>
             </div>
             <button
-              type="submit"
-              className="px-4 py-2 text-sm font-semibold rounded-xl text-white"
-              style={{ background: '#5B2D8E', minHeight: '40px' }}
-            >
-              Filtrer
-            </button>
-            <button
               type="button"
               onClick={handleReset}
-              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
               style={{ minHeight: '40px' }}
             >
               Réinitialiser
@@ -170,7 +265,7 @@ export default function AdminBornesListPage() {
           </div>
         </form>
 
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           {loading ? (
             <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
           ) : admins.length === 0 ? (
@@ -179,12 +274,12 @@ export default function AdminBornesListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">Nom / Prénom</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">Nom / Prénom</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Email</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Raison sociale</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">SIRET</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
-                  <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,34 +290,13 @@ export default function AdminBornesListPage() {
                     <td className="px-4 py-3 text-gray-500">{admin.raisonSociale}</td>
                     <td className="px-4 py-3 text-gray-500 font-mono text-xs">{admin.siret}</td>
                     <td className="px-4 py-3"><StatusBadge actif={admin.actif} /></td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2 flex-wrap">
-                        <button
-                          onClick={() => resetPassword(admin)}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors"
-                          style={{ minHeight: '36px' }}
-                        >
-                          Réinit. MDP
-                        </button>
-                        <button
-                          onClick={() => toggleActif(admin)}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors"
-                          style={{
-                            minHeight: '36px',
-                            borderColor: admin.actif ? '#d1d5db' : '#5B2D8E',
-                            color: admin.actif ? '#6b7280' : '#5B2D8E',
-                          }}
-                        >
-                          {admin.actif ? 'Désactiver' : 'Activer'}
-                        </button>
-                        <Link
-                          to={`/superadmin/admin-bornes/${admin.id}/edit`}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-                          style={{ minHeight: '36px', display: 'flex', alignItems: 'center' }}
-                        >
-                          Modifier
-                        </Link>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <AdminRowActions 
+                        admin={admin} 
+                        onResetPassword={promptResetPassword} 
+                        onToggleActif={toggleActif} 
+                        onDelete={handleDelete}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -231,6 +305,62 @@ export default function AdminBornesListPage() {
           )}
         </div>
       </div>
+
+      {/* Modal de confirmation */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Réinitialiser le mot de passe</h3>
+            <p className="text-gray-600 text-sm mb-6">
+              Voulez-vous vraiment réinitialiser le mot de passe de <span className="font-semibold text-gray-800">{confirmModal.admin?.prenom} {confirmModal.admin?.nom}</span> ?
+              <br/><br/>
+              L'ancien mot de passe ne fonctionnera plus et vous devrez lui communiquer le nouveau mot de passe temporaire.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setConfirmModal({ isOpen: false, admin: null })}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmResetPassword}
+                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-colors shadow-sm"
+              >
+                Confirmer la réinitialisation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de confirmation de suppression */}
+      {deleteModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Supprimer l'administrateur</h3>
+            <p className="text-gray-600 text-sm mb-6">
+              Êtes-vous sûr de vouloir supprimer l'administrateur <span className="font-semibold text-gray-800">{deleteModal.admin?.prenom} {deleteModal.admin?.nom}</span> ?
+              <br/><br/>
+              Cette action est irréversible.
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setDeleteModal({ isOpen: false, admin: null })}
+                className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-sm"
+              >
+                Supprimer définitivement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }

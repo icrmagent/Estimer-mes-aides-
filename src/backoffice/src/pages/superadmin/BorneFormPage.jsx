@@ -37,7 +37,7 @@ export default function BorneFormPage() {
     if (isEdit) {
       api.get(`/api/bornes/${id}`)
         .then(res => {
-          const b = res.data.borne || res.data
+          const b = res.data.data || res.data.borne || res.data
           setForm({
             idBorne: b.idBorne || '',
             langueDefaut: b.langueDefaut || 'fr',
@@ -64,20 +64,33 @@ export default function BorneFormPage() {
     setFieldErrors({})
     setLoading(true)
     try {
+      const { idBorne, ...payload } = form
       if (isEdit) {
-        await api.put(`/api/bornes/${id}`, form)
+        await api.put(`/api/bornes/${id}`, payload)
       } else {
-        await api.post('/api/bornes', form)
+        await api.post('/api/bornes', payload)
       }
       navigate('/superadmin/bornes')
     } catch (err) {
       const data = err.response?.data
-      if (data?.errors) {
+      if (data?.error?.details?.fieldErrors) {
+        const fe = {}
+        const fieldErrors = data.error.details.fieldErrors
+        Object.keys(fieldErrors).forEach(key => {
+          fe[key] = fieldErrors[key][0]
+        })
+        setFieldErrors(fe)
+        setError(data.error.message || 'Données invalides')
+      } else if (data?.errors) {
         const fe = {}
         data.errors.forEach(e => { fe[e.field || e.path] = e.message })
         setFieldErrors(fe)
+        setError('Données invalides')
       } else {
-        setError(data?.error || 'Erreur lors de la sauvegarde')
+        const errMsg = typeof data?.error === 'string' 
+          ? data.error 
+          : (data?.error?.message || 'Erreur lors de la sauvegarde')
+        setError(errMsg)
       }
     } finally {
       setLoading(false)
@@ -106,14 +119,16 @@ export default function BorneFormPage() {
               </label>
               <input
                 type="text"
-                value={form.idBorne}
-                onChange={e => handleChange('idBorne', e.target.value)}
-                required
-                disabled={isEdit}
-                className={inputClass + (isEdit ? ' bg-gray-50 text-gray-400' : '')}
+                value={isEdit ? form.idBorne : 'Généré automatiquement'}
+                readOnly
+                disabled
+                className={`${inputClass} bg-gray-50 text-gray-500 cursor-not-allowed`}
                 style={inputStyle}
-                placeholder="ex: BORNE-001"
+                aria-describedby="id-borne-help"
               />
+              <p id="id-borne-help" className="text-xs text-gray-500 mt-1">
+                Cet identifiant est généré par le serveur et ne peut pas être modifié.
+              </p>
               {fieldErrors.idBorne && <p className="text-red-500 text-xs mt-1">{fieldErrors.idBorne}</p>}
             </div>
 

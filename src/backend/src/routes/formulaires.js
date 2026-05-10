@@ -222,7 +222,11 @@ formulairesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req,
       where: { id: req.params.id, deletedAt: null },
       include: {
         questions: {
-          orderBy: { orderPage: 'asc' },
+          orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+          include: {
+            categorie: true,
+            sousCategorie: true,
+          },
         },
       },
     })
@@ -252,7 +256,15 @@ formulairesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req,
     // Fetch current formulaire to get current version
     const current = await prisma.formulaire.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { questions: { orderBy: { orderPage: 'asc' } } },
+      include: {
+        questions: {
+          orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+          include: {
+            categorie: true,
+            sousCategorie: true,
+          },
+        },
+      },
     })
 
     // Task 37.3 — Increment patch version (unless caller explicitly sets version)
@@ -261,7 +273,15 @@ formulairesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req,
     const formulaire = await prisma.formulaire.update({
       where: { id: req.params.id },
       data: { ...parsed.data, version: newVersion },
-      include: { questions: { orderBy: { orderPage: 'asc' } } },
+      include: {
+        questions: {
+          orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+          include: {
+            categorie: true,
+            sousCategorie: true,
+          },
+        },
+      },
     })
 
     // Task 37.3 — Create version snapshot
@@ -332,7 +352,15 @@ formulairesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), as
     const updated = await prisma.formulaire.update({
       where: { id: req.params.id },
       data: { statut, version: newVersion },
-      include: { questions: { orderBy: { orderPage: 'asc' } } },
+      include: {
+        questions: {
+          orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+          include: {
+            categorie: true,
+            sousCategorie: true,
+          },
+        },
+      },
     })
 
     // Task 37.4 — Create version snapshot on publication
@@ -348,9 +376,30 @@ formulairesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), as
 
 // ─── DELETE /api/formulaires/:id ────────────────────────────────────────────
 // Task 10.10 — Soft delete: set deletedAt instead of prisma.delete()
+// Suppression possible uniquement si le statut est 'brouillon'
 
 formulairesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   try {
+    // Vérifier si le formulaire existe et s'il est en brouillon
+    const existing = await prisma.formulaire.findUnique({
+      where: { id: req.params.id, deletedAt: null },
+      select: { id: true, statut: true },
+    })
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Formulaire introuvable' },
+      })
+    }
+
+    if (existing.statut !== 'brouillon') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Seuls les formulaires en brouillon peuvent être supprimés' },
+      })
+    }
+
     const formulaire = await prisma.formulaire.update({
       where: { id: req.params.id, deletedAt: null },
       data: { deletedAt: new Date() },
@@ -405,7 +454,7 @@ formulairesRouter.post('/:id/dupliquer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
   try {
     const source = await prisma.formulaire.findUniqueOrThrow({
       where: { id: req.params.id },
-      include: { questions: { orderBy: { orderPage: 'asc' } } },
+      include: { questions: { orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }] } },
     })
 
     // Create new formulaire as brouillon, reset version to 1.0.0
@@ -424,12 +473,24 @@ formulairesRouter.post('/:id/dupliquer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
             typeOption: q.typeOption,
             options: q.options,           // Task 36.5 — includes options_multiples arrays
             orderPage: q.orderPage,
+            ordreDansPage: q.ordreDansPage,
             obligatoire: q.obligatoire,
             paragrapheInfo: q.paragrapheInfo,
+            crmFieldIds: q.crmFieldIds,
+            categorieId: q.categorieId,
+            sousCategorieId: q.sousCategorieId,
           })),
         },
       },
-      include: { questions: { orderBy: { orderPage: 'asc' } } },
+      include: {
+        questions: {
+          orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
+          include: {
+            categorie: true,
+            sousCategorie: true,
+          },
+        },
+      },
     })
 
     return res.status(201).json({ success: true, data: newFormulaire })

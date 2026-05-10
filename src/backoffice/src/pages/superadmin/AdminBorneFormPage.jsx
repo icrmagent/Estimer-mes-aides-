@@ -24,7 +24,7 @@ export default function AdminBorneFormPage() {
     if (isEdit) {
       api.get(`/api/admin-bornes/${id}`)
         .then(res => {
-          const a = res.data.adminBorne || res.data
+          const a = res.data?.data || res.data?.adminBorne || res.data
           setForm({
             nom: a.nom || '',
             prenom: a.prenom || '',
@@ -59,12 +59,24 @@ export default function AdminBorneFormPage() {
       navigate('/superadmin/admin-bornes')
     } catch (err) {
       const data = err.response?.data
-      if (data?.errors) {
+      if (data?.error?.details?.fieldErrors) {
+        const fe = {}
+        const fieldErrors = data.error.details.fieldErrors
+        Object.keys(fieldErrors).forEach(key => {
+          fe[key] = fieldErrors[key][0]
+        })
+        setFieldErrors(fe)
+        setError(data.error.message || 'Données invalides')
+      } else if (data?.errors) {
         const fe = {}
         data.errors.forEach(e => { fe[e.field || e.path] = e.message })
         setFieldErrors(fe)
+        setError('Données invalides')
       } else {
-        setError(data?.error || 'Erreur lors de la sauvegarde')
+        const errMsg = typeof data?.error === 'string' 
+          ? data.error 
+          : (data?.error?.message || 'Erreur lors de la sauvegarde')
+        setError(errMsg)
       }
     } finally {
       setLoading(false)

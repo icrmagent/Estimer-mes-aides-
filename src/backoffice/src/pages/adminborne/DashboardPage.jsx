@@ -21,8 +21,9 @@ export default function ABDashboardPage() {
   useEffect(() => {
     api.get('/api/dashboard/adminborne')
       .then(res => {
-        setData(res.data)
-        setEnAttenteCRM(res.data.enAttenteCRM || 0)
+        const payload = res.data.data || res.data
+        setData(payload)
+        setEnAttenteCRM(payload.enAttenteCRM || 0)
       })
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))

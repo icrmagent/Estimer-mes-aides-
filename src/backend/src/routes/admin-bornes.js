@@ -33,6 +33,7 @@ const updateStatutSchema = z.object({
 
 const listQuerySchema = z.object({
   actif: z.enum(['true', 'false']).optional(),
+  search: z.string().optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })
@@ -75,9 +76,17 @@ adminBornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
     })
   }
 
-  const { actif, page, limit } = parsed.data
+  const { actif, search, page, limit } = parsed.data
   const where = {}
   if (actif !== undefined) where.actif = actif === 'true'
+  if (search) {
+    where.OR = [
+      { nom: { contains: search, mode: 'insensitive' } },
+      { prenom: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+      { raisonSociale: { contains: search, mode: 'insensitive' } },
+    ]
+  }
 
   const [admins, total] = await Promise.all([
     prisma.adminBorne.findMany({
@@ -228,6 +237,39 @@ adminBornesRouter.post('/:id/reset-password', jwtAuthV2, requireRole('SUPER_ADMI
         message: 'Mot de passe temporaire généré. Communiquez-le de manière sécurisée.',
       },
     })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── DELETE /api/admin-bornes/:id ─────────────────────────────────────────────
+
+adminBornesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  try {
+    const admin = await prisma.adminBorne.findUnique({
+      where: { id: req.params.id },
+      include: { bornes: true },
+    })
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'AdminBorne introuvable' },
+      })
+    }
+
+    if (admin.bornes && admin.bornes.length > 0) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Impossible de supprimer un admin associé à une ou plusieurs bornes' },
+      })
+    }
+
+    await prisma.adminBorne.delete({
+      where: { id: req.params.id },
+    })
+
+    return res.json({ success: true, message: 'AdminBorne supprimé avec succès' })
   } catch (err) {
     return handlePrismaError(err, res)
   }

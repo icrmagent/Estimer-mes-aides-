@@ -10,7 +10,7 @@ const MODAL_TIMEOUT = 60 // secondes (R3.6 critère 32)
  * Se ferme automatiquement après 60s sans interaction (R3.6).
  * Touch target ≥ 48px.
  */
-export default function ExitButton() {
+export default function ExitButton({ className, style, children }) {
   const navigate = useNavigate()
   const [showModal, setShowModal] = useState(false)
   const [password, setPassword] = useState('')
@@ -94,19 +94,18 @@ export default function ExitButton() {
 
   return (
     <>
-      {/* Bouton Exit discret */}
+      {/* Bouton Exit */}
       <button
         onClick={openModal}
-        className="fixed bottom-4 right-4 z-40 text-white/40 text-xs font-medium rounded-xl px-3 py-2 transition-opacity hover:text-white/70"
-        style={{
+        className={className || "fixed bottom-3 right-3 z-40 text-gray-400/50 hover:text-gray-400 bg-transparent rounded-lg px-3 py-2 transition-all font-medium"}
+        style={style || {
           minHeight: '48px',
           minWidth: '48px',
-          background: 'rgba(0,0,0,0.2)',
           fontSize: '12px',
         }}
         aria-label="Quitter le mode kiosque"
       >
-        Exit
+        {children || 'Exit AdminBorne'}
       </button>
 
       {/* Modal */}

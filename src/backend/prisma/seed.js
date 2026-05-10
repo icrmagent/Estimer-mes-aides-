@@ -1,7 +1,13 @@
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const prisma = new PrismaClient()
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const frontendEnvPath = path.resolve(__dirname, '../../frontend/.env')
 
 // ─── V1 Configuration (preserved) ────────────────────────────────────────────
 // Source : docs/CONTEXT.md — Tab ID 22, Projet référence 933
@@ -339,9 +345,63 @@ const pageFinConfig = {
   },
 }
 
+// ─── V2 question taxonomy (categories + sous-categories) ─────────────────────
+// Source: table fourni pour la V2. Les questions V2 restent une question par
+// ecran/etape, et chaque etape est rattachee a sa categorie/sous-categorie.
+const questionTaxonomy = [
+  {
+    categorie: 'Informations Personnelles',
+    sousCategories: [
+      'Information Personnelle 1/3',
+      'Information Personnelle 2/3',
+      'Information Personnelle 3/3',
+    ],
+  },
+  {
+    categorie: 'Le Lieu des Travaux',
+    sousCategories: [
+      'Le lieu des travaux 1/7',
+      'Le lieu des travaux 2/7',
+      'Le lieu des travaux 3/7',
+      'Le lieu des travaux 4/7',
+      'Le lieu des travaux 5/7',
+      'Le lieu des travaux 6/7',
+      'Le lieu des travaux 7/7',
+    ],
+  },
+  {
+    categorie: 'Vos Besoins',
+    sousCategories: [
+      'Vos Besoins 1/5',
+      'Vos Besoins 2/5',
+      'Vos Besoins 3/5',
+      'Vos Besoins 4/5',
+      'Vos Besoins 5/5',
+    ],
+  },
+]
+
+const questionTaxonomyByOrderPage = {
+  1: { categorie: 'Informations Personnelles', sousCategorie: 'Information Personnelle 1/3' },
+  2: { categorie: 'Informations Personnelles', sousCategorie: 'Information Personnelle 2/3' },
+  3: { categorie: 'Informations Personnelles', sousCategorie: 'Information Personnelle 3/3' },
+  4: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 1/7' },
+  5: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 2/7' },
+  6: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 3/7' },
+  7: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 4/7' },
+  8: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 5/7' },
+  9: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 6/7' },
+  10: { categorie: 'Le Lieu des Travaux', sousCategorie: 'Le lieu des travaux 7/7' },
+  11: { categorie: 'Vos Besoins', sousCategorie: 'Vos Besoins 1/5' },
+  12: { categorie: 'Vos Besoins', sousCategorie: 'Vos Besoins 2/5' },
+  13: { categorie: 'Vos Besoins', sousCategorie: 'Vos Besoins 3/5' },
+  14: { categorie: 'Vos Besoins', sousCategorie: 'Vos Besoins 4/5' },
+  15: { categorie: 'Vos Besoins', sousCategorie: 'Vos Besoins 5/5' },
+}
+
 // ─── V2 Questions (15 étapes, trilingues) ─────────────────────────────────────
 // Chaque question correspond à une sous-catégorie CRM (source : docs/CONTEXT.md)
-const questionsV2 = [
+const legacyQuestionsV2 = [
   // Étape 1 — Sous-cat 63 — Informations personnelles (multi-champs texte)
   {
     orderPage: 1,
@@ -886,6 +946,99 @@ const questionsV2 = [
   },
 ]
 
+const FIELD_TYPE_TO_TYPE_OPTION = {
+  1: 'texte_court',
+  2: 'texte_long',
+  4: 'option_unique',
+  5: 'option_unique',
+  6: 'telephone',
+  50: 'option_unique',
+}
+
+const FIELD_TYPE_OVERRIDES = {
+  2016: 'email',
+  2299: 'option_unique',
+  2303: 'option_unique',
+  2305: 'texte_long',
+}
+
+const FIELD_LABEL_OVERRIDES = {
+  2089: 'Code Postal',
+  2300: "Accès aux combles : il existe une trappe d'accès ?",
+  2302: 'Autre type de chauffage principal',
+  2297: 'Si vos combles sont habitables, que souhaitez-vous isoler ?',
+}
+
+const FIELD_REQUIRED_OVERRIDES = {
+  2087: true,
+  2088: true,
+  2089: true,
+  2090: true,
+  2294: true,
+  2293: true,
+}
+
+const FIELD_OPTIONS_OVERRIDES = {
+  2262: ['Mr.', 'Mme'],
+  2301: ['Bois', 'Fioul', 'Gaz', 'Pompe à chaleur', 'Électrique', 'Autre'],
+}
+
+function normalizeQuestionText(text) {
+  if (!text) return ''
+  return FIELD_LABEL_OVERRIDES[text.id] || text.name || ''
+}
+
+function i18nSame(value) {
+  return { fr: value, es: value, en: value }
+}
+
+function optionId(fieldId, value, index) {
+  return `${fieldId}-${index + 1}-${String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')}`
+}
+
+function buildQuestionsV2FromFields() {
+  const questions = []
+  let orderPage = 1
+
+  for (const category of formDefinition.categories) {
+    for (const subCategory of category.subcategories) {
+      for (const field of subCategory.fields) {
+        const optionValues = FIELD_OPTIONS_OVERRIDES[field.id] || field.options?.map((option) => option.name) || []
+        const hasOptions = optionValues.length > 0
+        const typeOption = FIELD_TYPE_OVERRIDES[field.id] || (hasOptions ? 'option_unique' : FIELD_TYPE_TO_TYPE_OPTION[field.fieldtype_id] || 'texte_court')
+        const label = normalizeQuestionText(field)
+
+        questions.push({
+          orderPage,
+          ordreDansPage: field.ordre ?? 0,
+          obligatoire: FIELD_REQUIRED_OVERRIDES[field.id] ?? field.required ?? false,
+          typeOption,
+          libelleQuestion: i18nSame(label),
+          paragrapheInfo: { fr: null, es: null, en: null },
+          options: hasOptions
+            ? optionValues.map((value, index) => ({
+                id: optionId(field.id, value, index),
+                crmValue: value,
+                label: i18nSame(value),
+              }))
+            : null,
+          crmFieldIds: [field.id],
+        })
+      }
+      orderPage += 1
+    }
+  }
+
+  return questions
+}
+
+const questionsV2 = buildQuestionsV2FromFields()
+
 // ─── Valid CRM Field IDs (source of truth — Requirement 7.4) ─────────────────
 // These are the ONLY valid field IDs for CRM synchronization.
 // Never use invented IDs — they will fail during CRM sync.
@@ -897,6 +1050,25 @@ const VALID_CRM_FIELD_IDS = [
 
 // ─── V2 Primary Color (Requirement 3.4 — must be #5B2D8E, NOT #5C2DD3) ──────
 const PRIMARY_COLOR_V2 = process.env.PRIMARY_COLOR ?? '#5B2D8E'
+
+function updateFrontendBorneEnv(borneId) {
+  if (!borneId || !fs.existsSync(frontendEnvPath)) {
+    console.log(`  ⚠️  Frontend .env introuvable — configurez VITE_BORNE_ID=${borneId}`)
+    return
+  }
+
+  let envContent = fs.readFileSync(frontendEnvPath, 'utf8')
+  const nextLine = `VITE_BORNE_ID="${borneId}"`
+
+  if (envContent.includes('VITE_BORNE_ID=')) {
+    envContent = envContent.replace(/VITE_BORNE_ID=.*/, nextLine)
+  } else {
+    envContent = `${envContent.trimEnd()}\n${nextLine}\n`
+  }
+
+  fs.writeFileSync(frontendEnvPath, envContent)
+  console.log('  ✅ Frontend .env mis à jour avec le VITE_BORNE_ID de la borne demo')
+}
 
 /**
  * Validate that all CRM field IDs used in questionsV2 are in the approved list.
@@ -1012,12 +1184,160 @@ async function seedAdminBorne() {
   return adminBorne
 }
 
+async function ensureQuestionTaxonomySchema() {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "categories_question" (
+      "id" TEXT NOT NULL,
+      "nom" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "categories_question_pkey" PRIMARY KEY ("id")
+    );
+  `)
+
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "sous_categories_question" (
+      "id" TEXT NOT NULL,
+      "nom" TEXT NOT NULL,
+      "categorieId" TEXT NOT NULL,
+      "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "updatedAt" TIMESTAMP(3) NOT NULL,
+      CONSTRAINT "sous_categories_question_pkey" PRIMARY KEY ("id")
+    );
+  `)
+
+  await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "categorieId" TEXT;')
+  await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "sousCategorieId" TEXT;')
+  await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "ordreDansPage" INTEGER NOT NULL DEFAULT 0;')
+  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS "categories_question_nom_key" ON "categories_question"("nom");')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "sous_categories_question_categorieId_idx" ON "sous_categories_question"("categorieId");')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "questions_categorieId_idx" ON "questions"("categorieId");')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "questions_sousCategorieId_idx" ON "questions"("sousCategorieId");')
+  await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "questions_formulaireId_orderPage_ordreDansPage_idx" ON "questions"("formulaireId", "orderPage", "ordreDansPage");')
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'sous_categories_question_categorieId_fkey'
+      ) THEN
+        ALTER TABLE "sous_categories_question"
+        ADD CONSTRAINT "sous_categories_question_categorieId_fkey"
+        FOREIGN KEY ("categorieId") REFERENCES "categories_question"("id")
+        ON DELETE CASCADE ON UPDATE CASCADE;
+      END IF;
+    END
+    $$;
+  `)
+
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'questions_categorieId_fkey'
+      ) THEN
+        ALTER TABLE "questions"
+        ADD CONSTRAINT "questions_categorieId_fkey"
+        FOREIGN KEY ("categorieId") REFERENCES "categories_question"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'questions_sousCategorieId_fkey'
+      ) THEN
+        ALTER TABLE "questions"
+        ADD CONSTRAINT "questions_sousCategorieId_fkey"
+        FOREIGN KEY ("sousCategorieId") REFERENCES "sous_categories_question"("id")
+        ON DELETE SET NULL ON UPDATE CASCADE;
+      END IF;
+    END
+    $$;
+  `)
+}
+
+async function seedQuestionTaxonomy() {
+  console.log('  → Seeding catégories et sous-catégories V2...')
+  await ensureQuestionTaxonomySchema()
+  const taxonomyByName = new Map()
+
+  for (const categoryData of questionTaxonomy) {
+    const categorie = await prisma.categorieQuestion.upsert({
+      where: { nom: categoryData.categorie },
+      update: {},
+      create: { nom: categoryData.categorie },
+    })
+
+    for (const sousCategorieNom of categoryData.sousCategories) {
+      let sousCategorie = await prisma.sousCategorieQuestion.findFirst({
+        where: {
+          nom: sousCategorieNom,
+          categorieId: categorie.id,
+        },
+      })
+
+      if (!sousCategorie) {
+        sousCategorie = await prisma.sousCategorieQuestion.create({
+          data: {
+            nom: sousCategorieNom,
+            categorieId: categorie.id,
+          },
+        })
+      }
+
+      taxonomyByName.set(`${categoryData.categorie}::${sousCategorieNom}`, {
+        categorieId: categorie.id,
+        sousCategorieId: sousCategorie.id,
+      })
+    }
+  }
+
+  console.log(`  ✅ Taxonomie V2 seeded (${questionTaxonomy.length} catégories, ${taxonomyByName.size} sous-catégories)`)
+  return taxonomyByName
+}
+
+function buildQuestionCreateData(taxonomyByName) {
+  return questionsV2.map((question) => {
+    const taxonomy = questionTaxonomyByOrderPage[question.orderPage]
+    const ids = taxonomy
+      ? taxonomyByName.get(`${taxonomy.categorie}::${taxonomy.sousCategorie}`)
+      : null
+
+    if (!ids) {
+      throw new Error(`Taxonomie manquante pour la question orderPage=${question.orderPage}`)
+    }
+
+    const {
+      orderPage,
+      obligatoire,
+      ordreDansPage,
+      typeOption,
+      libelleQuestion,
+      paragrapheInfo,
+      options,
+      crmFieldIds,
+    } = question
+
+    return {
+      orderPage,
+      ordreDansPage,
+      obligatoire,
+      typeOption,
+      libelleQuestion,
+      paragrapheInfo,
+      options,
+      crmFieldIds,
+      categorieId: ids.categorieId,
+      sousCategorieId: ids.sousCategorieId,
+    }
+  })
+}
+
 /**
  * Seed the demo Formulaire with all 15 steps and correct CRM field IDs.
  * Uses couleurPrimaire #5B2D8E (V2 color — Requirement 3.4).
  * Tasks 7.4, 7.5, 7.6, 7.7, 7.8, 7.9
  */
-async function seedFormulaire() {
+async function seedFormulaire(taxonomyByName) {
   console.log('  → Seeding Formulaire V2 (15 étapes)...')
 
   const DEMO_LABEL = 'Estimer Mes Aides V2 — Formulaire de démonstration'
@@ -1031,6 +1351,7 @@ async function seedFormulaire() {
     couleurPrimaire: PRIMARY_COLOR_V2,
     ...pageFinConfig,
   }
+  const questionCreateData = buildQuestionCreateData(taxonomyByName)
 
   // Check if demo formulaire already exists
   const existing = await prisma.formulaire.findFirst({
@@ -1052,14 +1373,7 @@ async function seedFormulaire() {
         pageDebutConfig: pageDebutConfigV2,
         pageFinConfig: pageFinConfigV2,
         questions: {
-          create: questionsV2.map(({ orderPage, obligatoire, typeOption, libelleQuestion, paragrapheInfo, options }) => ({
-            orderPage,
-            obligatoire,
-            typeOption,
-            libelleQuestion,
-            paragrapheInfo,
-            options,
-          })),
+          create: questionCreateData,
         },
       },
       include: { questions: true },
@@ -1078,14 +1392,7 @@ async function seedFormulaire() {
       pageDebutConfig: pageDebutConfigV2,
       pageFinConfig: pageFinConfigV2,
       questions: {
-        create: questionsV2.map(({ orderPage, obligatoire, typeOption, libelleQuestion, paragrapheInfo, options }) => ({
-          orderPage,
-          obligatoire,
-          typeOption,
-          libelleQuestion,
-          paragrapheInfo,
-          options,
-        })),
+        create: questionCreateData,
       },
     },
     include: { questions: true },
@@ -1102,7 +1409,7 @@ async function seedBorne(adminBorne, formulaire) {
   console.log('  → Seeding Borne de démonstration...')
   const idBorne = 'BORNE-DEMO-001'
 
-  await prisma.borne.upsert({
+  const borne = await prisma.borne.upsert({
     where: { idBorne },
     update: {
       langueDefaut: 'fr',
@@ -1126,8 +1433,9 @@ async function seedBorne(adminBorne, formulaire) {
       adminBorneId: adminBorne.id,
     },
   })
-  console.log(`  ✅ Borne seeded: ${idBorne} → AdminBorne: ${adminBorne.email}, Formulaire: ${formulaire.id}`)
-  return idBorne
+  updateFrontendBorneEnv(borne.id)
+  console.log(`  ✅ Borne seeded: ${idBorne} (${borne.id}) → AdminBorne: ${adminBorne.email}, Formulaire: ${formulaire.id}`)
+  return borne
 }
 
 /**
@@ -1136,12 +1444,13 @@ async function seedBorne(adminBorne, formulaire) {
  * Execution order:
  *   1. Validate all CRM field IDs (fail fast if any are invalid)
  *   2. Seed V1 Configuration (always — backward compat)
- *   3. Check idempotency — skip V2 seed if data already exists (log "Data already exists")
- *   4. Seed SuperAdmin (task 7.2)
- *   5. Seed demo AdminBorne (task 7.3)
- *   6. Seed demo Formulaire with 15 steps (tasks 7.4–7.9)
- *   7. Seed demo Borne assigned to AdminBorne + Formulaire (task 7.10)
- *   8. Print summary
+ *   3. Seed V2 taxonomy (categories + sous-categories)
+ *   4. Check idempotency — if demo data exists, refresh only the demo formulaire
+ *   5. Seed SuperAdmin (task 7.2)
+ *   6. Seed demo AdminBorne (task 7.3)
+ *   7. Seed demo Formulaire with 15 steps (tasks 7.4–7.9)
+ *   8. Seed demo Borne assigned to AdminBorne + Formulaire (task 7.10)
+ *   9. Print summary
  */
 async function main() {
   console.log('🌱 Seeding V2...')
@@ -1156,33 +1465,43 @@ async function main() {
   // ─── Step 2: V1 Configuration (always seeded — backward compat) ────────────
   await seedV1Configuration()
 
-  // ─── Step 3: Idempotency check for V2 data ─────────────────────────────────
+  // ─── Step 3: V2 Taxonomy (categories + sous-categories) ───────────────────
+  const taxonomyByName = await seedQuestionTaxonomy()
+
+  // ─── Step 4: Idempotency check for V2 data ─────────────────────────────────
   const alreadySeeded = await dataAlreadyExists()
   if (alreadySeeded) {
+    const formulaire = await seedFormulaire(taxonomyByName)
+    const borne = await prisma.borne.findUnique({ where: { idBorne: 'BORNE-DEMO-001' } })
+    updateFrontendBorneEnv(borne?.id)
     console.log('')
-    console.log('ℹ️  Data already exists — skipping V2 seed.')
-    console.log('   To re-seed, delete the SuperAdmin and BORNE-DEMO-001 records first.')
+    console.log('ℹ️  Data already exists — taxonomie et formulaire V2 rafraîchis.')
+    console.log('   SuperAdmin/AdminBorne/Borne de démonstration conservés.')
+    console.log('   Borne UUID    :', borne?.id)
+    console.log('   Formulaire    :', formulaire.id)
+    console.log('   Questions     :', formulaire.questions.length)
     return
   }
 
-  // ─── Step 4: SuperAdmin (task 7.2) ─────────────────────────────────────────
+  // ─── Step 5: SuperAdmin (task 7.2) ─────────────────────────────────────────
   const superAdminEmail = await seedSuperAdmin()
 
-  // ─── Step 5: Demo AdminBorne (task 7.3) ────────────────────────────────────
+  // ─── Step 6: Demo AdminBorne (task 7.3) ────────────────────────────────────
   const adminBorne = await seedAdminBorne()
 
-  // ─── Step 6: Demo Formulaire with 15 steps (tasks 7.4–7.9) ────────────────
-  const formulaire = await seedFormulaire()
+  // ─── Step 7: Demo Formulaire with 15 steps (tasks 7.4–7.9) ────────────────
+  const formulaire = await seedFormulaire(taxonomyByName)
 
-  // ─── Step 7: Demo Borne (task 7.10) ────────────────────────────────────────
-  const idBorne = await seedBorne(adminBorne, formulaire)
+  // ─── Step 8: Demo Borne (task 7.10) ────────────────────────────────────────
+  const borne = await seedBorne(adminBorne, formulaire)
 
-  // ─── Step 8: Summary ───────────────────────────────────────────────────────
+  // ─── Step 9: Summary ───────────────────────────────────────────────────────
   console.log('')
   console.log('🎉 Seed V2 terminé avec succès !')
   console.log('   SuperAdmin    :', superAdminEmail)
   console.log('   AdminBorne    :', adminBorne.email, '/ Demo2026!')
-  console.log('   Borne         :', idBorne)
+  console.log('   Borne         :', borne.idBorne)
+  console.log('   Borne UUID    :', borne.id)
   console.log('   Formulaire    :', formulaire.id)
   console.log('   Questions     :', formulaire.questions.length)
   console.log('   Couleur V2    :', PRIMARY_COLOR_V2)

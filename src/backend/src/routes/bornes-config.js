@@ -23,13 +23,20 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
     const cached = await cacheService.get(cacheKey)
     if (cached) {
       // For ADMIN_BORNE: verify ownership from cached data before returning
-      if (req.user.role === 'ADMIN_BORNE' && cached.borne && cached.borne.adminBorneId !== req.user.sub) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'Accès refusé' },
-        })
+      if (req.user.role === 'ADMIN_BORNE' && cached.borne?.adminBorneId) {
+        if (cached.borne.adminBorneId !== req.user.sub) {
+          return res.status(403).json({
+            success: false,
+            error: { code: 'FORBIDDEN', message: 'Accès refusé' },
+          })
+        }
       }
-      return res.json({ success: true, data: cached, fromCache: true })
+
+      if (req.user.role === 'ADMIN_BORNE' && !cached.borne?.adminBorneId) {
+        await cacheService.delete(cacheKey)
+      } else {
+        return res.json({ success: true, data: cached, fromCache: true })
+      }
     }
 
     const borne = await prisma.borne.findUnique({
@@ -55,15 +62,21 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
             pageDebutConfig: true,
             pageFinConfig: true,
             questions: {
-              orderBy: { orderPage: 'asc' },
+              orderBy: [{ orderPage: 'asc' }, { ordreDansPage: 'asc' }],
               select: {
                 id: true,
                 libelleQuestion: true,
                 typeOption: true,
                 options: true,
                 orderPage: true,
+                ordreDansPage: true,
                 obligatoire: true,
                 paragrapheInfo: true,
+                crmFieldIds: true,
+                categorieId: true,
+                sousCategorieId: true,
+                categorie: true,
+                sousCategorie: true,
               },
             },
           },
@@ -115,7 +128,7 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
     await cacheService.set(cacheKey, responseData, CACHE_TTL_SECONDS)
 
     // Return without adminBorneId in the public response
-    const { borne: { adminBorneId: _omit, ...publicBorne }, ...rest } = responseData
+    const { adminBorneId: _omit, ...publicBorne } = responseData.borne
 
     return res.json({
       success: true,

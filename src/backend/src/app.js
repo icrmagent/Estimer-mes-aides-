@@ -15,6 +15,8 @@ import { questionsRouter } from './routes/questions.js'
 import { enregistrementsRouter } from './routes/enregistrements.js'
 import { dashboardRouter } from './routes/dashboard.js'
 import { partageRouter } from './routes/partage.js'
+import { categoriesQuestionsRouter } from './routes/categories-questions.js'
+import { canauxRouter } from './routes/canaux.js'
 import { csrfProtectionMiddleware, generateToken } from './middleware/csrfProtection.js'
 import { globalErrorHandler } from './lib/errorSanitizer.js'
 import { ipBlockCheck } from './middleware/ipBlockMiddleware.js'
@@ -148,8 +150,10 @@ backofficeRouter.use('/bornes', bornesConfigRouter)       // /api/bornes/:id/con
 backofficeRouter.use('/admin-bornes', adminBornesRouter)
 backofficeRouter.use('/formulaires', formulairesRouter)
 backofficeRouter.use('/formulaires', questionsRouter)     // /api/formulaires/:id/questions
+backofficeRouter.use('/categories-questions', categoriesQuestionsRouter)
 backofficeRouter.use('/dashboard', dashboardRouter)
 backofficeRouter.use('/partage', partageRouter)           // /api/partage/jobs
+backofficeRouter.use('/canaux', canauxRouter)
 
 // Mount backoffice router at /api (legacy paths) and /api/backoffice (new canonical prefix)
 app.use('/api', backofficeRouter)

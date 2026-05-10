@@ -19,7 +19,7 @@ import FieldRenderer from './FieldRenderer.jsx'
  * - Font-size ≥ 16px sur tous les inputs
  * - Couleur primaire #5B2D8E
  */
-export default function StepRenderer({ question, value, onChange, langue, stepIndex, totalSteps }) {
+export default function StepRenderer({ question, value, onChange, langue }) {
   if (!question) return null
 
   const libelleQuestion = t(question.libelleQuestion, langue)
@@ -28,19 +28,13 @@ export default function StepRenderer({ question, value, onChange, langue, stepIn
   return (
     <div className="step-renderer">
       {/* Titre de la question */}
-      <h2
-        className="font-bold text-gray-900 mb-6 text-center leading-tight"
-        style={{ fontSize: '20px' }}
-      >
+      <h2 className="pf-title">
         {libelleQuestion}
       </h2>
 
       {/* Paragraphe d'information optionnel */}
       {paragrapheInfo && (
-        <p
-          className="text-center italic mb-6 text-sm"
-          style={{ color: '#5B2D8E' }}
-        >
+        <p className="pf-hint">
           {paragrapheInfo}
         </p>
       )}

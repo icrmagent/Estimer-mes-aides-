@@ -29,6 +29,7 @@ const updateEnregistrementSchema = z.object({
 })
 
 const listQuerySchema = z.object({
+  id: z.string().uuid().optional(),
   borneId: z.string().uuid().optional(),
   formulaireId: z.string().uuid().optional(),
   dateDebut: z.string().datetime({ offset: true }).optional(),
@@ -37,7 +38,7 @@ const listQuerySchema = z.object({
     .enum(['en_attente', 'en_cours', 'partage', 'echec_temporaire', 'echec_definitif'])
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 })
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ function handlePrismaError(err, res) {
 async function buildWhereClause(user, filters) {
   const where = { deletedAt: null }
 
+  if (filters.id) where.id = filters.id
   if (filters.borneId) where.borneId = filters.borneId
   if (filters.formulaireId) where.formulaireId = filters.formulaireId
   if (filters.statutPartage) where.statutPartage = filters.statutPartage
@@ -310,25 +312,58 @@ enregistrementsRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORN
     })
   }
 
-  const [enregistrements, total] = await Promise.all([
-    prisma.enregistrement.findMany({
+  try {
+    const enregistrementsRaw = await prisma.enregistrement.findMany({
       where,
       skip: (page - 1) * limit,
-      take: limit,
+      take: limit + 1,
       orderBy: { createdAt: 'desc' },
       include: {
         borne: { select: { id: true, idBorne: true, adresse: true } },
         formulaire: { select: { id: true, label: true, version: true } },
       },
-    }),
-    prisma.enregistrement.count({ where }),
-  ])
+    })
+    const hasMore = enregistrementsRaw.length > limit
+    const enregistrements = hasMore ? enregistrementsRaw.slice(0, limit) : enregistrementsRaw
+    const total = hasMore ? (page * limit) + 1 : ((page - 1) * limit) + enregistrements.length
 
-  return res.json({
-    success: true,
-    data: enregistrements,
-    meta: { page, limit, total },
-  })
+    // Load candidate contact answers and let the frontend resolve initials from labels.
+    const enregistrementIds = enregistrements.map((e) => e.id)
+    const contactReponses = enregistrementIds.length
+      ? await prisma.enregistrementReponse.findMany({
+          where: {
+            enregistrementId: { in: enregistrementIds },
+          },
+          select: {
+            enregistrementId: true,
+            valeur: true,
+            question: {
+              select: { libelleQuestion: true },
+            },
+          },
+        })
+      : []
+
+    const reponsesByEnregistrement = new Map()
+    for (const rep of contactReponses) {
+      const list = reponsesByEnregistrement.get(rep.enregistrementId) || []
+      list.push(rep)
+      reponsesByEnregistrement.set(rep.enregistrementId, list)
+    }
+
+    const enregistrementsWithContact = enregistrements.map((enregistrement) => ({
+      ...enregistrement,
+      reponses: reponsesByEnregistrement.get(enregistrement.id) || [],
+    }))
+
+    return res.json({
+      success: true,
+      data: enregistrementsWithContact,
+      meta: { page, limit, total },
+    })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
 })
 
 // ─── GET /api/enregistrements/:id ────────────────────────────────────────────
@@ -342,7 +377,7 @@ enregistrementsRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_B
         formulaire: { select: { id: true, label: true, version: true } },
         reponses: {
           include: {
-            question: { select: { libelleQuestion: true, typeOption: true, orderPage: true } },
+            question: { select: { libelleQuestion: true, typeOption: true, options: true, orderPage: true } },
           },
           orderBy: { question: { orderPage: 'asc' } },
         },

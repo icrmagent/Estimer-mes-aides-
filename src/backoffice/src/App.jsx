@@ -9,6 +9,7 @@ import AdminBornesListPage from './pages/superadmin/AdminBornesListPage.jsx'
 import AdminBorneFormPage from './pages/superadmin/AdminBorneFormPage.jsx'
 import FormulairesListPage from './pages/superadmin/FormulairesListPage.jsx'
 import FormulaireEditorPage from './pages/superadmin/FormulaireEditorPage.jsx'
+import CategoriesQuestionsPage from './pages/superadmin/CategoriesQuestionsPage.jsx'
 import EnregistrementsListPage from './pages/superadmin/EnregistrementsListPage.jsx'
 import PartageJobsPage from './pages/superadmin/PartageJobsPage.jsx'
 import ABDashboardPage from './pages/adminborne/DashboardPage.jsx'
@@ -33,6 +34,7 @@ export default function App() {
                 <Route path="admin-bornes/:id/edit" element={<AdminBorneFormPage />} />
                 <Route path="formulaires" element={<FormulairesListPage />} />
                 <Route path="formulaires/:id/edit" element={<FormulaireEditorPage />} />
+                <Route path="categories-questions" element={<CategoriesQuestionsPage />} />
                 <Route path="enregistrements" element={<EnregistrementsListPage />} />
                 <Route path="partage" element={<PartageJobsPage />} />
               </Routes>

@@ -210,6 +210,26 @@ describe('POST /api/bornes', () => {
     expect(res.body.data.idBorne).toBe('BORNE-001')
   })
 
+  it('sans idBorne → génère un identifiant automatiquement', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue(null)
+    mockPrisma.borne.create.mockImplementation(({ data }) => Promise.resolve({ ...mockBorne, ...data }))
+
+    const res = await request(app)
+      .post('/api/bornes')
+      .set(authSA)
+      .send({ adresse: '1 rue Test' })
+
+    expect(res.status).toBe(201)
+    expect(res.body.success).toBe(true)
+    expect(res.body.data.idBorne).toMatch(/^BORNE-[0-9A-F]{8}$/)
+    expect(mockPrisma.borne.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        adresse: '1 rue Test',
+        idBorne: expect.stringMatching(/^BORNE-[0-9A-F]{8}$/),
+      }),
+    })
+  })
+
   it('avec idBorne dupliqué → 409 DUPLICATE', async () => {
     mockPrisma.borne.create.mockRejectedValue(p2002Error)
 

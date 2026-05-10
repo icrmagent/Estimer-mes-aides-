@@ -50,7 +50,7 @@ async function processJob(job) {
     const enregistrement = await prisma.enregistrement.findUnique({
       where: { id: job.enregistrementId },
       include: {
-        borne: { select: { id: true, idBorne: true } },
+        borne: { select: { id: true, idBorne: true, canalTransmission: true } },
         reponses: {
           include: {
             question: { select: { libelleQuestion: true, orderPage: true } },
@@ -83,6 +83,7 @@ async function processJob(job) {
         body: JSON.stringify({
           source: 'borne_v2',
           borne_id: enregistrement.borne?.idBorne,
+          canal_transmission: enregistrement.borne?.canalTransmission || undefined,
           langue: enregistrement.langueUtilisee,
           field_values: fieldValues,
         }),

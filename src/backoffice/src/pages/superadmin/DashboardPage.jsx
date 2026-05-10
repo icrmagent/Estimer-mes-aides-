@@ -30,7 +30,7 @@ export default function SADashboardPage() {
 
   useEffect(() => {
     api.get('/api/dashboard/superadmin')
-      .then(res => setData(res.data))
+      .then(res => setData(res.data.data || res.data))
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))
   }, [])

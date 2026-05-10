@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
@@ -12,17 +13,18 @@ export const bornesRouter = Router()
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 const createBorneSchema = z.object({
-  idBorne: z.string().min(1),
+  idBorne: z.string().min(1).optional(),
   langueDefaut: z.enum(['fr', 'es', 'en']).default('fr'),
   adresse: z.string().min(1),
   commercant: z.string().optional(),
   regie: z.string().optional(),
   installateur: z.string().optional(),
+  canalTransmission: z.string().trim().max(120).optional().nullable(),
   formulaireId: z.string().uuid().optional(),
   adminBorneId: z.string().uuid().optional(),
 })
 
-const updateBorneSchema = createBorneSchema.partial()
+const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial()
 
 const updateStatutSchema = z.object({
   statut: z.enum(['actif', 'inactif']),
@@ -61,9 +63,19 @@ function handlePrismaError(err, res) {
   })
 }
 
+async function generateUniqueIdBorne() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const idBorne = `BORNE-${randomUUID().slice(0, 8).toUpperCase()}`
+    const existing = await prisma.borne.findUnique({ where: { idBorne } })
+    if (!existing) return idBorne
+  }
+
+  return `BORNE-${randomUUID().toUpperCase()}`
+}
+
 // ─── GET /api/bornes ──────────────────────────────────────────────────────────
 
-bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
   const parsed = listQuerySchema.safeParse(req.query)
   if (!parsed.success) {
     return res.status(400).json({
@@ -75,28 +87,37 @@ bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =>
   const { statut, adminBorneId, formulaireId, page, limit } = parsed.data
   const where = { deletedAt: null }
   if (statut) where.statut = statut
-  if (adminBorneId) where.adminBorneId = adminBorneId
+  if (req.user.role === 'ADMIN_BORNE') {
+    // AdminBorne can only list their assigned bornes.
+    where.adminBorneId = req.user.sub
+  } else if (adminBorneId) {
+    where.adminBorneId = adminBorneId
+  }
   if (formulaireId) where.formulaireId = formulaireId
 
-  const [bornes, total] = await Promise.all([
-    prisma.borne.findMany({
-      where,
-      skip: (page - 1) * limit,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
-        formulaire: { select: { id: true, label: true, version: true, statut: true } },
-      },
-    }),
-    prisma.borne.count({ where }),
-  ])
+  try {
+    const [bornes, total] = await Promise.all([
+      prisma.borne.findMany({
+        where,
+        skip: (page - 1) * limit,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
+          formulaire: { select: { id: true, label: true, version: true, statut: true } },
+        },
+      }),
+      prisma.borne.count({ where }),
+    ])
 
-  return res.json({
-    success: true,
-    data: bornes,
-    meta: { page, limit, total },
-  })
+    return res.json({
+      success: true,
+      data: bornes,
+      meta: { page, limit, total },
+    })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
 })
 
 // ─── POST /api/bornes ─────────────────────────────────────────────────────────
@@ -111,7 +132,11 @@ bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =
   }
 
   try {
-    const borne = await prisma.borne.create({ data: parsed.data })
+    const data = {
+      ...parsed.data,
+      idBorne: parsed.data.idBorne || await generateUniqueIdBorne(),
+    }
+    const borne = await prisma.borne.create({ data })
     return res.status(201).json({ success: true, data: borne })
   } catch (err) {
     return handlePrismaError(err, res)

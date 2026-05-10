@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
@@ -12,6 +12,68 @@ function StatusBadge({ statut }) {
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${styles[statut] || 'bg-gray-100 text-gray-500'}`}>
       {statut}
     </span>
+  )
+}
+
+function BorneRowActions({ borne, toggleStatut }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  return (
+    <div className="relative inline-block text-left" ref={menuRef}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(prev => !prev);
+        }}
+        className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors focus:outline-none"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="1"/>
+          <circle cx="12" cy="5" r="1"/>
+          <circle cx="12" cy="19" r="1"/>
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 z-50 overflow-hidden">
+          <div className="py-1">
+            <button
+              onClick={() => { setIsOpen(false); toggleStatut(borne); }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {borne.statut === 'actif' ? (
+                  <><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></>
+                ) : (
+                  <><path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/></>
+                )}
+              </svg>
+              {borne.statut === 'actif' ? 'Désactiver' : 'Activer'}
+            </button>
+            <Link
+              to={`/superadmin/bornes/${borne.id}/edit`}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Modifier
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -144,7 +206,7 @@ export default function BornesListPage() {
           </div>
         </form>
 
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           {loading ? (
             <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
           ) : bornes.length === 0 ? (
@@ -153,12 +215,12 @@ export default function BornesListPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">ID Borne</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">ID Borne</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Adresse</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Admin Borne</th>
-                  <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -171,27 +233,11 @@ export default function BornesListPage() {
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {borne.adminBorne ? `${borne.adminBorne.nom} ${borne.adminBorne.prenom}` : '—'}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => toggleStatut(borne)}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors"
-                          style={{
-                            minHeight: '36px',
-                            borderColor: borne.statut === 'actif' ? '#d1d5db' : '#5B2D8E',
-                            color: borne.statut === 'actif' ? '#6b7280' : '#5B2D8E',
-                          }}
-                        >
-                          {borne.statut === 'actif' ? 'Désactiver' : 'Activer'}
-                        </button>
-                        <Link
-                          to={`/superadmin/bornes/${borne.id}/edit`}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-                          style={{ minHeight: '36px', display: 'flex', alignItems: 'center' }}
-                        >
-                          Modifier
-                        </Link>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <BorneRowActions
+                        borne={borne}
+                        toggleStatut={toggleStatut}
+                      />
                     </td>
                   </tr>
                 ))}
