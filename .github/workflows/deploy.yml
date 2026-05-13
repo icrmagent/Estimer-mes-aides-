@@ -168,6 +168,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # Le repo n'a que gradlew.bat (Windows) — installer gradle directement via l'action officielle
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+
       - name: Decode keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -185,10 +191,6 @@ jobs:
           keyPassword=$ANDROID_KEY_PASSWORD
           EOF
 
-      - name: Grant gradle perms
-        working-directory: android-webview
-        run: chmod +x ./gradlew || true
-
       - name: Compute version (sync avec frontend)
         id: version
         run: |
@@ -202,10 +204,10 @@ jobs:
         working-directory: android-webview
         run: |
           if [ -f keystore/release.keystore ]; then
-            ./gradlew assembleRelease --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
+            gradle assembleRelease --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
           else
             echo "Pas de keystore — build debug"
-            ./gradlew assembleDebug --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
+            gradle assembleDebug --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
           fi
 
       - name: Upload APK artifact
