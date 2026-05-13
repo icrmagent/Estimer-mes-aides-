@@ -111,7 +111,6 @@ async function processJob(job) {
             canaux: {
               where: { actif: true },
               orderBy: { createdAt: 'desc' },
-              take: 1,
             },
           },
         },
@@ -127,8 +126,11 @@ async function processJob(job) {
       throw new Error(`Enregistrement ${job.enregistrementId} introuvable`)
     }
 
-    // Résoudre les credentials : canal de la borne en priorité, env vars en fallback
-    const canal = enregistrement.borne?.canaux?.[0]
+    // Sélectionner le canal par canalTransmission (label) si défini, sinon premier canal actif
+    const canalLabel = enregistrement.borne?.canalTransmission
+    const canal = canalLabel
+      ? (enregistrement.borne?.canaux?.find(c => c.label === canalLabel) ?? enregistrement.borne?.canaux?.[0])
+      : enregistrement.borne?.canaux?.[0]
     const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
     const crmKey = canal?.token || canal?.apiKey || process.env.CRM_API_KEY
 
