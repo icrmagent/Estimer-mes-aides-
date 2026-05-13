@@ -36,12 +36,14 @@ const mockPrisma = {
   },
   formulaire: {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     count: jest.fn(),
   },
   question: { findMany: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
+  formulaireVersion: { create: jest.fn().mockResolvedValue({}), findMany: jest.fn().mockResolvedValue([]) },
   enregistrement: {
     findMany: jest.fn(),
     findUniqueOrThrow: jest.fn(),
@@ -50,6 +52,7 @@ const mockPrisma = {
     groupBy: jest.fn(),
   },
   partageJob: { create: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
   loginAttempt: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   refreshToken: { create: jest.fn(), findMany: jest.fn(), update: jest.fn(), deleteMany: jest.fn() },
   revokedToken: { upsert: jest.fn(), findUnique: jest.fn(), deleteMany: jest.fn() },
@@ -181,14 +184,9 @@ describe('CSRF — Backoffice routes (mounted under csrfProtectionMiddleware)', 
 
   it('PUT /api/formulaires/:id without CSRF token → passes in test mode', async () => {
     const formId = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
-    mockPrisma.formulaire.update.mockResolvedValue({
-      id: formId,
-      label: 'Updated',
-      statut: 'brouillon',
-      version: '1.0.0',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
+    const mockForm = { id: formId, label: 'Test', statut: 'brouillon', version: '1.0.0', questions: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    mockPrisma.formulaire.findUniqueOrThrow.mockResolvedValue(mockForm)
+    mockPrisma.formulaire.update.mockResolvedValue({ ...mockForm, label: 'Updated Label' })
 
     const res = await request(app)
       .put(`/api/formulaires/${formId}`)
@@ -201,17 +199,11 @@ describe('CSRF — Backoffice routes (mounted under csrfProtectionMiddleware)', 
   it('DELETE /api/formulaires/:id/questions/:qid without CSRF token → passes in test mode', async () => {
     const formId = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'
     const questionId = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb'
-    // The DELETE handler calls getFormulaireOrFail → prisma.formulaire.findUnique
-    mockPrisma.formulaire.findUnique.mockResolvedValue({
-      id: formId,
-      label: 'Test',
-      statut: 'brouillon',
-      version: '1.0.0',
-    })
-    mockPrisma.question.delete.mockResolvedValue({
-      id: questionId,
-      formulaireId: formId,
-    })
+    const mockForm = { id: formId, label: 'Test', statut: 'brouillon', version: '1.0.0', questions: [] }
+    // getFormulaireOrFail uses findUnique; incrementMinorVersionAndSnapshot uses findUnique + update
+    mockPrisma.formulaire.findUnique.mockResolvedValue(mockForm)
+    mockPrisma.formulaire.update.mockResolvedValue({ ...mockForm, version: '1.1.0' })
+    mockPrisma.question.delete.mockResolvedValue({ id: questionId, formulaireId: formId })
 
     const res = await request(app)
       .delete(`/api/formulaires/${formId}/questions/${questionId}`)

@@ -80,16 +80,16 @@ describe('validateEnv', () => {
   test('exits with code 1 and lists ALL missing required variables at once', () => {
     const env = { ...VALID_ENV }
     delete env.DATABASE_URL
-    delete env.REDIS_URL
     delete env.PUSHER_SECRET
+    delete env.SUPERADMIN_EMAIL
 
     validateEnv(env)
 
     expect(exitSpy).toHaveBeenCalledWith(1)
     const errorMessage = errorSpy.mock.calls[0][0]
     expect(errorMessage).toContain('DATABASE_URL')
-    expect(errorMessage).toContain('REDIS_URL')
     expect(errorMessage).toContain('PUSHER_SECRET')
+    expect(errorMessage).toContain('SUPERADMIN_EMAIL')
   })
 
   test('treats empty-string required variable as missing', () => {
@@ -99,9 +99,9 @@ describe('validateEnv', () => {
   })
 
   test('treats whitespace-only required variable as missing', () => {
-    validateEnv({ ...VALID_ENV, REDIS_URL: '   ' })
+    validateEnv({ ...VALID_ENV, PUSHER_SECRET: '   ' })
     expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('REDIS_URL'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('PUSHER_SECRET'))
   })
 
   // ─── Optional variables ──────────────────────────────────────────────────────

@@ -760,13 +760,17 @@ html, body {
     var(--c-gradient) border-box;
   color: var(--c-text);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   font-family: var(--font-title);
   font-size: 17px;
   font-weight: 800;
   line-height: 1.25;
   padding: 14px 18px;
   text-align: center;
-  transition: opacity 0.2s var(--ease), transform 0.1s var(--ease), color 0.2s var(--ease);
+  transition: opacity 0.2s var(--ease), transform 0.15s var(--ease), color 0.2s var(--ease), box-shadow 0.2s var(--ease);
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -775,12 +779,31 @@ html, body {
 }
 
 .pf-option-card:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 
 .pf-option-card.is-selected {
   background: var(--c-gradient);
   color: #fff;
+  transform: scale(1.025);
+  box-shadow: 0 6px 22px rgba(91, 45, 142, 0.3);
+}
+
+.pf-option-check-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  animation: checkPop 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes checkPop {
+  from { transform: scale(0) rotate(-20deg); opacity: 0; }
+  to   { transform: scale(1) rotate(0deg);   opacity: 1; }
+}
+
+@keyframes categoryIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @media (min-width: 640px) {
@@ -1810,4 +1833,81 @@ body { overscroll-behavior: none; }
   .option-icon          { width: 18px !important; height: 18px !important; }
   .welcome-stats        { gap: 8px; }
   .stat-badge           { font-size: 12px; padding: 7px 11px; }
+}
+
+/* ═══════════════════════════════════════════
+   FORMPAGE MOBILE — < 768px
+   Fix: flèches nav au bas de l'écran
+   (évite le chevauchement avec le contenu)
+═══════════════════════════════════════════ */
+@media (max-width: 767px) {
+  .tablet-nav-prev,
+  .tablet-nav-next {
+    top: auto !important;
+    bottom: 24px;
+    transform: none !important;
+    width: 56px !important;
+    height: 56px !important;
+    z-index: 36;
+  }
+
+  .tablet-nav-prev { left: 8px !important; }
+  .tablet-nav-next { right: 8px !important; }
+
+  .tablet-borne-info {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+}
+
+/* Header compressé sur petits écrans (< 640px) */
+@media (max-width: 639px) {
+  .tablet-home-zone img {
+    width: 64px !important;
+    margin: 0 2px !important;
+  }
+
+  .tablet-lang-zone {
+    width: 84px !important;
+    min-width: 84px;
+  }
+
+  .tablet-form-header .hero-title {
+    font-size: clamp(18px, 5vw, 26px);
+  }
+
+  .tablet-form-header .hero-subtitle {
+    font-size: 12px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+/* Landscape mobile — header FormPage compact */
+@media (max-height: 500px) and (orientation: landscape) {
+  .tablet-form-header {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+  }
+
+  .tablet-form-header .hero-title {
+    font-size: 20px !important;
+    margin-bottom: 0 !important;
+  }
+
+  .tablet-form-header .hero-subtitle {
+    display: none;
+  }
+
+  .tablet-home-zone img {
+    width: 50px !important;
+    margin: 0 !important;
+  }
+
+  .tablet-lang-zone {
+    width: 70px !important;
+    min-width: 70px;
+  }
 }

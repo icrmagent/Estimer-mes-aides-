@@ -15,55 +15,70 @@ import homeEnv from '../assets/homeenv.png'
 const sectionStyles = {
   wrapper: {
     width: "100%",
-    fontFamily: "'Segoe UI', sans-serif",
-    padding: "0 16px",
+    padding: "0",
     boxSizing: "border-box",
-    marginBottom: "16px"
+    marginBottom: "20px",
   },
-  header: {
+  banner: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
+    padding: "12px 18px",
+    borderRadius: "16px",
+    background: "linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)",
+    boxShadow: "0 4px 18px rgba(91, 45, 142, 0.22)",
+    animation: "categoryIn 350ms cubic-bezier(0.22, 1, 0.36, 1) both",
+  },
+  left: {
+    display: "flex",
+    alignItems: "center",
     gap: "12px",
-    padding: "14px 0 10px",
   },
   badge: {
-    width: "28px",
-    height: "28px",
-    borderRadius: "6px",
-    background: "linear-gradient(135deg, #7c3aed, #6d28d9)",
+    width: "34px",
+    height: "34px",
+    borderRadius: "9px",
+    background: "rgba(255,255,255,0.16)",
+    border: "1.5px solid rgba(255,255,255,0.3)",
     color: "#fff",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontWeight: "700",
-    fontSize: "14px",
+    fontWeight: "800",
+    fontSize: "15px",
     flexShrink: 0,
-    boxShadow: "0 2px 6px rgba(109, 40, 217, 0.35)",
   },
   title: {
-    fontSize: "15px",
+    fontSize: "13px",
     fontWeight: "700",
-    color: "#1a1a2e",
-    letterSpacing: "0.01em",
-    textTransform: "uppercase"
+    color: "rgba(255,255,255,0.95)",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
   },
-  divider: {
-    height: "5px",
-    borderRadius: "2px",
-    background: "linear-gradient(90deg, #7c3aed 0%, #3b82f6 60%, transparent 100%)",
-    marginTop: "2px",
+  counter: {
+    fontSize: "11px",
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.8)",
+    background: "rgba(255,255,255,0.14)",
+    padding: "4px 10px",
+    borderRadius: "20px",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
   },
 };
 
-const SectionHeader = ({ number = 1, title = "" }) => {
+const SectionHeader = ({ number = 1, title = "", total = 1 }) => {
   return (
     <div style={sectionStyles.wrapper}>
-      <div style={sectionStyles.header}>
-        <div style={sectionStyles.badge}>{number}</div>
-        <span style={sectionStyles.title}>{title}</span>
+      <div style={sectionStyles.banner}>
+        <div style={sectionStyles.left}>
+          <div style={sectionStyles.badge}>{number}</div>
+          <span style={sectionStyles.title}>{title}</span>
+        </div>
+        {total > 1 && (
+          <span style={sectionStyles.counter}>Cat. {number} / {total}</span>
+        )}
       </div>
-      <div style={sectionStyles.divider} />
     </div>
   );
 };
@@ -323,9 +338,10 @@ export function FormPage() {
           <div className="form-page-panel max-w-5xl mx-auto my-auto w-full" style={{ marginTop: '0px' }}>
             {currentPage.categorie && (
               <div className={pageTitle ? 'mb-4' : 'mb-8'}>
-                <SectionHeader 
-                  number={uniqueCategories.indexOf(currentPage.categorie.nom) + 1} 
-                  title={currentPage.categorie.nom} 
+                <SectionHeader
+                  number={uniqueCategories.indexOf(currentPage.categorie.nom) + 1}
+                  title={currentPage.categorie.nom}
+                  total={uniqueCategories.length}
                 />
               </div>
             )}

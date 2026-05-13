@@ -69,6 +69,7 @@ const mockPrisma = {
   adminBorne: { findUnique: jest.fn() },
   refreshToken: { create: jest.fn(), findMany: jest.fn(), update: jest.fn(), deleteMany: jest.fn() },
   revokedToken: { upsert: jest.fn(), findUnique: jest.fn(), deleteMany: jest.fn() },
+  $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
 }
 
 jest.unstable_mockModule('../../src/lib/prisma.js', () => ({

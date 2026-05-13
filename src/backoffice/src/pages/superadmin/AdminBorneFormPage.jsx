@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
+import { ErrorBanner } from '../../components/ui.jsx'
 
 export default function AdminBorneFormPage() {
   const { id } = useParams()
@@ -95,9 +96,7 @@ export default function AdminBorneFormPage() {
           </h1>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">{error}</div>
-        )}
+        <ErrorBanner message={error} onClose={() => setError(null)} />
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm p-6 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">

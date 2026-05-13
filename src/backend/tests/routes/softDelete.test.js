@@ -62,6 +62,7 @@ const mockPrisma = {
     groupBy: jest.fn(),
   },
   partageJob: { create: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
   $transaction: jest.fn(),
 }
 
@@ -241,6 +242,7 @@ describe('P11 — GET /api/enregistrements excludes soft-deleted records', () =>
 
 describe('DELETE /api/formulaires/:id — soft delete', () => {
   it('sets deletedAt on the formulaire instead of deleting it', async () => {
+    mockPrisma.formulaire.findUnique.mockResolvedValue({ id: 'uuid-form-1', statut: 'brouillon' })
     mockPrisma.formulaire.update.mockResolvedValue(mockFormulaireDeleted)
 
     const res = await request(app)

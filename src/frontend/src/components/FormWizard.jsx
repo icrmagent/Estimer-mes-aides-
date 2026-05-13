@@ -8,8 +8,7 @@ import StepBadge from './StepBadge.jsx'
 import LanguageSelector from './LanguageSelector.jsx'
 import ExitButton from './ExitButton.jsx'
 import ilaLogo from '../assets/logo.png'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+import { API_URL } from '../services/api.js'
 
 /**
  * FormWizard — gère la navigation multi-étapes du formulaire borne.

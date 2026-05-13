@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import logo from '../assets/logo.png'
+import { API_URL } from '../services/api.js'
 
 const MAX_ATTEMPTS  = 5
 const LOCKOUT_MS    = 5 * 60 * 1000
 const ATTEMPTS_KEY  = 'borne_login_attempts'
 const LOCKOUT_KEY   = 'borne_login_lockout'
 const IDLE_RESET_MS = 60 * 1000          // efface les champs après 60 s d'inactivité
-const API_URL       = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 /* ─── Icônes SVG légères (pas de lib externe requise) ──────────────────── */
 const IconMail = () => (
@@ -117,6 +117,16 @@ function Field({ label, icon, type, value, onChange, disabled, placeholder, auto
   )
 }
 
+/* ─── Vérifie si un JWT stocké est encore valide (non expiré) ─────────── */
+function isTokenValid(token) {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return payload.exp * 1000 > Date.now()
+  } catch {
+    return false
+  }
+}
+
 /* ─── Composant principal ──────────────────────────────────────────────── */
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -132,6 +142,15 @@ export default function LoginPage() {
   const [lockoutUntil, setLockoutUntil] = useState(() =>
     parseInt(localStorage.getItem(LOCKOUT_KEY)  || '0', 10))
   const [now, setNow] = useState(() => Date.now())
+
+  /* Reprise de session persistante — si un token valide existe (ex. reprise après coupure courant),
+     on redirige directement vers /start sans demander une nouvelle connexion. */
+  useEffect(() => {
+    const token = localStorage.getItem('borne_token')
+    if (token && isTokenValid(token)) {
+      navigate('/start', { replace: true })
+    }
+  }, [navigate])
 
   /* Compte à rebours du verrouillage */
   useEffect(() => {
@@ -179,6 +198,8 @@ export default function LoginPage() {
       const data = await res.json()
 
       if (res.ok && data.token) {
+        // localStorage choisi intentionnellement : device kiosque dédié, pas de navigation inter-onglets.
+        // httpOnly cookie complexifierait le timeout 60s (CLAUDE.md règle 3). Décision validée audit 2026-05-13.
         localStorage.setItem('borne_token', data.token)
         localStorage.removeItem(ATTEMPTS_KEY)
         localStorage.removeItem(LOCKOUT_KEY)

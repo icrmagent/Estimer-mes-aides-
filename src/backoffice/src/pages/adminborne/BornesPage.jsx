@@ -1,18 +1,7 @@
 import { useState, useEffect } from 'react'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
-
-// NOTE: Data isolation is enforced server-side via the ADMIN_BORNE JWT role check.
-// The backend automatically filters bornes to only those assigned to the authenticated AdminBorne.
-// No client-side filtering is needed or should be relied upon for security.
-
-function StatutBadge({ statut }) {
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statut === 'actif' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-      {statut}
-    </span>
-  )
-}
+import { ErrorBanner, SkeletonTableRows, EmptyState, BadgeBorneStatut } from '../../components/ui.jsx'
 
 export default function ABBornesPage() {
   const [bornes, setBornes] = useState([])
@@ -36,42 +25,45 @@ export default function ABBornesPage() {
           </p>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">{error}</div>
-        )}
+        <ErrorBanner message={error} onClose={() => setError(null)} />
 
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
-          ) : bornes.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-gray-400">
-              Aucune borne assignée
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">ID Borne</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">Adresse</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire actif</th>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50">
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">ID Borne</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">Adresse</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Formulaire actif</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <SkeletonTableRows cols={4} rows={3} />
+              ) : bornes.length === 0 ? (
+                <tr>
+                  <td colSpan={4}>
+                    <EmptyState
+                      icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
+                      title="Aucune borne assignée"
+                      description="Contactez votre Super Administrateur."
+                    />
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {bornes.map(borne => (
+              ) : (
+                bornes.map(borne => (
                   <tr key={borne.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">{borne.idBorne}</td>
                     <td className="px-4 py-3 text-gray-700 max-w-xs truncate">{borne.adresse}</td>
-                    <td className="px-4 py-3"><StatutBadge statut={borne.statut} /></td>
+                    <td className="px-4 py-3"><BadgeBorneStatut statut={borne.statut} /></td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{borne.formulaire?.label || '—'}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
 
-        {/* Read-only notice */}
         <p className="text-xs text-gray-400 text-center">
           Vue en lecture seule — la configuration des bornes est gérée par le Super Administrateur.
         </p>

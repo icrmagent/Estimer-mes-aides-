@@ -5,6 +5,7 @@ jest.unstable_mockModule('../src/lib/prisma.js', () => ({
   prisma: {
     configuration: { findFirst: jest.fn(), deleteMany: jest.fn(), create: jest.fn() },
     submission: { create: jest.fn(), findMany: jest.fn(), count: jest.fn(), update: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   },
 }))
 

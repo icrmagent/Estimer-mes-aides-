@@ -1,25 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
-
-// NOTE: Data isolation is enforced server-side via the ADMIN_BORNE JWT role check.
-// The backend automatically filters enregistrements to only those belonging to the
-// authenticated AdminBorne's assigned bornes. No client-side filtering is needed.
-
-function StatutBadge({ statut }) {
-  const styles = {
-    en_attente: 'bg-yellow-100 text-yellow-700',
-    en_cours: 'bg-blue-100 text-blue-700',
-    partage: 'bg-green-100 text-green-700',
-    echec_temporaire: 'bg-orange-100 text-orange-700',
-    echec_definitif: 'bg-red-100 text-red-700',
-  }
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${styles[statut] || 'bg-gray-100 text-gray-500'}`}>
-      {statut?.replace(/_/g, ' ')}
-    </span>
-  )
-}
+import { ErrorBanner, SkeletonTableRows, BadgeEnreg } from '../../components/ui.jsx'
 
 function getQuestionLabel(rep, index) {
   const label = rep.question?.libelleQuestion
@@ -136,12 +118,7 @@ export default function ABEnregistrementsPage() {
           </button>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm flex items-center justify-between">
-            <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 ml-4">✕</button>
-          </div>
-        )}
+        <ErrorBanner message={error} onClose={() => setError(null)} />
 
         {/* Filters */}
         <div className="bg-white rounded-2xl shadow-sm p-4">
@@ -198,25 +175,24 @@ export default function ABEnregistrementsPage() {
 
         {/* Table */}
         <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
-          ) : enregistrements.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-gray-400">Aucun enregistrement trouvé</div>
-          ) : (
-            <table className="w-full text-sm">
+          <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">ID</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">ID</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Borne</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Contact</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Langue</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600">Date</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Date</th>
                 </tr>
               </thead>
               <tbody>
-                {enregistrements.map(e => (
+                {loading ? (
+                  <SkeletonTableRows cols={7} rows={5} />
+                ) : enregistrements.length === 0 ? (
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400 text-sm">Aucun enregistrement trouvé</td></tr>
+                ) : enregistrements.map(e => (
                   <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{e.id?.slice(0, 8)}…</td>
                     <td className="px-4 py-3 text-gray-700">{e.borne?.idBorne || e.borneId || '—'}</td>
@@ -227,7 +203,7 @@ export default function ABEnregistrementsPage() {
                         {e.langueUtilisee || '—'}
                       </span>
                     </td>
-                    <td className="px-4 py-3"><StatutBadge statut={e.statutPartage} /></td>
+                    <td className="px-4 py-3"><BadgeEnreg statut={e.statutPartage} /></td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {e.createdAt ? new Date(e.createdAt).toLocaleDateString('fr-FR', {
                         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -238,7 +214,6 @@ export default function ABEnregistrementsPage() {
                 ))}
               </tbody>
             </table>
-          )}
         </div>
 
         {/* Pagination */}

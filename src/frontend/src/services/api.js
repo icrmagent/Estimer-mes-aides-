@@ -1,7 +1,8 @@
 import axios from 'axios'
 import { get, set } from 'idb-keyval'
 
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+const BASE = API_URL
 const KEY  = import.meta.env.VITE_API_KEY  || ''
 
 const client = axios.create({

@@ -1,10 +1,13 @@
 import { t, tOptions } from '../utils/i18n.js'
+import { PhoneInput } from './PhoneInput'
 
-/**
- * FieldRenderer V2 — rendu dynamique par typeOption.
- * Supporte : texte_court, texte_long, option_unique, options_multiples, telephone, email.
- * Touch targets ≥ 48px, font-size ≥ 16px.
- */
+const CheckIcon = () => (
+  <svg className="pf-option-check-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+    <circle cx="10" cy="10" r="8" fill="rgba(255,255,255,0.2)" />
+    <path d="M6.5 10l2.5 2.5 4.5-4.5" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 export default function FieldRenderer({ question, value, onChange, langue }) {
   const { typeOption, options } = question
   const translatedOptions = tOptions(options, langue)
@@ -49,14 +52,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
 
     case 'telephone':
       return renderFrame(
-        <input
-          type="tel"
-          aria-label={fieldLabel}
-          value={value || ''}
-          onChange={e => onChange(e.target.value)}
-          className="pf-input"
-          inputMode="tel"
-        />
+        <PhoneInput onChange={onChange} />
       )
 
     case 'email':
@@ -115,7 +111,8 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
                 onClick={() => onChange(opt.id)}
                 className={`pf-option-card${selected ? ' is-selected' : ''}`}
               >
-                {opt.label}
+                <span>{opt.label}</span>
+                {selected && <CheckIcon />}
               </button>
             )
           })}
@@ -141,7 +138,8 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
                 }}
                 className={`pf-option-card${isSelected ? ' is-selected' : ''}`}
               >
-                {opt.label}
+                <span>{opt.label}</span>
+                {isSelected && <CheckIcon />}
               </button>
             )
           })}

@@ -73,6 +73,8 @@ jest.unstable_mockModule('../../src/lib/prisma.js', () => ({
     borne: mockBorne,
     enregistrement: mockEnregistrement,
     partageJob: mockPartageJob,
+    formulaire: { findUnique: jest.fn().mockResolvedValue({ version: '1.0.0' }) },
+    enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
   },
 }))
 

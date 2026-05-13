@@ -51,6 +51,8 @@ const mockPrisma = {
     create: jest.fn(),
   },
   partageJob: { create: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
+  $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
   $transaction: jest.fn(),
 }
 
@@ -172,9 +174,14 @@ describe('GET /api/bornes', () => {
     expect(res.status).toBe(401)
   })
 
-  it('avec ADMIN_BORNE → 403', async () => {
+  it('avec ADMIN_BORNE → 200 (seulement ses bornes)', async () => {
+    mockPrisma.borne.findMany.mockResolvedValue([])
+    mockPrisma.borne.count.mockResolvedValue(0)
+
     const res = await request(app).get('/api/bornes').set(authAB)
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(Array.isArray(res.body.data)).toBe(true)
   })
 
   it('avec SUPER_ADMIN → 200 avec data et meta', async () => {
@@ -605,6 +612,7 @@ describe('GET /api/enregistrements', () => {
     mockPrisma.borne.findMany.mockResolvedValue([{ id: 'uuid-borne-1' }])
     mockPrisma.enregistrement.findMany.mockResolvedValue([mockEnregistrement])
     mockPrisma.enregistrement.count.mockResolvedValue(1)
+    mockPrisma.enregistrementReponse.findMany.mockResolvedValue([])
 
     const res = await request(app).get('/api/enregistrements').set(authAB)
     expect(res.status).toBe(200)

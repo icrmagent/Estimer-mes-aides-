@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useBorne } from '../context/BorneContext.jsx'
 import { t } from '../utils/i18n.js'
 import LanguageSelector from '../components/LanguageSelector.jsx'
@@ -70,6 +70,8 @@ export default function StartPage() {
   const navigate = useNavigate()
   const { formulaire, langue, setLangue } = useBorne()
   const [isExiting, setIsExiting] = useState(false)
+  const [iconOverlayStyle, setIconOverlayStyle] = useState(null)
+  const iconRef = useRef(null)
 
   const config = formulaire?.pageDebutConfig || {}
 
@@ -84,7 +86,6 @@ export default function StartPage() {
       en: 'For the energy renovation of your home',
       es: 'Para la renovación energética de tu hogar',
     },
-
     labelBouton: {
       fr: 'Commencer',
       en: 'Start',
@@ -94,151 +95,220 @@ export default function StartPage() {
 
   const titre = t(config.titre, langue) || t(defaultTexts.titre, langue)
   const sousTitre = t(config.sousTitre, langue) || t(defaultTexts.sousTitre, langue)
-
   const labelBouton = t(config.labelBouton, langue) || t(defaultTexts.labelBouton, langue)
 
   function handleStart() {
+    const rect = iconRef.current.getBoundingClientRect()
+    // Center of the icon in viewport coordinates
+    const cx = rect.left + rect.width / 2
+    const cy = rect.top + rect.height / 2
+
+    const baseStyle = {
+      position: 'fixed',
+      borderRadius: '50%',
+      background: 'rgba(140,160,255,0.22)',
+      border: '1.5px solid rgba(255,255,255,0.3)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
+      zIndex: 1000,
+      pointerEvents: 'none',
+    }
+
+    // Step 1: place overlay icon at the exact current screen position — no visual jump
+    setIconOverlayStyle({
+      ...baseStyle,
+      top: `${cy}px`,
+      left: `${cx}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      transform: 'translate(-50%, -50%)',
+      transition: 'none',
+    })
+
     setIsExiting(true)
-    setTimeout(() => {
-      navigate('/form')
-    }, 800)
+
+    // Step 2: after 2 frames (browser has painted step 1), animate to center and grow
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setIconOverlayStyle({
+          ...baseStyle,
+          top: '50vh',
+          left: '50vw',
+          width: '190px',
+          height: '190px',
+          transform: 'translate(-50%, -50%)',
+          transition: [
+            'top 1.1s cubic-bezier(0.4, 0, 0.2, 1)',
+            'left 1.1s cubic-bezier(0.4, 0, 0.2, 1)',
+            'width 1.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            'height 1.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          ].join(', '),
+          // Pulse glow starts after icon reaches center (~1s)
+          animation: 'loaderPulse 0.85s ease-in-out 0.9s infinite',
+        })
+      })
+    })
+
+    setTimeout(() => navigate('/form'), 2000)
   }
 
   return (
-    <div
-      className={isExiting ? 'is-exiting' : ''}
-      style={{
-        position: 'relative',
-        width: '100%',
-        minHeight: '100vh',
-        background: 'linear-gradient(135deg, #0a1a6e 0%, #1a3aaa 30%, #2a3fb5 50%, #3b2fa0 70%, #6a3fb5 100%)',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '48px 32px 40px',
-        fontFamily: "'Segoe UI', system-ui, sans-serif",
-        boxSizing: 'border-box',
-      }}
-    >
-      {/* Background layers */}
-      <SolarPanelBg />
-      <HexPattern />
+    <>
+      {/* Floating icon overlay — detaches on click, moves to center as a loader */}
+      {iconOverlayStyle && (
+        <div style={iconOverlayStyle}>
+          <img
+            src={houseIcon}
+            alt=""
+            style={{ width: '62%', height: '62%', objectFit: 'contain' }}
+          />
+        </div>
+      )}
 
-      {/* Radial glow center */}
       <div
+        className={isExiting ? 'is-exiting' : ''}
         style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          width: '500px',
-          height: '400px',
-          background: 'radial-gradient(ellipse at center, rgba(100,120,255,0.18) 0%, transparent 70%)',
-          pointerEvents: 'none',
-        }}
-      />
-
-      {/* Logo — top left */}
-      <div
-        className="fade-out"
-        style={{
-          position: 'absolute',
-          top: '16px',
-          left: '16px',
-          background: 'rgba(10,26,110,0.7)',
-          borderRadius: '10px',
-          padding: '8px 12px',
+          position: 'relative',
+          width: '100%',
+          minHeight: '100vh',
+          background: isExiting
+            ? '#060c2e'
+            : 'linear-gradient(135deg, #0a1a6e 0%, #1a3aaa 30%, #2a3fb5 50%, #3b2fa0 70%, #6a3fb5 100%)',
+          transition: 'background 1s ease-out',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          border: '1px solid rgba(255,255,255,0.15)',
-          zIndex: 20,
+          justifyContent: 'center',
+          padding: '48px 32px 40px',
+          fontFamily: "'Segoe UI', system-ui, sans-serif",
+          boxSizing: 'border-box',
         }}
       >
-        <img src={ilaLogo} alt="ila 26" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
-        <span
+        {/* Background layers */}
+        <SolarPanelBg />
+        <HexPattern />
+
+        {/* Radial glow center */}
+        <div
           style={{
-            color: 'rgba(255,255,255,0.75)',
-            fontSize: '8px',
-            letterSpacing: '3px',
-            textTransform: 'uppercase',
-            marginTop: '2px',
-            fontWeight: 600,
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: '500px',
+            height: '400px',
+            background: 'radial-gradient(ellipse at center, rgba(100,120,255,0.18) 0%, transparent 70%)',
+            pointerEvents: 'none',
+          }}
+        />
+
+        {/* Logo */}
+        <div
+          className="fade-all"
+          style={{
+            position: 'absolute',
+            top: '16px',
+            left: '16px',
+            background: 'rgba(10,26,110,0.7)',
+            borderRadius: '10px',
+            padding: '8px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            border: '1px solid rgba(255,255,255,0.15)',
+            zIndex: 20,
           }}
         >
-
-        </span>
-      </div>
-
-      {/* Language selector — top right */}
-      <div
-        className="fade-out"
-        style={{
-          position: 'absolute',
-          top: '14px',
-          right: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '4px',
-          zIndex: 20,
-        }}
-      >
-        <LanguageSelector currentLang={langue} onChange={setLangue} />
-      </div>
-
-      {/* Sparkle decorations */}
-      <SparkleIcon className="fade-out" size={20} style={{ position: 'absolute', top: '60px', left: '55%', opacity: 0.5 }} />
-      <SparkleIcon className="fade-out" size={12} style={{ position: 'absolute', bottom: '50px', right: '70px', opacity: 0.4 }} />
-      <SparkleIcon className="fade-out" size={28} style={{ position: 'absolute', bottom: '30px', right: '30px', opacity: 0.55 }} />
-
-      <div className="hero-wrapper">
-        {/* Glassmorphism house icon */}
-        <div className="hero-icon">
-          <img src={houseIcon} alt="Maison" />
+          <img src={ilaLogo} alt="ila 26" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
         </div>
 
-        <div className="hero-text">
-          {/* Main heading */}
-          <h1 className="hero-title">
-            {titre}
-          </h1>
-
-          {/* Subtitle */}
-          <p className="hero-subtitle">
-            {sousTitre}
-          </p>
+        {/* Language selector */}
+        <div
+          className="fade-all"
+          style={{
+            position: 'absolute',
+            top: '14px',
+            right: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '4px',
+            zIndex: 20,
+          }}
+        >
+          <LanguageSelector currentLang={langue} onChange={setLangue} />
         </div>
-      </div>
 
+        {/* Sparkle decorations */}
+        <SparkleIcon className="fade-all" size={20} style={{ position: 'absolute', top: '60px', left: '55%', opacity: 0.5 }} />
+        <SparkleIcon className="fade-all" size={12} style={{ position: 'absolute', bottom: '50px', right: '70px', opacity: 0.4 }} />
+        <SparkleIcon className="fade-all" size={28} style={{ position: 'absolute', bottom: '30px', right: '30px', opacity: 0.55 }} />
 
-      {/* CTA button */}
-      <style>
-        {`
-          .fade-out {
-            transition: opacity 0.4s ease-out, transform 0.4s ease-out;
-            opacity: 1;
-            transform: translateY(0);
+        <div className="hero-wrapper">
+          {/* House icon — hidden the moment the overlay takes over */}
+          <div
+            className="hero-icon"
+            ref={iconRef}
+            style={{ visibility: iconOverlayStyle ? 'hidden' : 'visible' }}
+          >
+            <img src={houseIcon} alt="Maison" />
+          </div>
+
+          <div className="hero-text">
+            <h1 className="hero-title">{titre}</h1>
+            <p className="hero-subtitle">{sousTitre}</p>
+          </div>
+        </div>
+
+        <button
+          className="start-btn fade-all"
+          onClick={handleStart}
+          style={{
+            color: '#1a1a2e',
+            border: 'none',
+            borderRadius: '50px',
+            padding: '16px 42px',
+            fontSize: '17px',
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            letterSpacing: '0.5px',
+            position: 'relative',
+            zIndex: 10,
+          }}
+        >
+          {labelBouton} <span className="start-btn-icon" style={{ fontSize: '20px' }}>→</span>
+        </button>
+
+        <style>{`
+          /* All UI elements fade out slowly on exit */
+          .fade-all {
+            transition: opacity 0.75s ease-out;
           }
-          .is-exiting .fade-out {
+          .is-exiting .fade-all {
             opacity: 0;
-            transform: translateY(20px);
             pointer-events: none;
           }
 
+          /* Hero wrapper (text + icon bg) fades out */
           .hero-wrapper {
             position: relative;
             width: 100%;
-            height: 250px;
+            height: 260px;
             margin-bottom: 16px;
-            transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
             z-index: 10;
+            transition: opacity 0.65s ease-out;
           }
           .is-exiting .hero-wrapper {
-            transform: translateY(-25vh);
+            opacity: 0;
           }
 
+          /* Hero icon (original node, hidden once overlay is active) */
           .hero-icon {
             position: absolute;
             top: 0;
@@ -255,21 +325,11 @@ export default function StartPage() {
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             box-shadow: 0 4px 32px rgba(80,100,255,0.2);
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
           }
           .hero-icon img {
             width: 70px;
             height: 70px;
             object-fit: contain;
-          }
-          .is-exiting .hero-icon {
-            transform: translateX(-140px) scale(0.65);
-            top: 50px;
-            background: transparent;
-            border-color: transparent;
-            box-shadow: none;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
           }
 
           .hero-text {
@@ -282,12 +342,6 @@ export default function StartPage() {
             align-items: center;
             width: max-content;
             max-width: 90vw;
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-          }
-          .is-exiting .hero-text {
-            transform: translateX(-20px);
-            top: 50px;
-            align-items: flex-start;
           }
 
           .hero-title {
@@ -297,11 +351,6 @@ export default function StartPage() {
             margin: 0 0 8px;
             letter-spacing: -0.3px;
             line-height: 1.15;
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-          }
-          .is-exiting .hero-title {
-            font-size: 28px;
-            margin: 0 0 4px;
           }
 
           .hero-subtitle {
@@ -309,42 +358,33 @@ export default function StartPage() {
             font-size: clamp(14px, 2vw, 17px);
             font-weight: 700;
             margin: 0 0 6px;
-            transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-          }
-          .is-exiting .hero-subtitle {
-            font-size: 16px;
-            font-style: italic;
           }
 
-          @keyframes floatAndPulse {
-            0% { 
-              transform: translateY(0) scale(1); 
-              box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4), 0 4px 15px rgba(0,0,0,0.2);
-            }
-            50% { 
-              transform: translateY(-4px) scale(1.02); 
-              box-shadow: 0 0 0 10px rgba(255, 255, 255, 0), 0 10px 25px rgba(0,0,0,0.3);
-            }
-            100% { 
-              transform: translateY(0) scale(1); 
-              box-shadow: 0 0 0 0 rgba(255, 255, 255, 0), 0 4px 15px rgba(0,0,0,0.2);
-            }
+          /* Glow ring pulse — applied to the overlay icon once centered */
+          @keyframes loaderPulse {
+            0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.55), 0 0 40px rgba(100,120,255,0.35); }
+            50%  { box-shadow: 0 0 0 28px rgba(255,255,255,0), 0 0 90px rgba(100,120,255,0.75); }
+            100% { box-shadow: 0 0 0 0 rgba(255,255,255,0), 0 0 40px rgba(100,120,255,0.35); }
           }
-          
+
+          /* CTA button animations */
+          @keyframes floatAndPulse {
+            0%   { transform: translateY(0) scale(1);       box-shadow: 0 0 0 0 rgba(255,255,255,0.4), 0 4px 15px rgba(0,0,0,0.2); }
+            50%  { transform: translateY(-4px) scale(1.02); box-shadow: 0 0 0 10px rgba(255,255,255,0), 0 10px 25px rgba(0,0,0,0.3); }
+            100% { transform: translateY(0) scale(1);       box-shadow: 0 0 0 0 rgba(255,255,255,0), 0 4px 15px rgba(0,0,0,0.2); }
+          }
           @keyframes shimmer {
-            0% { left: -100%; opacity: 0; }
-            20% { opacity: 1; }
-            80% { left: 200%; opacity: 0; }
+            0%   { left: -100%; opacity: 0; }
+            20%  { opacity: 1; }
+            80%  { left: 200%; opacity: 0; }
             100% { left: 200%; opacity: 0; }
           }
-
           .start-btn {
             animation: floatAndPulse 3s infinite ease-in-out;
-            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.75s ease-out;
             overflow: hidden;
             background: linear-gradient(135deg, #ffffff 0%, #f0f0f5 100%) !important;
           }
-
           .start-btn::before {
             content: '';
             position: absolute;
@@ -352,47 +392,24 @@ export default function StartPage() {
             left: -100%;
             width: 50%;
             height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(100, 150, 255, 0.4), transparent);
+            background: linear-gradient(90deg, transparent, rgba(100,150,255,0.4), transparent);
             transform: skewX(-25deg);
             animation: shimmer 3s infinite ease-in-out;
             pointer-events: none;
           }
-
           .start-btn:hover {
             animation: none;
             transform: translateY(-6px) scale(1.06) !important;
             box-shadow: 0 15px 35px rgba(0,0,0,0.4), 0 0 20px rgba(255,255,255,0.6) !important;
           }
-          
           .start-btn-icon {
             transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
           }
           .start-btn:hover .start-btn-icon {
             transform: translateX(6px);
           }
-        `}
-      </style>
-      <button
-        className="start-btn fade-out"
-        onClick={handleStart}
-        style={{
-          color: '#1a1a2e',
-          border: 'none',
-          borderRadius: '50px',
-          padding: '16px 42px',
-          fontSize: '17px',
-          fontWeight: 800,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          letterSpacing: '0.5px',
-          position: 'relative',
-          zIndex: 10,
-        }}
-      >
-        {labelBouton} <span className="start-btn-icon" style={{ fontSize: '20px' }}>→</span>
-      </button>
-    </div>
+        `}</style>
+      </div>
+    </>
   )
 }

@@ -125,13 +125,16 @@ describe('Auth Bypass — AdminBorne cannot access SuperAdmin-only routes', () =
     mockPrisma.enregistrement.count.mockResolvedValue(0)
   })
 
-  it('AdminBorne token → GET /api/bornes (SuperAdmin only) → 403', async () => {
+  it('AdminBorne token → GET /api/bornes → 200 (filtré sur ses bornes)', async () => {
+    mockPrisma.borne.findMany.mockResolvedValue([])
+    mockPrisma.borne.count.mockResolvedValue(0)
+
     const res = await request(app)
       .get('/api/bornes')
       .set('Authorization', `Bearer ${makeAdminBorneToken()}`)
 
-    expect(res.status).toBe(403)
-    expect(res.body.error).toBeDefined()
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
   })
 
   it('AdminBorne token → GET /api/admin-bornes (SuperAdmin only) → 403', async () => {

@@ -52,6 +52,7 @@ const mockPrisma = {
     groupBy: jest.fn(),
   },
   partageJob: { create: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+  enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
   loginAttempt: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), upsert: jest.fn() },
   refreshToken: { create: jest.fn(), findMany: jest.fn(), update: jest.fn(), deleteMany: jest.fn() },
   revokedToken: { upsert: jest.fn(), findUnique: jest.fn(), deleteMany: jest.fn() },

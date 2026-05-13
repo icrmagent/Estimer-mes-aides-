@@ -115,54 +115,84 @@ export default function ExitButton({ className, style, children }) {
           style={{ background: 'rgba(0,0,0,0.7)' }}
           onClick={e => { if (e.target === e.currentTarget) closeModal() }}
         >
-          <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-gray-900">Accès administrateur</h2>
-              <span className="text-sm text-gray-400">Fermeture dans {countdown}s</span>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+            {/* Header band */}
+            <div className="px-8 pt-7 pb-5">
+              <div className="flex items-center gap-3 mb-1">
+                <div
+                  className="flex items-center justify-center rounded-xl w-9 h-9 shrink-0"
+                  style={{ background: 'rgba(91,45,142,0.1)' }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#5B2D8E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                </div>
+                <h2 className="text-base font-bold text-gray-900 leading-tight">Accès administrateur</h2>
+              </div>
+              <div className="flex items-center gap-1.5 mt-2 ml-12">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-500 shrink-0">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                <span className="text-xs font-medium text-amber-600">Fermeture dans {countdown}s</span>
+              </div>
             </div>
 
-            {error && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
-                {error}
-              </div>
-            )}
+            <div className="px-8 pb-7">
+              {error && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-center gap-2">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  {error}
+                </div>
+              )}
 
-            <form onSubmit={handleVerify} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  Mot de passe AdminBorne
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  required
-                  autoFocus
-                  className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2"
-                  style={{ minHeight: '52px', fontSize: '16px' }}
-                  placeholder="••••••••"
-                />
-              </div>
+              <form onSubmit={handleVerify} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                    Mot de passe AdminBorne
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    required
+                    autoFocus
+                    className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none transition-colors"
+                    style={{ minHeight: '52px', fontSize: '16px', '--tw-ring-color': '#5B2D8E' }}
+                    onFocus={e => { e.target.style.borderColor = '#5B2D8E' }}
+                    onBlur={e => { e.target.style.borderColor = '#e5e7eb' }}
+                    placeholder="••••••••"
+                  />
+                </div>
 
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="flex-1 border border-gray-300 rounded-xl py-3 font-medium text-gray-600 hover:bg-gray-50"
-                  style={{ minHeight: '52px', fontSize: '16px' }}
-                >
-                  Annuler
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 text-white font-bold rounded-xl py-3 disabled:opacity-50"
-                  style={{ background: '#5B2D8E', minHeight: '52px', fontSize: '16px' }}
-                >
-                  {loading ? '...' : 'Confirmer'}
-                </button>
-              </div>
-            </form>
+                <div className="flex gap-3 pt-1">
+                  <button
+                    type="button"
+                    onClick={closeModal}
+                    className="flex-1 rounded-xl py-3 font-semibold text-gray-500 bg-gray-100 hover:bg-gray-200 transition-colors"
+                    style={{ minHeight: '52px', fontSize: '15px' }}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="flex-1 text-white font-bold rounded-xl py-3 disabled:opacity-50 transition-opacity shadow-sm"
+                    style={{ background: 'linear-gradient(135deg, #6D35A8 0%, #5B2D8E 100%)', minHeight: '52px', fontSize: '15px' }}
+                  >
+                    {loading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        </svg>
+                        Vérification
+                      </span>
+                    ) : 'Confirmer'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

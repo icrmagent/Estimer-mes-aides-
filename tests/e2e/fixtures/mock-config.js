@@ -1,3 +1,36 @@
+export const BORNE_ID = '8b581903-700d-493d-b50b-4b4583c1c011'
+
+const V2_QUESTIONS = [
+  // Page 1 — champs obligatoires texte
+  { id: 'q-nom',    formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Nom', es: 'Nombre', en: 'Last Name' },       typeOption: 'texte_court', obligatoire: true,  orderPage: 1,  ordreDansPage: 0, options: null, crmFieldIds: [2087] },
+  { id: 'q-prenom', formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Prénom', es: 'Nombre', en: 'First Name' },    typeOption: 'texte_court', obligatoire: true,  orderPage: 1,  ordreDansPage: 1, options: null, crmFieldIds: [2088] },
+  { id: 'q-cp',     formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Code postal', es: 'CP', en: 'Postcode' },     typeOption: 'texte_court', obligatoire: true,  orderPage: 1,  ordreDansPage: 2, options: null, crmFieldIds: [2089] },
+  { id: 'q-ville',  formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Ville', es: 'Ciudad', en: 'City' },           typeOption: 'texte_court', obligatoire: true,  orderPage: 1,  ordreDansPage: 3, options: null, crmFieldIds: [2090] },
+  // Page 2 — radio obligatoire
+  { id: 'q-revenu', formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Revenu fiscal', es: 'Renta', en: 'Income' },  typeOption: 'option_unique', obligatoire: true, orderPage: 2, ordreDansPage: 0,
+    options: [{ id: 'moins', label: { fr: 'Moins de 23 734€', es: 'Menos de 23 734€', en: 'Less than 23,734€' } }, { id: 'plus', label: { fr: 'Plus de 23 734€', es: 'Más de 23 734€', en: 'More than 23,734€' } }], crmFieldIds: [2294] },
+  // Page 3 — radio obligatoire
+  { id: 'q-statut', formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Statut propriétaire', es: 'Estado', en: 'Status' }, typeOption: 'option_unique', obligatoire: true, orderPage: 3, ordreDansPage: 0,
+    options: [{ id: 'prop', label: { fr: 'Propriétaire', es: 'Propietario', en: 'Owner' } }, { id: 'loc', label: { fr: 'Locataire', es: 'Inquilino', en: 'Tenant' } }], crmFieldIds: [2293] },
+  // Pages 4-14 — radios optionnels
+  ...Array.from({ length: 11 }, (_, i) => ({
+    id: `q-p${i + 4}`, formulaireId: 'form-e2e-uuid',
+    libelleQuestion: { fr: `Question ${i + 4}`, es: `Pregunta ${i + 4}`, en: `Question ${i + 4}` },
+    typeOption: 'option_unique', obligatoire: false, orderPage: i + 4, ordreDansPage: 0,
+    options: [{ id: 'o1', label: { fr: 'Option 1', es: 'Opción 1', en: 'Option 1' } }, { id: 'o2', label: { fr: 'Option 2', es: 'Opción 2', en: 'Option 2' } }],
+    crmFieldIds: [],
+  })),
+  // Page 15 — texte optionnel (dernière page → bouton Terminer)
+  { id: 'q-comm', formulaireId: 'form-e2e-uuid', libelleQuestion: { fr: 'Commentaires', es: 'Comentarios', en: 'Comments' }, typeOption: 'texte_long', obligatoire: false, orderPage: 15, ordreDansPage: 0, options: null, crmFieldIds: [2305] },
+]
+
+export const MOCK_BORNE_CONFIG = {
+  data: {
+    borne: { id: BORNE_ID, idBorne: 'BORNE-E2E', langueDefaut: 'fr', adresse: '1 rue Test E2E' },
+    formulaire: { id: 'form-e2e-uuid', label: 'Formulaire E2E', version: '1.0.0', dureeRetourAccueil: 30, questions: V2_QUESTIONS, pageDebutConfig: {}, pageFinConfig: {} },
+  },
+}
+
 export const MOCK_CONFIG = {
   version: '1.0.0',
   updatedAt: '2026-04-26T00:00:00.000Z',

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
+import { ErrorBanner } from '../../components/ui.jsx'
 
 export default function BorneFormPage() {
   const { id } = useParams()
@@ -15,6 +16,7 @@ export default function BorneFormPage() {
     commercant: '',
     regie: '',
     installateur: '',
+    canalTransmission: '',
     formulaireId: '',
     adminBorneId: '',
   })
@@ -45,6 +47,7 @@ export default function BorneFormPage() {
             commercant: b.commercant || '',
             regie: b.regie || '',
             installateur: b.installateur || '',
+            canalTransmission: b.canalTransmission || '',
             formulaireId: b.formulaireId || '',
             adminBorneId: b.adminBorneId || '',
           })
@@ -107,9 +110,7 @@ export default function BorneFormPage() {
           <h1 className="text-2xl font-bold text-gray-900">{isEdit ? 'Modifier la borne' : 'Nouvelle borne'}</h1>
         </div>
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">{error}</div>
-        )}
+        <ErrorBanner message={error} onClose={() => setError(null)} />
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm p-6 space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -196,6 +197,21 @@ export default function BorneFormPage() {
                 placeholder="Nom de l'installateur"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Canal de transmission I-CRM</label>
+            <input
+              type="text"
+              value={form.canalTransmission}
+              onChange={e => handleChange('canalTransmission', e.target.value)}
+              className={inputClass}
+              style={inputStyle}
+              placeholder="ex: canal-principal (configurer les identifiants dans Partage)"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">

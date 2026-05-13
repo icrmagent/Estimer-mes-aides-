@@ -7,9 +7,24 @@ import { FormPage } from './pages/FormPage.jsx'
 import { ConfirmationPage } from './pages/ConfirmationPage.jsx'
 import { useBorneConfig } from './hooks/useBorneConfig.js'
 
-// Borne ID from env or URL param — in production this comes from the device config
 const BORNE_ID = import.meta.env.VITE_BORNE_ID || null
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
+/* Redirige vers /start si un token valide est présent, sinon vers /login.
+   Permet la reprise automatique de session après coupure de courant. */
+function RootRedirect() {
+  const token = localStorage.getItem('borne_token')
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      if (payload.exp * 1000 > Date.now()) {
+        return <Navigate to="/start" replace />
+      }
+    } catch {}
+    localStorage.removeItem('borne_token')
+  }
+  return <Navigate to="/login" replace />
+}
 
 function KioskLayout() {
   const { loading, loadError } = useBorneConfig(BORNE_ID, API_URL)
@@ -65,8 +80,8 @@ export default function App() {
               <Route path="/confirmation" element={<ConfirmationPage />} />
             </Route>
 
-            {/* Redirect racine vers login */}
-            <Route path="/" element={<Navigate to="/login" replace />} />
+            {/* Reprise de session ou redirection vers login */}
+            <Route path="/" element={<RootRedirect />} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>
