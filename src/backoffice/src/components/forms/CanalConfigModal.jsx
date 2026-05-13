@@ -3,26 +3,31 @@ import api from '../../services/api.js'
 
 /**
  * CanalConfigModal — Modal pour créer/modifier la configuration d'un canal I-CRM
- * 
+ *
  * Props:
- * - isOpen: boolean — affiche/masque le modal
- * - onClose: function — appelé quand fermer
- * - borneId: string — UUID de la borne
+ * - isOpen: boolean
+ * - onClose: function
+ * - borneId: string — UUID pré-sélectionné (borne active dans la page parente)
+ * - bornes: array — liste complète des bornes pour le sélecteur
  * - onSave: function — appelé après succès (reçoit le canal créé/modifié)
- * - initialCanal?: object — pour modification (avec id, label, apiUrl, apiKey, token, actif)
+ * - initialCanal?: object — pour modification
  */
-export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, initialCanal = null }) {
-  const [label, setLabel] = useState('')
-  const [apiUrl, setApiUrl] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [token, setToken] = useState('')
-  const [actif, setActif] = useState(true)
-  const [error, setError] = useState(null)
+export default function CanalConfigModal({ isOpen, onClose, borneId, bornes = [], onSave, initialCanal = null }) {
+  const [selectedBorneId, setSelectedBorneId] = useState(borneId || '')
+  const [label, setLabel]     = useState('')
+  const [apiUrl, setApiUrl]   = useState('')
+  const [apiKey, setApiKey]   = useState('')
+  const [token, setToken]     = useState('')
+  const [actif, setActif]     = useState(true)
+  const [affecterBorne, setAffecterBorne] = useState(true)
+  const [error, setError]     = useState(null)
   const [loading, setLoading] = useState(false)
 
-  // Réinitialiser le formulaire quand le modal s'ouvre/ferme ou quand initialCanal change
   useEffect(() => {
     if (isOpen) {
+      setSelectedBorneId(borneId || '')
+      setAffecterBorne(true)
+      setError(null)
       if (initialCanal) {
         setLabel(initialCanal.label || '')
         setApiUrl(initialCanal.apiUrl || '')
@@ -36,9 +41,8 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
         setToken('')
         setActif(true)
       }
-      setError(null)
     }
-  }, [isOpen, initialCanal])
+  }, [isOpen, initialCanal, borneId])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -46,61 +50,40 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
     setLoading(true)
 
     try {
-      // Validation simple
-      if (!label.trim()) {
-        setError('Le label du canal est requis')
-        setLoading(false)
-        return
-      }
-      if (!apiUrl.trim()) {
-        setError('L\'URL API est requise')
-        setLoading(false)
-        return
-      }
-      if (!apiKey.trim()) {
-        setError('La clé API est requise')
-        setLoading(false)
-        return
-      }
-      if (!token.trim()) {
-        setError('Le token est requis')
-        setLoading(false)
-        return
-      }
+      if (!selectedBorneId) { setError('Sélectionnez une borne'); setLoading(false); return }
+      if (!label.trim())    { setError('Le label du canal est requis'); setLoading(false); return }
+      if (!apiUrl.trim())   { setError("L'URL API est requise"); setLoading(false); return }
+      if (!apiKey.trim())   { setError('La clé API est requise'); setLoading(false); return }
+      if (!token.trim())    { setError('Le token est requis'); setLoading(false); return }
 
       let response
-      if (initialCanal && initialCanal.id) {
-        // Modification
+      if (initialCanal?.id) {
         response = await api.put(`/api/canaux/${initialCanal.id}`, {
-          label: label.trim(),
-          apiUrl: apiUrl.trim(),
-          apiKey: apiKey.trim(),
-          token: token.trim(),
-          actif,
+          label: label.trim(), apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), token: token.trim(), actif,
         })
       } else {
-        // Création
         response = await api.post('/api/canaux', {
-          label: label.trim(),
-          apiUrl: apiUrl.trim(),
-          apiKey: apiKey.trim(),
-          token: token.trim(),
-          actif,
-          borneId,
+          label: label.trim(), apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), token: token.trim(), actif,
+          borneId: selectedBorneId,
         })
       }
 
-      const canal = response.data
-      if (onSave) {
-        onSave(canal)
+      // Affecter la borne au canal (canalTransmission = label)
+      if (affecterBorne && selectedBorneId) {
+        await api.put(`/api/partage/bornes/${selectedBorneId}/canal`, {
+          canalTransmission: label.trim(),
+        })
       }
+
+      if (onSave) onSave(response.data)
       onClose()
     } catch (err) {
-      const errorMsg = err.response?.data?.error?.message ||
-                       err.response?.data?.error ||
-                       err.message ||
-                       'Erreur lors de l\'enregistrement du canal'
-      setError(errorMsg)
+      setError(
+        err.response?.data?.error?.message ||
+        err.response?.data?.error ||
+        err.message ||
+        "Erreur lors de l'enregistrement du canal"
+      )
     } finally {
       setLoading(false)
     }
@@ -115,27 +98,38 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        {/* Entête */}
+
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-gray-900">
             {initialCanal ? 'Modifier le canal' : 'Créer un nouveau canal'}
           </h2>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="text-gray-400 hover:text-gray-600 disabled:opacity-50 text-2xl leading-none"
-          >
-            ✕
-          </button>
+          <button onClick={onClose} disabled={loading} className="text-gray-400 hover:text-gray-600 disabled:opacity-50 text-2xl leading-none">✕</button>
         </div>
 
-        {/* Contenu */}
         <form onSubmit={handleSubmit} className="space-y-4 p-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">
-              {error}
-            </div>
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-700 text-sm">{error}</div>
           )}
+
+          {/* Borne */}
+          <div>
+            <label className={labelClass}>Borne assignée</label>
+            <select
+              value={selectedBorneId}
+              onChange={(e) => setSelectedBorneId(e.target.value)}
+              className={inputClass}
+              style={inputStyle}
+              disabled={loading}
+            >
+              <option value="">— Sélectionner une borne —</option>
+              {bornes.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.idBorne}{b.adresse ? ` · ${b.adresse}` : ''}
+                  {b.canalTransmission ? ` (canal: ${b.canalTransmission})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Label */}
           <div>
@@ -160,12 +154,11 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
               type="url"
               value={apiUrl}
               onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="Ex: https://api.icrm.example.com"
+              placeholder="https://app-web-abondance-dev-webapi.azurewebsites.net"
               className={inputClass}
               style={inputStyle}
               disabled={loading}
             />
-            <div className="text-xs text-gray-400 mt-1">URL valide requise</div>
           </div>
 
           {/* Clé API */}
@@ -180,38 +173,48 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
               style={inputStyle}
               disabled={loading}
             />
-            <div className="text-xs text-gray-400 mt-1">Clé secrète confidentielle</div>
           </div>
 
-          {/* Token */}
+          {/* Token JWT */}
           <div>
-            <label className={labelClass}>Token</label>
-            <input
-              type="password"
+            <label className={labelClass}>Token JWT I-CRM</label>
+            <textarea
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="••••••••••••••••••••"
+              placeholder="eyJhbGciOi..."
               className={inputClass}
-              style={inputStyle}
+              style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'monospace', fontSize: '11px' }}
               disabled={loading}
             />
-            <div className="text-xs text-gray-400 mt-1">Token de connexion I-CRM</div>
+            <div className="text-xs text-gray-400 mt-1">Bearer token — à renouveler à l'expiration</div>
           </div>
 
-          {/* Actif */}
-          <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="actif"
-              checked={actif}
-              onChange={(e) => setActif(e.target.checked)}
-              disabled={loading}
-              className="rounded"
-              style={{ minWidth: '20px', minHeight: '20px' }}
-            />
-            <label htmlFor="actif" className="text-sm text-gray-600 font-medium cursor-pointer">
-              Canal actif
-            </label>
+          {/* Actif + Affecter */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="actif"
+                checked={actif}
+                onChange={(e) => setActif(e.target.checked)}
+                disabled={loading}
+                style={{ minWidth: '20px', minHeight: '20px' }}
+              />
+              <label htmlFor="actif" className="text-sm text-gray-600 font-medium cursor-pointer">Canal actif</label>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                id="affecterBorne"
+                checked={affecterBorne}
+                onChange={(e) => setAffecterBorne(e.target.checked)}
+                disabled={loading}
+                style={{ minWidth: '20px', minHeight: '20px' }}
+              />
+              <label htmlFor="affecterBorne" className="text-sm text-gray-600 font-medium cursor-pointer">
+                Affecter ce canal à la borne sélectionnée
+              </label>
+            </div>
           </div>
 
           {/* Boutons */}
@@ -228,10 +231,10 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, onSave, ini
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50 transition"
+              className="flex-1 px-4 py-2.5 text-sm font-medium rounded-xl text-white disabled:opacity-50 transition"
               style={{ minHeight: '40px', background: '#5B2D8E' }}
             >
-              {loading ? 'En cours...' : (initialCanal ? 'Modifier' : 'Créer')}
+              {loading ? 'En cours...' : (initialCanal ? 'Modifier' : 'Créer et affecter')}
             </button>
           </div>
         </form>

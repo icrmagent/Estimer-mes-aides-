@@ -143,6 +143,7 @@ export default function PartageJobsPage() {
   const handleCanalSaved = (canal) => {
     setSuccess('Canal enregistré avec succès.')
     fetchCanaux()
+    fetchBornes()
     setEditingCanal(null)
     setShowCanalModal(false)
   }
@@ -454,6 +455,7 @@ export default function PartageJobsPage() {
             setEditingCanal(null)
           }}
           borneId={selectedBorneId}
+          bornes={bornes}
           onSave={handleCanalSaved}
           initialCanal={editingCanal}
         />
