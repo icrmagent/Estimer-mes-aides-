@@ -5,6 +5,72 @@ import logger from '../lib/logger.js'
 const POLL_INTERVAL = 30 * 1000 // 30 secondes
 const MAX_TENTATIVES = 5        // Task 30.3 — échec_définitif after 5 failures
 
+// Mapping CRM field ID → nom de champ I-CRM API
+const FIELD_ID_MAP = {
+  2087: 'last_name',
+  2088: 'first_name',
+  2089: 'code_postale',
+  2090: 'ville',
+  2262: 'civility',
+}
+
+// Fallback : libellé FR normalisé → nom de champ I-CRM API
+const LABEL_MAP = {
+  'nom': 'last_name',
+  'prénom': 'first_name',
+  'prenom': 'first_name',
+  'email': 'email_adress',
+  'e-mail': 'email_adress',
+  'adresse email': 'email_adress',
+  'téléphone': 'phone_number',
+  'telephone': 'phone_number',
+  'tél': 'phone_number',
+  'tel': 'phone_number',
+  'adresse': 'adresse',
+  'ville': 'ville',
+  'code postal': 'code_postale',
+  'civilité': 'civility',
+  'civilite': 'civility',
+}
+
+function mapReponsesToICRM(reponses) {
+  const payload = {
+    dtypes: 1,
+    user_id: parseInt(process.env.CRM_USER_ID || '1', 10),
+    type_contact_id: 1,
+    user_type: 'societe',
+  }
+
+  for (const r of reponses) {
+    let icrmField = null
+
+    const crmFieldIds = r.question.crmFieldIds
+    if (crmFieldIds !== null && crmFieldIds !== undefined) {
+      const ids = Array.isArray(crmFieldIds) ? crmFieldIds : [crmFieldIds]
+      for (const id of ids) {
+        if (FIELD_ID_MAP[id]) {
+          icrmField = FIELD_ID_MAP[id]
+          break
+        }
+      }
+    }
+
+    if (!icrmField) {
+      const labelJson = r.question.libelleQuestion
+      const raw = typeof labelJson === 'object' && labelJson !== null
+        ? (labelJson.fr || labelJson.FR || Object.values(labelJson)[0] || '')
+        : (labelJson || '')
+      icrmField = LABEL_MAP[raw.toString().toLowerCase().trim()]
+    }
+
+    if (icrmField) {
+      payload[icrmField] = r.valeur
+    }
+  }
+
+  return payload
+}
+
 let workerInterval = null
 let isRunning = false
 
@@ -53,7 +119,7 @@ async function processJob(job) {
         borne: { select: { id: true, idBorne: true, canalTransmission: true } },
         reponses: {
           include: {
-            question: { select: { libelleQuestion: true, orderPage: true } },
+            question: { select: { libelleQuestion: true, orderPage: true, crmFieldIds: true } },
           },
         },
       },
@@ -63,10 +129,7 @@ async function processJob(job) {
       throw new Error(`Enregistrement ${job.enregistrementId} introuvable`)
     }
 
-    const fieldValues = enregistrement.reponses.map(r => ({
-      field_id: r.questionId,
-      value: r.valeur,
-    }))
+    const icrmPayload = mapReponsesToICRM(enregistrement.reponses)
 
     // Task 30.1 — 30-second timeout via AbortController
     const controller = new AbortController()
@@ -74,19 +137,13 @@ async function processJob(job) {
 
     let crmRes
     try {
-      crmRes = await fetch(`${crmUrl}/api/submissions`, {
+      crmRes = await fetch(`${crmUrl}/api/customContacts?lang=fr`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': crmKey,
+          'Authorization': `Bearer ${crmKey}`,
         },
-        body: JSON.stringify({
-          source: 'borne_v2',
-          borne_id: enregistrement.borne?.idBorne,
-          canal_transmission: enregistrement.borne?.canalTransmission || undefined,
-          langue: enregistrement.langueUtilisee,
-          field_values: fieldValues,
-        }),
+        body: JSON.stringify(icrmPayload),
         signal: controller.signal,
       })
     } finally {
