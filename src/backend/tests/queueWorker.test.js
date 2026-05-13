@@ -45,6 +45,7 @@ const mockEnregistrement = {
   borne: { id: 'borne-uuid-1', idBorne: 'BORNE-001' },
   reponses: [
     { questionId: 'q-1', valeur: 'Dupont', question: { libelleQuestion: { fr: 'Nom' }, orderPage: 1 } },
+    { questionId: 'q-2', valeur: 'Jean',   question: { libelleQuestion: { fr: 'Prénom' }, orderPage: 1 } },
   ],
 }
 
@@ -106,10 +107,13 @@ describe('queueWorker — processJob', () => {
       await processJob(makeJob())
 
       expect(global.fetch).toHaveBeenCalledWith(
-        'http://crm-test.example.com/api/submissions',
+        'http://crm-test.example.com/api/customContacts?lang=fr',
         expect.objectContaining({
           method: 'POST',
-          headers: expect.objectContaining({ 'x-api-key': 'test-crm-key' }),
+          headers: expect.objectContaining({
+            'Authorization': 'Bearer test-crm-key',
+            'Content-Type': 'application/json',
+          }),
         })
       )
     })

@@ -114,8 +114,13 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   deploy-backend:
     name: Deploy Backend → Railway
-    needs: migrate
-    if: ${{ always() && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    needs: [tests, migrate]
+    # Ne tourne que si :
+    # - tests OK (ou explicitement sautés via inputs)
+    # - ET migrate OK (ou explicitement sautée via inputs)
+    if: ${{ always()
+        && (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && inputs.skip_tests == true))
+        && (needs.migrate.result == 'success' || (needs.migrate.result == 'skipped' && inputs.skip_migration == true)) }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -194,8 +199,8 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   build-webview:
     name: Build Android WebView APK
-    needs: deploy-vercel
-    if: ${{ inputs.skip_webview != true }}
+    needs: [sync, deploy-vercel]
+    if: ${{ inputs.skip_webview != true && needs.deploy-vercel.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -127,11 +127,12 @@ describe('Integration — CRM Queue Worker: processJob', () => {
 
       // Verify CRM API was called
       expect(global.fetch).toHaveBeenCalledWith(
-        'https://crm.example.com/api/submissions',
+        'https://crm.example.com/api/customContacts?lang=fr',
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
-            'x-api-key': 'test-crm-api-key',
+            'Authorization': 'Bearer test-crm-api-key',
+            'Content-Type': 'application/json',
           }),
         })
       )

@@ -68,6 +68,11 @@ const mockEnregistrementData = {
       valeur: 'Dupont',
       question: { libelleQuestion: { fr: 'Nom' }, orderPage: 1 },
     },
+    {
+      questionId: 'q-2',
+      valeur: 'Jean',
+      question: { libelleQuestion: { fr: 'Prénom' }, orderPage: 1 },
+    },
   ],
 }
 
