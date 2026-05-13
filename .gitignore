@@ -2,8 +2,15 @@
 bd.txt
 *.env
 *.env.local
+.env.production
+.env.deploy
 git ssh
 git ssh.pub
+android-webview/keystore/keystore.properties
+android-webview/keystore/*.keystore
+
+# Build frontend embarqué dans la WebView (généré à chaque build)
+android-webview/app/src/main/assets/
 
 # Fichiers temporaires / prototypes (racine uniquement)
 estimer-vos-aides.html

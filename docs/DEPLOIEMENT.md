@@ -195,8 +195,58 @@ import('./src/lib/prisma.js').then(async ({prisma}) => {
 
 ### Déploiement
 
+#### Pipeline automatique (recommandé)
+
+À chaque `push` sur `main`, [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) exécute :
+
+```
+1. sync         → checkout + vérif lockfiles
+2. tests        → npm test (backend Jest, 72+ tests V1+V2)
+3. migrate      → prisma migrate deploy sur Supabase (DIRECT_URL port 5432)
+4. deploy-backend → Railway (npx @railway/cli up) + healthcheck /health
+5. deploy-vercel  → matrix [frontend, backoffice, crm-module] en parallèle
+6. build-webview  → APK Android signé (artefact 30 j)
+7. finalize       → tag git `deploy-YYYYMMDD-HHMMSS-<sha>` + summary
+```
+
+Déclenchement manuel avec options dans **GitHub → Actions → Deploy Production → Run workflow** :
+- `skip_tests` (hotfix d'urgence)
+- `skip_migration` (si déjà appliquée)
+- `skip_webview` (deploy web uniquement)
+
+**Secrets GitHub requis** (Settings → Secrets and variables → Actions) :
+
+| Catégorie | Secret |
+|-----------|--------|
+| DB | `DATABASE_URL`, `DIRECT_URL` |
+| Backend | `JWT_SECRET`, `API_KEY_MOBILE`, `API_KEY_CRM`, `BACKEND_URL` |
+| Railway | `RAILWAY_TOKEN`, `RAILWAY_SERVICE` |
+| Vercel | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID_FRONTEND`, `VERCEL_PROJECT_ID_BACKOFFICE`, `VERCEL_PROJECT_ID_CRM` |
+| Android (optionnel) | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` |
+
+> Si les 4 secrets Android sont absents, le job produit un APK **debug** au lieu d'un APK release signé.
+
+#### Pipeline local (scripts/deploy)
+
+Copier [.env.deploy.example](../.env.deploy.example) en `.env.deploy` puis :
+
+```powershell
+# Windows
+.\scripts\deploy.ps1                      # pipeline complet
+.\scripts\deploy.ps1 -SkipWebview         # web uniquement
+.\scripts\deploy.ps1 -SkipTests -SkipMigration  # redeploy rapide
+```
+
 ```bash
-# Backend → Railway (automatique sur push, ou manuel)
+# macOS / Linux
+./scripts/deploy.sh
+./scripts/deploy.sh --skip-webview
+```
+
+#### Déploiement par composant (manuel)
+
+```bash
+# Backend → Railway
 cd src/backend && railway up
 
 # Frontend → Vercel
@@ -204,6 +254,12 @@ cd src/frontend && npx vercel --prod
 
 # CRM Module → Vercel
 cd src/crm-module && npx vercel --prod
+
+# Back-Office → Vercel
+cd src/backoffice && npx vercel --prod
+
+# Migration DB seule
+cd src/backend && DATABASE_URL=$DIRECT_URL npx prisma migrate deploy
 ```
 
 ### Tests

@@ -1,0 +1,297 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (urgence hotfix)'
+        type: boolean
+        default: false
+      skip_migration:
+        description: 'Skip Prisma migrate deploy'
+        type: boolean
+        default: false
+      skip_webview:
+        description: 'Skip Android WebView build'
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. SYNC — Vérifie la cohérence du repo (sources, lockfiles)
+  # ─────────────────────────────────────────────────────────────
+  sync:
+    name: Sync repo & install
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: meta
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Verify lockfiles present
+        run: |
+          for dir in src/backend src/frontend src/backoffice src/crm-module; do
+            test -f "$dir/package-lock.json" || { echo "Missing lockfile in $dir"; exit 1; }
+          done
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. TESTS — Backend Jest (29 V1 + 72+ V2)
+  # ─────────────────────────────────────────────────────────────
+  tests:
+    name: Tests backend
+    needs: sync
+    runs-on: ubuntu-latest
+    if: ${{ inputs.skip_tests != true }}
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+        env:
+          NODE_ENV: test
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          API_KEY_MOBILE: ${{ secrets.API_KEY_MOBILE }}
+          API_KEY_CRM: ${{ secrets.API_KEY_CRM }}
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. MIGRATION — Prisma migrate deploy (sur Supabase prod)
+  # ─────────────────────────────────────────────────────────────
+  migrate:
+    name: Migration DB Prisma
+    needs: [sync, tests]
+    if: ${{ always() && needs.sync.result == 'success' && (needs.tests.result == 'success' || inputs.skip_tests == true) && inputs.skip_migration != true }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/backend/package-lock.json
+      - run: npm ci
+      - name: prisma migrate deploy
+        run: npx prisma migrate deploy
+        env:
+          # DIRECT_URL = pooler session port 5432 (requis pour migrate)
+          DATABASE_URL: ${{ secrets.DIRECT_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+
+  # ─────────────────────────────────────────────────────────────
+  # 4. DEPLOY BACKEND — Railway
+  # ─────────────────────────────────────────────────────────────
+  deploy-backend:
+    name: Deploy Backend → Railway
+    needs: migrate
+    if: ${{ always() && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Railway deploy
+        run: npx -y @railway/cli@latest up --service ${{ secrets.RAILWAY_SERVICE }} --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Healthcheck
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 15
+            if curl -fsS "${{ secrets.BACKEND_URL }}/health"; then
+              echo "Backend healthy"
+              exit 0
+            fi
+            echo "Try $i failed, retry..."
+          done
+          echo "Backend healthcheck failed"
+          exit 1
+
+  # ─────────────────────────────────────────────────────────────
+  # 5. DEPLOY VITE APPS — Vercel (frontend, back-office, CRM)
+  # ─────────────────────────────────────────────────────────────
+  deploy-vercel:
+    name: Deploy ${{ matrix.app.name }} → Vercel
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app:
+          - name: frontend
+            dir: src/frontend
+            project_id_secret: VERCEL_PROJECT_ID_FRONTEND
+          - name: backoffice
+            dir: src/backoffice
+            project_id_secret: VERCEL_PROJECT_ID_BACKOFFICE
+          - name: crm-module
+            dir: src/crm-module
+            project_id_secret: VERCEL_PROJECT_ID_CRM
+    defaults:
+      run:
+        working-directory: ${{ matrix.app.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.app.dir }}/package-lock.json
+      - run: npm ci
+      - name: Pull Vercel env
+        run: npx -y vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
+      - name: Build
+        run: npx -y vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
+      - name: Deploy
+        run: npx -y vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
+
+  # ─────────────────────────────────────────────────────────────
+  # 6. WEBVIEW — Build APK Android signé
+  # ─────────────────────────────────────────────────────────────
+  build-webview:
+    name: Build Android WebView APK
+    needs: deploy-vercel
+    if: ${{ inputs.skip_webview != true }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Decode keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        run: |
+          mkdir -p android-webview/keystore
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > android-webview/keystore/release.keystore
+          cat > android-webview/keystore/keystore.properties <<EOF
+          storeFile=../keystore/release.keystore
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Grant gradle perms
+        working-directory: android-webview
+        run: chmod +x ./gradlew || true
+
+      - name: Compute version (sync avec frontend)
+        id: version
+        run: |
+          FRONT_VERSION=$(node -p "require('./src/frontend/package.json').version")
+          VERSION_CODE=$(git rev-list --count HEAD)
+          echo "name=$FRONT_VERSION" >> $GITHUB_OUTPUT
+          echo "code=$VERSION_CODE"  >> $GITHUB_OUTPUT
+          echo "APK versionName=$FRONT_VERSION  versionCode=$VERSION_CODE"
+
+      - name: Build APK
+        working-directory: android-webview
+        run: |
+          if [ -f keystore/release.keystore ]; then
+            ./gradlew assembleRelease --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
+          else
+            echo "No keystore secret — building debug APK"
+            ./gradlew assembleDebug --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webview-apk-${{ needs.sync.outputs.short_sha }}
+          path: |
+            android-webview/app/build/outputs/apk/release/*.apk
+            android-webview/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # 7. POST-DEPLOY — Tag git + résumé
+  # ─────────────────────────────────────────────────────────────
+  finalize:
+    name: Tag & summary
+    needs: [sync, deploy-backend, deploy-vercel]
+    if: ${{ always() && needs.deploy-backend.result == 'success' && needs.deploy-vercel.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tag deployment
+        run: |
+          TAG="deploy-$(date -u +%Y%m%d-%H%M%S)-${{ needs.sync.outputs.short_sha }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Production deploy ${{ needs.sync.outputs.short_sha }}"
+          git push origin "$TAG"
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          ## ✅ Déploiement réussi
+
+          | Étape | Statut |
+          |-------|--------|
+          | Tests backend | ${{ needs.tests.result || 'skipped' }} |
+          | Migration DB | ${{ needs.migrate.result || 'skipped' }} |
+          | Backend Railway | ${{ needs.deploy-backend.result }} |
+          | Vercel (frontend, backoffice, CRM) | ${{ needs.deploy-vercel.result }} |
+          | WebView APK | ${{ needs.build-webview.result || 'skipped' }} |
+
+          - **Commit** : \`${{ needs.sync.outputs.short_sha }}\`
+          - **Tag** : \`$TAG\`
+          - **Backend** : ${{ secrets.BACKEND_URL }}
+          EOF

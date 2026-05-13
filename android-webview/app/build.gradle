@@ -10,6 +10,32 @@ if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 }
 
+// Source unique de vérité : src/frontend/package.json
+// versionName = "version" du package.json
+// versionCode = surchargeable via -PversionCodeOverride (sinon nb de commits git, sinon 1)
+def frontendPkg = new File(rootProject.projectDir, "../src/frontend/package.json")
+def frontendVersionName = "2.0.0"
+if (frontendPkg.exists()) {
+    def matcher = frontendPkg.text =~ /"version"\s*:\s*"([^"]+)"/
+    if (matcher.find()) { frontendVersionName = matcher.group(1) }
+}
+
+def computedVersionCode = 1
+if (project.hasProperty("versionCodeOverride")) {
+    computedVersionCode = project.versionCodeOverride as Integer
+} else {
+    try {
+        def out = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-list', '--count', 'HEAD'
+            standardOutput = out
+            ignoreExitValue = true
+        }
+        def s = out.toString().trim()
+        if (s) { computedVersionCode = s as Integer }
+    } catch (ignored) { }
+}
+
 android {
     namespace 'fr.ila26.estimermesaides'
     compileSdk 34
@@ -18,8 +44,8 @@ android {
         applicationId "fr.ila26.estimermesaides"
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName "2.0.0"
+        versionCode computedVersionCode
+        versionName frontendVersionName
     }
 
     signingConfigs {
