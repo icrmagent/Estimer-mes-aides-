@@ -30,6 +30,13 @@ const updateEnregistrementSchema = z.object({
 
 const listQuerySchema = z.object({
   id: z.string().uuid().optional(),
+  ids: z
+    .string()
+    .optional()
+    .refine(
+      (val) => !val || val.split(',').every((s) => /^[0-9a-f-]{36}$/i.test(s.trim())),
+      { message: 'ids doit être une liste d\'UUID séparés par des virgules' }
+    ),
   borneId: z.string().uuid().optional(),
   formulaireId: z.string().uuid().optional(),
   dateDebut: z.string().datetime({ offset: true }).optional(),
@@ -39,6 +46,10 @@ const listQuerySchema = z.object({
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(500).default(50),
+})
+
+const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500),
 })
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -65,6 +76,10 @@ async function buildWhereClause(user, filters) {
   const where = { deletedAt: null }
 
   if (filters.id) where.id = filters.id
+  if (filters.ids) {
+    const idArray = filters.ids.split(',').map((s) => s.trim()).filter(Boolean)
+    if (idArray.length > 0) where.id = { in: idArray }
+  }
   if (filters.borneId) where.borneId = filters.borneId
   if (filters.formulaireId) where.formulaireId = filters.formulaireId
   if (filters.statutPartage) where.statutPartage = filters.statutPartage
@@ -421,15 +436,52 @@ enregistrementsRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
   }
 })
 
+// ─── POST /api/enregistrements/bulk-delete ────────────────────────────────────
+// Soft delete plusieurs enregistrements en une seule requête — SuperAdmin only
+
+enregistrementsRouter.post('/bulk-delete', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = bulkDeleteSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Données invalides', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const [, result] = await prisma.$transaction([
+      // Hard delete des jobs de partage associés — un enregistrement supprimé
+      // ne doit plus jamais être traité par le worker
+      prisma.partageJob.deleteMany({
+        where: { enregistrementId: { in: parsed.data.ids } },
+      }),
+      prisma.enregistrement.updateMany({
+        where: { id: { in: parsed.data.ids }, deletedAt: null },
+        data: { deletedAt: new Date() },
+      }),
+    ])
+    return res.json({ success: true, data: { count: result.count } })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
 // ─── DELETE /api/enregistrements/:id ──────────────────────────────────────────
 // Task 36.2 — Soft delete (set deletedAt) — SuperAdmin only
 
 enregistrementsRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   try {
-    const enregistrement = await prisma.enregistrement.update({
-      where: { id: req.params.id, deletedAt: null },
-      data: { deletedAt: new Date() },
-    })
+    const [, enregistrement] = await prisma.$transaction([
+      // Hard delete des jobs de partage associés — un enregistrement supprimé
+      // ne doit plus jamais être traité par le worker
+      prisma.partageJob.deleteMany({
+        where: { enregistrementId: req.params.id },
+      }),
+      prisma.enregistrement.update({
+        where: { id: req.params.id, deletedAt: null },
+        data: { deletedAt: new Date() },
+      }),
+    ])
     return res.json({ success: true, data: enregistrement })
   } catch (err) {
     return handlePrismaError(err, res)

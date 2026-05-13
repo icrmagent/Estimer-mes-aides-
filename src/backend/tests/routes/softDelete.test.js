@@ -284,11 +284,16 @@ describe('DELETE /api/formulaires/:id — soft delete', () => {
   })
 })
 
-// ─── DELETE /api/bornes/:id — soft delete ────────────────────────────────────
+// ─── DELETE /api/bornes/:id — soft delete (borne inactive uniquement) ────────
 
 describe('DELETE /api/bornes/:id — soft delete', () => {
-  it('sets deletedAt on the borne instead of deleting it', async () => {
-    mockPrisma.borne.update.mockResolvedValue(mockBorneDeleted)
+  it('sets deletedAt on an inactive borne', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue({
+      id: 'uuid-borne-1',
+      statut: 'inactif',
+      deletedAt: null,
+    })
+    mockPrisma.borne.update.mockResolvedValue({ ...mockBorneDeleted, statut: 'inactif' })
 
     const res = await request(app)
       .delete('/api/bornes/uuid-borne-1')
@@ -303,8 +308,25 @@ describe('DELETE /api/bornes/:id — soft delete', () => {
     expect(updateCall.data.deletedAt).toBeInstanceOf(Date)
   })
 
-  it('returns 404 when borne not found (P2025)', async () => {
-    mockPrisma.borne.update.mockRejectedValue(p2025Error)
+  it('returns 403 when borne is actif', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue({
+      id: 'uuid-borne-1',
+      statut: 'actif',
+      deletedAt: null,
+    })
+
+    const res = await request(app)
+      .delete('/api/bornes/uuid-borne-1')
+      .set(authSA)
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('FORBIDDEN')
+    expect(res.body.error.details.statut).toBe('actif')
+    expect(mockPrisma.borne.update).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 when borne not found', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue(null)
 
     const res = await request(app)
       .delete('/api/bornes/nonexistent-id')
@@ -312,6 +334,23 @@ describe('DELETE /api/bornes/:id — soft delete', () => {
 
     expect(res.status).toBe(404)
     expect(res.body.error.code).toBe('NOT_FOUND')
+    expect(mockPrisma.borne.update).not.toHaveBeenCalled()
+  })
+
+  it('returns 404 for an already soft-deleted borne', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue({
+      id: 'uuid-borne-1',
+      statut: 'inactif',
+      deletedAt: new Date(),
+    })
+
+    const res = await request(app)
+      .delete('/api/bornes/uuid-borne-1')
+      .set(authSA)
+
+    expect(res.status).toBe(404)
+    expect(res.body.error.code).toBe('NOT_FOUND')
+    expect(mockPrisma.borne.update).not.toHaveBeenCalled()
   })
 
   it('requires SUPER_ADMIN — ADMIN_BORNE gets 403', async () => {

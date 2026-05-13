@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { BorneProvider } from './context/BorneContext.jsx'
 import { FormProvider } from './context/FormContext.jsx'
 import LoginPage from './pages/LoginPage.jsx'
@@ -6,9 +7,42 @@ import StartPage from './pages/StartPage.jsx'
 import { FormPage } from './pages/FormPage.jsx'
 import { ConfirmationPage } from './pages/ConfirmationPage.jsx'
 import { useBorneConfig } from './hooks/useBorneConfig.js'
+import { connectBorneChannel } from './services/borneRemoteControl.js'
+import { exitKiosk } from './services/kioskService'
 
-const BORNE_ID = import.meta.env.VITE_BORNE_ID || null
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+
+/* Composant invisible : abonne Pusher au canal borne-{id} dès que l'app charge,
+   et déclenche login/logout temps réel sur ordre du back-office. */
+function BorneRemoteControlBridge() {
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    const borneId = import.meta.env.VITE_BORNE_ID || localStorage.getItem('borne_id')
+    if (!borneId) return
+
+    const cleanup = connectBorneChannel(borneId, {
+      onForceLogin: (data) => {
+        // N'écrase pas une session déjà active
+        if (data?.token && !localStorage.getItem('borne_token')) {
+          localStorage.setItem('borne_token', data.token)
+          if (data.email) localStorage.setItem('borne_email', data.email)
+          navigate('/start', { replace: true })
+        }
+      },
+      onForceLogout: async () => {
+        try { await exitKiosk() } catch { /* tolérant : navigation prime */ }
+        localStorage.removeItem('borne_token')
+        localStorage.removeItem('borne_email')
+        navigate('/login', { replace: true })
+      },
+    })
+
+    return cleanup
+  }, [navigate])
+
+  return null
+}
 
 /* Redirige vers /start si un token valide est présent, sinon vers /login.
    Permet la reprise automatique de session après coupure de courant. */
@@ -27,13 +61,21 @@ function RootRedirect() {
 }
 
 function KioskLayout() {
-  const { loading, loadError } = useBorneConfig(BORNE_ID, API_URL)
+  // Env var en priorité (dev local), sinon borneId stocké après login (APK bundle)
+  const borneId = import.meta.env.VITE_BORNE_ID || localStorage.getItem('borne_id') || null
+  const { loading, loadError } = useBorneConfig(borneId, API_URL)
 
-  if (!BORNE_ID) {
+  if (!borneId) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#f5f6fa', fontFamily: 'sans-serif' }}>
         <h2 style={{ fontSize: '24px', color: '#e74c3c', marginBottom: '16px' }}>Erreur de configuration</h2>
-        <p>L'identifiant de la borne (<code>VITE_BORNE_ID</code>) n'est pas défini dans le fichier <code>.env</code>.</p>
+        <p>Aucune borne assignée à ce compte. Contactez votre administrateur.</p>
+        <button
+          onClick={() => { localStorage.removeItem('borne_token'); window.location.href = '/login' }}
+          style={{ marginTop: '16px', background: '#5B2D8E', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', minHeight: '52px' }}
+        >
+          Se reconnecter
+        </button>
       </div>
     )
   }
@@ -69,6 +111,7 @@ export default function App() {
     <BorneProvider>
       <FormProvider>
         <BrowserRouter>
+          <BorneRemoteControlBridge />
           <Routes>
             {/* Connexion AdminBorne sur la borne */}
             <Route path="/login" element={<LoginPage />} />

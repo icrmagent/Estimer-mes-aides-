@@ -237,7 +237,7 @@ export default function BorneFormPage() {
                 className={inputClass}
                 style={inputStyle}
               >
-                <option value="">— Aucun —</option>
+                <option value="">Géré par SuperAdmin</option>
                 {adminBornes.map(a => (
                   <option key={a.id} value={a.id}>{a.nom} {a.prenom} ({a.email})</option>
                 ))}

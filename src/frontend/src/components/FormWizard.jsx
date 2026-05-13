@@ -34,7 +34,7 @@ export default function FormWizard() {
     setSubmitting,
     submitting,
   } = useForm()
-  const { saveOffline } = useOfflineSync()
+  const { saveOffline, markSynced } = useOfflineSync()
 
   const totalSteps = questions.length
   const currentQuestion = questions[currentStep] || null
@@ -75,7 +75,7 @@ export default function FormWizard() {
     }
 
     // Offline-first : sauvegarder en IndexedDB avant l'envoi API
-    await saveOffline(enregistrement)
+    const localId = await saveOffline(enregistrement)
 
     try {
       const token = localStorage.getItem('borne_token')
@@ -89,6 +89,8 @@ export default function FormWizard() {
       })
 
       if (res.ok) {
+        // Retirer l'entrée de la queue offline pour empêcher un re-post par syncPending().
+        if (localId) await markSynced(localId)
         const data = await res.json()
         setResult({ ok: true, data: data.data })
       } else {

@@ -51,6 +51,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const res = await api.post('/api/auth/login', { email, password })
+      localStorage.setItem('ema_user_email', email)
       login(res.data.token, res.data.refreshToken)
     } catch (err) {
       setError(err.response?.data?.error || 'Identifiants invalides')

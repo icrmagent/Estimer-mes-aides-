@@ -39,6 +39,8 @@ export default function ABEnregistrementsPage() {
   const [total, setTotal] = useState(0)
   const [bornesList, setBornesList] = useState([])
   const [limit, setLimit] = useState(50)
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [bulkActionLoading, setBulkActionLoading] = useState(false)
 
   const [filters, setFilters] = useState({
     borneId: '',
@@ -72,8 +74,56 @@ export default function ABEnregistrementsPage() {
 
   function handleFilterChange(field, value) {
     setPage(1)
+    setSelectedIds(new Set())
     setFilters(prev => ({ ...prev, [field]: value }))
   }
+
+  function toggleOne(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllOnPage() {
+    const pageIds = enregistrements.map(e => e.id)
+    const allSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.has(id))
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (allSelected) pageIds.forEach(id => next.delete(id))
+      else pageIds.forEach(id => next.add(id))
+      return next
+    })
+  }
+
+  async function handleBulkExport() {
+    if (selectedIds.size === 0) return
+    setBulkActionLoading(true)
+    try {
+      const ids = Array.from(selectedIds).join(',')
+      const res = await api.get(`/api/enregistrements/export?ids=${encodeURIComponent(ids)}`, {
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `mes-enregistrements-selection-${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      setError('Erreur lors de l\'export de la sélection')
+    } finally {
+      setBulkActionLoading(false)
+    }
+  }
+
+  const pageIds = enregistrements.map(e => e.id)
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.has(id))
+  const someOnPageSelected = pageIds.some(id => selectedIds.has(id)) && !allOnPageSelected
 
   async function handleExport() {
     try {
@@ -119,6 +169,34 @@ export default function ABEnregistrementsPage() {
         </div>
 
         <ErrorBanner message={error} onClose={() => setError(null)} />
+
+        {selectedIds.size > 0 && (
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-purple-900">
+              {selectedIds.size} enregistrement{selectedIds.size !== 1 ? 's' : ''} sélectionné{selectedIds.size !== 1 ? 's' : ''}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleBulkExport}
+                disabled={bulkActionLoading}
+                className="px-3 py-2 text-sm font-semibold rounded-lg text-white disabled:opacity-50"
+                style={{ background: '#1A56A0', minHeight: '40px' }}
+              >
+                ↓ Exporter la sélection
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                disabled={bulkActionLoading}
+                className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-white disabled:opacity-50"
+                style={{ minHeight: '40px' }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="bg-white rounded-2xl shadow-sm p-4">
@@ -178,7 +256,18 @@ export default function ABEnregistrementsPage() {
           <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100 bg-gray-50">
-                  <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">ID</th>
+                  <th className="px-4 py-3 w-10 rounded-tl-2xl">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      ref={el => { if (el) el.indeterminate = someOnPageSelected }}
+                      onChange={toggleAllOnPage}
+                      aria-label="Tout sélectionner sur cette page"
+                      className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                      style={{ accentColor: '#5B2D8E' }}
+                    />
+                  </th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600">ID</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Borne</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Contact</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire</th>
@@ -189,11 +278,21 @@ export default function ABEnregistrementsPage() {
               </thead>
               <tbody>
                 {loading ? (
-                  <SkeletonTableRows cols={7} rows={5} />
+                  <SkeletonTableRows cols={8} rows={5} />
                 ) : enregistrements.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400 text-sm">Aucun enregistrement trouvé</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400 text-sm">Aucun enregistrement trouvé</td></tr>
                 ) : enregistrements.map(e => (
-                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                  <tr key={e.id} className={`border-b border-gray-50 hover:bg-gray-50 transition-colors ${selectedIds.has(e.id) ? 'bg-purple-50/40' : ''}`}>
+                    <td className="px-4 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(e.id)}
+                        onChange={() => toggleOne(e.id)}
+                        aria-label={`Sélectionner l'enregistrement ${e.id?.slice(0, 8)}`}
+                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                        style={{ accentColor: '#5B2D8E' }}
+                      />
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{e.id?.slice(0, 8)}…</td>
                     <td className="px-4 py-3 text-gray-700">{e.borne?.idBorne || e.borneId || '—'}</td>
                     <td className="px-4 py-3 text-gray-800 font-medium">{getContactName(e)}</td>

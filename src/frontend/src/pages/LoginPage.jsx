@@ -204,6 +204,32 @@ export default function LoginPage() {
         localStorage.setItem('borne_email', email)
         localStorage.removeItem(ATTEMPTS_KEY)
         localStorage.removeItem(LOCKOUT_KEY)
+
+        // Auto-détection du borneId pour le bundle APK local (VITE_BORNE_ID absent en prod)
+        if (!import.meta.env.VITE_BORNE_ID) {
+          try {
+            const bornesRes = await fetch(`${API_URL}/api/bornes?limit=1`, {
+              headers: { Authorization: `Bearer ${data.token}` },
+            })
+            if (bornesRes.ok) {
+              const bornesData = await bornesRes.json()
+              const firstBorne = bornesData.data?.[0]
+              if (firstBorne?.id) localStorage.setItem('borne_id', firstBorne.id)
+            }
+          } catch { /* ignoré — borne_id peut être absent si la borne n'est pas encore assignée */ }
+        }
+
+        // Synchronise estConnectee = true côté backend pour le back-office
+        const borneId = import.meta.env.VITE_BORNE_ID || localStorage.getItem('borne_id')
+        if (borneId) {
+          try {
+            await fetch(`${API_URL}/api/bornes/${borneId}/session`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${data.token}` },
+            })
+          } catch { /* tolérant : la borne reste utilisable même si le badge back-office ne s'aligne pas */ }
+        }
+
         navigate('/start', { replace: true })
       } else {
         const n = attempts + 1

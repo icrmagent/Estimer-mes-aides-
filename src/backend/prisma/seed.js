@@ -348,35 +348,36 @@ const pageFinConfig = {
 // ─── V2 question taxonomy (categories + sous-categories) ─────────────────────
 // Source: table fourni pour la V2. Les questions V2 restent une question par
 // ecran/etape, et chaque etape est rattachee a sa categorie/sous-categorie.
+// Format i18n requis : { fr, es, en } pour la colonne jsonb `nom`.
 const questionTaxonomy = [
   {
-    categorie: 'Informations Personnelles',
+    categorie: { fr: 'Informations Personnelles', es: 'Información Personal', en: 'Personal Information' },
     sousCategories: [
-      'Information Personnelle 1/3',
-      'Information Personnelle 2/3',
-      'Information Personnelle 3/3',
+      { fr: 'Information Personnelle 1/3', es: 'Información Personal 1/3', en: 'Personal Information 1/3' },
+      { fr: 'Information Personnelle 2/3', es: 'Información Personal 2/3', en: 'Personal Information 2/3' },
+      { fr: 'Information Personnelle 3/3', es: 'Información Personal 3/3', en: 'Personal Information 3/3' },
     ],
   },
   {
-    categorie: 'Le Lieu des Travaux',
+    categorie: { fr: 'Le Lieu des Travaux', es: 'El Lugar de las Obras', en: 'The Work Location' },
     sousCategories: [
-      'Le lieu des travaux 1/7',
-      'Le lieu des travaux 2/7',
-      'Le lieu des travaux 3/7',
-      'Le lieu des travaux 4/7',
-      'Le lieu des travaux 5/7',
-      'Le lieu des travaux 6/7',
-      'Le lieu des travaux 7/7',
+      { fr: 'Le lieu des travaux 1/7', es: 'El lugar de las obras 1/7', en: 'Work location 1/7' },
+      { fr: 'Le lieu des travaux 2/7', es: 'El lugar de las obras 2/7', en: 'Work location 2/7' },
+      { fr: 'Le lieu des travaux 3/7', es: 'El lugar de las obras 3/7', en: 'Work location 3/7' },
+      { fr: 'Le lieu des travaux 4/7', es: 'El lugar de las obras 4/7', en: 'Work location 4/7' },
+      { fr: 'Le lieu des travaux 5/7', es: 'El lugar de las obras 5/7', en: 'Work location 5/7' },
+      { fr: 'Le lieu des travaux 6/7', es: 'El lugar de las obras 6/7', en: 'Work location 6/7' },
+      { fr: 'Le lieu des travaux 7/7', es: 'El lugar de las obras 7/7', en: 'Work location 7/7' },
     ],
   },
   {
-    categorie: 'Vos Besoins',
+    categorie: { fr: 'Vos Besoins', es: 'Sus Necesidades', en: 'Your Needs' },
     sousCategories: [
-      'Vos Besoins 1/5',
-      'Vos Besoins 2/5',
-      'Vos Besoins 3/5',
-      'Vos Besoins 4/5',
-      'Vos Besoins 5/5',
+      { fr: 'Vos Besoins 1/5', es: 'Sus Necesidades 1/5', en: 'Your Needs 1/5' },
+      { fr: 'Vos Besoins 2/5', es: 'Sus Necesidades 2/5', en: 'Your Needs 2/5' },
+      { fr: 'Vos Besoins 3/5', es: 'Sus Necesidades 3/5', en: 'Your Needs 3/5' },
+      { fr: 'Vos Besoins 4/5', es: 'Sus Necesidades 4/5', en: 'Your Needs 4/5' },
+      { fr: 'Vos Besoins 5/5', es: 'Sus Necesidades 5/5', en: 'Your Needs 5/5' },
     ],
   },
 ]
@@ -1315,7 +1316,10 @@ async function ensureQuestionTaxonomySchema() {
   await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "categorieId" TEXT;')
   await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "sousCategorieId" TEXT;')
   await prisma.$executeRawUnsafe('ALTER TABLE "questions" ADD COLUMN IF NOT EXISTS "ordreDansPage" INTEGER NOT NULL DEFAULT 0;')
-  await prisma.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS "categories_question_nom_key" ON "categories_question"("nom");')
+  // Note : la migration `20260513000000_categories_nom_i18n` convertit `nom` en jsonb
+  // et supprime la contrainte unique d'origine. L'unicité sémantique est maintenant
+  // assurée applicativement via `nom->>'fr'` (cf. routes/categories-questions.js).
+  await prisma.$executeRawUnsafe('DROP INDEX IF EXISTS "categories_question_nom_key";')
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "sous_categories_question_categorieId_idx" ON "sous_categories_question"("categorieId");')
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "questions_categorieId_idx" ON "questions"("categorieId");')
   await prisma.$executeRawUnsafe('CREATE INDEX IF NOT EXISTS "questions_sousCategorieId_idx" ON "questions"("sousCategorieId");')
@@ -1367,32 +1371,54 @@ async function seedQuestionTaxonomy() {
   const taxonomyByName = new Map()
 
   for (const categoryData of questionTaxonomy) {
-    const categorie = await prisma.categorieQuestion.upsert({
-      where: { nom: categoryData.categorie },
-      update: {},
-      create: { nom: categoryData.categorie },
-    })
+    const catNom = categoryData.categorie
+    const catFr = catNom.fr
 
-    for (const sousCategorieNom of categoryData.sousCategories) {
-      let sousCategorie = await prisma.sousCategorieQuestion.findFirst({
-        where: {
-          nom: sousCategorieNom,
-          categorieId: categorie.id,
-        },
-      })
+    // Lookup by jsonb->>'fr' (the unique semantic key after the i18n migration).
+    const existingCat = await prisma.$queryRaw`
+      SELECT id FROM categories_question WHERE nom->>'fr' = ${catFr} LIMIT 1
+    `
+    let categorieId
+    if (existingCat.length > 0) {
+      categorieId = existingCat[0].id
+      await prisma.$executeRaw`
+        UPDATE categories_question SET nom = ${JSON.stringify(catNom)}::jsonb, "updatedAt" = NOW()
+        WHERE id = ${categorieId}
+      `
+    } else {
+      const created = await prisma.$queryRaw`
+        INSERT INTO categories_question (id, nom, "createdAt", "updatedAt")
+        VALUES (gen_random_uuid(), ${JSON.stringify(catNom)}::jsonb, NOW(), NOW())
+        RETURNING id
+      `
+      categorieId = created[0].id
+    }
 
-      if (!sousCategorie) {
-        sousCategorie = await prisma.sousCategorieQuestion.create({
-          data: {
-            nom: sousCategorieNom,
-            categorieId: categorie.id,
-          },
-        })
+    for (const subNom of categoryData.sousCategories) {
+      const subFr = subNom.fr
+      const existingSub = await prisma.$queryRaw`
+        SELECT id FROM sous_categories_question
+        WHERE "categorieId" = ${categorieId} AND nom->>'fr' = ${subFr} LIMIT 1
+      `
+      let sousCategorieId
+      if (existingSub.length > 0) {
+        sousCategorieId = existingSub[0].id
+        await prisma.$executeRaw`
+          UPDATE sous_categories_question SET nom = ${JSON.stringify(subNom)}::jsonb, "updatedAt" = NOW()
+          WHERE id = ${sousCategorieId}
+        `
+      } else {
+        const created = await prisma.$queryRaw`
+          INSERT INTO sous_categories_question (id, nom, "categorieId", "createdAt", "updatedAt")
+          VALUES (gen_random_uuid(), ${JSON.stringify(subNom)}::jsonb, ${categorieId}, NOW(), NOW())
+          RETURNING id
+        `
+        sousCategorieId = created[0].id
       }
 
-      taxonomyByName.set(`${categoryData.categorie}::${sousCategorieNom}`, {
-        categorieId: categorie.id,
-        sousCategorieId: sousCategorie.id,
+      taxonomyByName.set(`${catFr}::${subFr}`, {
+        categorieId,
+        sousCategorieId,
       })
     }
   }

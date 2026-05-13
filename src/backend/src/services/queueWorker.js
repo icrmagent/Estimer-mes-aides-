@@ -198,11 +198,33 @@ async function processJob(job) {
       throw new Error(`Enregistrement ${job.enregistrementId} introuvable`)
     }
 
+    // Filet de sécurité : un enregistrement soft-deleted ne doit pas être transmis.
+    // Le job est supprimé (les routes DELETE le font déjà en transaction, ce cas
+    // est défensif pour les jobs créés avant la suppression).
+    if (enregistrement.deletedAt) {
+      await prisma.partageJob.delete({ where: { id: job.id } })
+      logger.info({
+        message: '[QUEUE] Job supprimé — enregistrement soft-deleted',
+        jobId: job.id,
+        enregistrementId: job.enregistrementId,
+      })
+      return
+    }
+
     // Sélectionner le canal par canalTransmission (label) si défini, sinon premier canal actif
     const canalLabel = enregistrement.borne?.canalTransmission
-    const canal = canalLabel
-      ? (enregistrement.borne?.canaux?.find(c => c.label === canalLabel) ?? enregistrement.borne?.canaux?.[0])
-      : enregistrement.borne?.canaux?.[0]
+    const matchedByLabel = canalLabel
+      ? enregistrement.borne?.canaux?.find(c => c.label === canalLabel)
+      : null
+    if (canalLabel && !matchedByLabel) {
+      logger.warn({
+        message: '[QUEUE] canalTransmission ne correspond à aucun canal actif — fallback sur premier canal',
+        canalLabel,
+        borneId: enregistrement.borne?.id,
+        jobId: job.id,
+      })
+    }
+    const canal = matchedByLabel ?? enregistrement.borne?.canaux?.[0]
     const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
     const crmKey = canal
       ? await getValidToken(canal)

@@ -2,8 +2,6 @@ package fr.ila26.estimermesaides
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
@@ -12,17 +10,18 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewFeature
 import fr.ila26.estimermesaides.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
 
-    // ── URL de l'application déployée sur Vercel ──────────────────
-    // Remplacer après le déploiement : vercel --prod → copier l'URL
-    private val APP_URL = "https://estimer-mes-aides.vercel.app"
+    // ── URL locale (assets bundlés dans l'APK) ────────────────────
+    private val APP_URL = "https://appassets.androidplatform.net/index.html"
     // ─────────────────────────────────────────────────────────────
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var assetLoader: WebViewAssetLoader
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,9 +33,18 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        setupAssetLoader()
         setupBackNavigation()
         setupWebView()
         loadApp()
+    }
+
+    // ── AssetLoader : sert les fichiers depuis assets/ avec URL HTTPS ─
+    private fun setupAssetLoader() {
+        assetLoader = WebViewAssetLoader.Builder()
+            .setDomain("appassets.androidplatform.net")
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
     }
 
     // ── Navigation arrière ────────────────────────────────────────
@@ -72,12 +80,31 @@ class MainActivity : AppCompatActivity() {
             cacheMode                      = WebSettings.LOAD_DEFAULT
         }
 
-        // Mode sombre : suivre le thème système si supporté
+        // Mode sombre : désactivé (charte graphique maîtrisée par le front)
         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
             WebSettingsCompat.setAlgorithmicDarkeningAllowed(binding.webView.settings, false)
         }
 
         binding.webView.webViewClient = object : WebViewClient() {
+
+            // Intercepte toutes les requêtes pour servir depuis les assets locaux
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                val intercepted = assetLoader.shouldInterceptRequest(request.url)
+                if (intercepted != null) return intercepted
+
+                // SPA fallback : routes React Router sans extension → index.html
+                val path = request.url.path ?: return null
+                if (request.isForMainFrame && !path.contains('.')) {
+                    return assetLoader.shouldInterceptRequest(
+                        Uri.parse("https://appassets.androidplatform.net/index.html")
+                    )
+                }
+                return null
+            }
+
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                 binding.progressBar.visibility = View.VISIBLE
                 binding.errorView.visibility   = View.GONE
@@ -129,25 +156,12 @@ class MainActivity : AppCompatActivity() {
         binding.btnRetry.setOnClickListener { loadApp() }
     }
 
-    // ── Chargement de l'app ───────────────────────────────────────
+    // ── Chargement de l'app depuis les assets locaux ──────────────
     private fun loadApp() {
-        if (!isConnected()) {
-            binding.webView.visibility     = View.INVISIBLE
-            binding.errorView.visibility   = View.VISIBLE
-            binding.progressBar.visibility = View.GONE
-            return
-        }
         binding.errorView.visibility   = View.GONE
         binding.progressBar.visibility = View.VISIBLE
         binding.webView.visibility     = View.VISIBLE
         binding.webView.loadUrl(APP_URL)
-    }
-
-    // ── Vérification réseau ───────────────────────────────────────
-    private fun isConnected(): Boolean {
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     // ── Résultat sélecteur fichier ────────────────────────────────

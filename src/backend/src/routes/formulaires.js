@@ -143,7 +143,7 @@ formulairesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
       take: limit,
       orderBy: { createdAt: 'desc' },
       include: {
-        _count: { select: { questions: true, bornes: true } },
+        _count: { select: { questions: true, bornes: { where: { deletedAt: null } } } },
       },
     }),
     prisma.formulaire.count({ where }),
@@ -201,7 +201,7 @@ formulairesRouter.get('/deleted', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
       take: limit,
       orderBy: { deletedAt: 'desc' },
       include: {
-        _count: { select: { questions: true, bornes: true } },
+        _count: { select: { questions: true, bornes: { where: { deletedAt: null } } } },
       },
     }),
     prisma.formulaire.count({ where: { deletedAt: { not: null } } }),
@@ -376,14 +376,18 @@ formulairesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), as
 
 // ─── DELETE /api/formulaires/:id ────────────────────────────────────────────
 // Task 10.10 — Soft delete: set deletedAt instead of prisma.delete()
-// Suppression possible uniquement si le statut est 'brouillon'
+// Suppression possible si le statut est 'brouillon' OU si le formulaire
+// n'est associé à aucune borne active.
 
 formulairesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   try {
-    // Vérifier si le formulaire existe et s'il est en brouillon
     const existing = await prisma.formulaire.findUnique({
       where: { id: req.params.id, deletedAt: null },
-      select: { id: true, statut: true },
+      select: {
+        id: true,
+        statut: true,
+        _count: { select: { bornes: { where: { deletedAt: null } } } },
+      },
     })
 
     if (!existing) {
@@ -393,10 +397,18 @@ formulairesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (r
       })
     }
 
-    if (existing.statut !== 'brouillon') {
+    const bornesCount = existing._count?.bornes ?? 0
+    const isBrouillon = existing.statut === 'brouillon'
+    const isUnassociated = bornesCount === 0
+
+    if (!isBrouillon && !isUnassociated) {
       return res.status(403).json({
         success: false,
-        error: { code: 'FORBIDDEN', message: 'Seuls les formulaires en brouillon peuvent être supprimés' },
+        error: {
+          code: 'FORBIDDEN',
+          message: "Suppression refusée : ce formulaire est associé à une ou plusieurs bornes. Détachez-le d'abord ou repassez-le en brouillon.",
+          details: { bornesCount },
+        },
       })
     }
 

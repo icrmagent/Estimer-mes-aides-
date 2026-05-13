@@ -42,12 +42,33 @@ function handleError(err, res) {
   })
 }
 
-function parseNom(nom) {
-  if (!nom) return { fr: '', es: '', en: '' }
+function parseNom(nom, depth = 0) {
+  if (!nom || depth > 6) return typeof nom === 'string' ? { fr: nom, es: '', en: '' } : { fr: '', es: '', en: '' }
   if (typeof nom === 'string') {
-    try { return JSON.parse(nom) } catch { return { fr: nom, es: '', en: '' } }
+    const trimmed = nom.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('"')) {
+      try { return parseNom(JSON.parse(trimmed), depth + 1) } catch { return { fr: nom, es: '', en: '' } }
+    }
+    return { fr: nom, es: '', en: '' }
   }
-  return nom
+  if (typeof nom !== 'object') return { fr: String(nom), es: '', en: '' }
+  let fr = nom.fr || ''
+  let es = nom.es || ''
+  let en = nom.en || ''
+  if (typeof fr === 'string' && fr.trim().startsWith('{')) {
+    try {
+      const inner = JSON.parse(fr)
+      if (inner && typeof inner === 'object' && ('fr' in inner || 'es' in inner || 'en' in inner)) {
+        const rec = parseNom(inner, depth + 1)
+        return {
+          fr: rec.fr || '',
+          es: rec.es || es || '',
+          en: rec.en || en || '',
+        }
+      }
+    } catch { /* not nested JSON */ }
+  }
+  return { fr: String(fr || ''), es: String(es || ''), en: String(en || '') }
 }
 
 function sortByNomFr(items) {

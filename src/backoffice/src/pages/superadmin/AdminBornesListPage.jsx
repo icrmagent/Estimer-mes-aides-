@@ -2,13 +2,115 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
+import { adminBornesService } from '../../services/adminBornesService.js'
 import {
   PRIMARY,
   IcoMore, IcoPlus,
   Toast, ErrorBanner, ConfirmModal, SkeletonTableRows, BadgeActif,
 } from '../../components/ui.jsx'
 
-function AdminRowActions({ admin, onResetPassword, onToggleActif, onDelete }) {
+function SetPasswordModal({ admin, onCancel, onSuccess, onError }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [show, setShow] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [localError, setLocalError] = useState(null)
+
+  const tooShort = password.length > 0 && password.length < 8
+  const mismatch = confirm.length > 0 && confirm !== password
+  const canSubmit = password.length >= 8 && password === confirm && !saving
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!canSubmit) return
+    setSaving(true)
+    setLocalError(null)
+    try {
+      await adminBornesService.setPassword(admin.id, password)
+      onSuccess()
+    } catch (err) {
+      const e = err.response?.data?.error
+      const msg = typeof e === 'string' ? e : (e?.message || 'Erreur lors de la mise à jour')
+      setLocalError(msg)
+      onError?.(msg)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-bold text-gray-900">Définir un mot de passe</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Pour <strong>{admin?.prenom} {admin?.nom}</strong>. L'ancien mot de passe ne fonctionnera plus.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Nouveau mot de passe</label>
+            <input
+              type={show ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+              autoComplete="new-password"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+              style={{ minHeight: '40px', fontSize: '16px' }}
+              placeholder="Min. 8 caractères"
+            />
+            {tooShort && <p className="text-xs text-red-600 mt-1">Au moins 8 caractères.</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Confirmer</label>
+            <input
+              type={show ? 'text' : 'password'}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              autoComplete="new-password"
+              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent"
+              style={{ minHeight: '40px', fontSize: '16px' }}
+              placeholder="Retapez le mot de passe"
+            />
+            {mismatch && <p className="text-xs text-red-600 mt-1">Les mots de passe ne correspondent pas.</p>}
+          </div>
+
+          <label className="flex items-center gap-2 text-xs text-gray-600 select-none">
+            <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
+            Afficher le mot de passe
+          </label>
+
+          {localError && <p className="text-sm text-red-600">{localError}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium text-gray-700 border border-gray-200 rounded-xl bg-white hover:bg-gray-50 transition-colors disabled:opacity-60"
+            style={{ minHeight: '40px' }}
+          >
+            Annuler
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-semibold text-white rounded-xl disabled:opacity-60 transition-opacity hover:opacity-90"
+            style={{ minHeight: '40px', background: PRIMARY }}
+          >
+            {saving ? 'Enregistrement…' : 'Enregistrer'}
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function AdminRowActions({ admin, onResetPassword, onSetPassword, onToggleActif, onDelete }) {
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -34,11 +136,18 @@ function AdminRowActions({ admin, onResetPassword, onToggleActif, onDelete }) {
         <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 z-50 overflow-hidden">
           <div className="py-1">
             <button
+              onClick={() => { setIsOpen(false); onSetPassword(admin) }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Définir MDP
+            </button>
+            <button
               onClick={() => { setIsOpen(false); onResetPassword(admin) }}
               className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
-              Réinit. MDP
+              Réinit. MDP (aléatoire)
             </button>
             <button
               onClick={() => { setIsOpen(false); onToggleActif(admin) }}
@@ -58,7 +167,7 @@ function AdminRowActions({ admin, onResetPassword, onToggleActif, onDelete }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               Modifier
             </Link>
-            {(!admin.bornes || admin.bornes.length === 0) && (
+            {(!admin.bornes || admin.bornes.length === 0 || admin.bornes.every(b => b.statut === 'inactif')) && (
               <button
                 onClick={() => { setIsOpen(false); onDelete(admin) }}
                 className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
@@ -81,6 +190,7 @@ export default function AdminBornesListPage() {
   const [toast, setToast] = useState(null)
   const [tempPasswordAlert, setTempPasswordAlert] = useState(null)
   const [confirmModal, setConfirmModal] = useState({ isOpen: false, admin: null })
+  const [setPasswordModal, setSetPasswordModal] = useState({ isOpen: false, admin: null })
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, admin: null })
 
   const [filters, setFilters] = useState({ search: '', actif: '' })
@@ -126,9 +236,14 @@ export default function AdminBornesListPage() {
     setDeleteModal({ isOpen: false, admin: null })
     if (!admin) return
     try {
-      await api.delete(`/api/admin-bornes/${admin.id}`)
+      const res = await api.delete(`/api/admin-bornes/${admin.id}`)
       setAdmins(prev => prev.filter(a => a.id !== admin.id))
-      setToast({ message: 'Administrateur supprimé' })
+      const reassigned = res.data?.data?.bornesReassignees || 0
+      setToast({
+        message: reassigned > 0
+          ? `Administrateur supprimé — ${reassigned} borne${reassigned > 1 ? 's' : ''} réassignée${reassigned > 1 ? 's' : ''} au SuperAdmin`
+          : 'Administrateur supprimé',
+      })
     } catch (err) {
       const e = err.response?.data?.error
       setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la suppression'))
@@ -264,6 +379,7 @@ export default function AdminBornesListPage() {
                       <AdminRowActions
                         admin={admin}
                         onResetPassword={(a) => setConfirmModal({ isOpen: true, admin: a })}
+                        onSetPassword={(a) => setSetPasswordModal({ isOpen: true, admin: a })}
                         onToggleActif={toggleActif}
                         onDelete={(a) => setDeleteModal({ isOpen: true, admin: a })}
                       />
@@ -287,14 +403,32 @@ export default function AdminBornesListPage() {
         />
       )}
 
-      {deleteModal.isOpen && (
-        <ConfirmModal
-          title="Supprimer l'administrateur"
-          message={`Êtes-vous sûr de vouloir supprimer ${deleteModal.admin?.prenom} ${deleteModal.admin?.nom} ? Cette action est irréversible.`}
-          confirmLabel="Supprimer définitivement"
-          onConfirm={confirmDelete}
-          onCancel={() => setDeleteModal({ isOpen: false, admin: null })}
-          danger
+      {deleteModal.isOpen && (() => {
+        const bornesInactives = (deleteModal.admin?.bornes || []).filter(b => b.statut === 'inactif').length
+        const suffix = bornesInactives > 0
+          ? ` ${bornesInactives} borne${bornesInactives > 1 ? 's' : ''} inactive${bornesInactives > 1 ? 's' : ''} sera${bornesInactives > 1 ? 'ont' : ''} réassignée${bornesInactives > 1 ? 's' : ''} au SuperAdmin.`
+          : ''
+        return (
+          <ConfirmModal
+            title="Supprimer l'administrateur"
+            message={`Êtes-vous sûr de vouloir supprimer ${deleteModal.admin?.prenom} ${deleteModal.admin?.nom} ? Cette action est irréversible.${suffix}`}
+            confirmLabel="Supprimer définitivement"
+            onConfirm={confirmDelete}
+            onCancel={() => setDeleteModal({ isOpen: false, admin: null })}
+            danger
+          />
+        )
+      })()}
+
+      {setPasswordModal.isOpen && (
+        <SetPasswordModal
+          admin={setPasswordModal.admin}
+          onCancel={() => setSetPasswordModal({ isOpen: false, admin: null })}
+          onSuccess={() => {
+            setSetPasswordModal({ isOpen: false, admin: null })
+            setToast({ message: 'Mot de passe mis à jour' })
+          }}
+          onError={(msg) => setError(msg)}
         />
       )}
     </AppLayout>

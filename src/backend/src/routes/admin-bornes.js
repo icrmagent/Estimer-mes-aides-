@@ -31,6 +31,10 @@ const updateStatutSchema = z.object({
   actif: z.boolean(),
 })
 
+const setPasswordSchema = z.object({
+  password: z.string().min(8).max(128),
+})
+
 const listQuerySchema = z.object({
   actif: z.enum(['true', 'false']).optional(),
   search: z.string().optional(),
@@ -210,6 +214,34 @@ adminBornesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), as
   }
 })
 
+// ─── PATCH /api/admin-bornes/:id/password ────────────────────────────────────
+// SuperAdmin sets a chosen password for an AdminBorne (vs. random reset below).
+
+adminBornesRouter.patch('/:id/password', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = setPasswordSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Mot de passe invalide (min 8 caractères)', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    await prisma.adminBorne.findUniqueOrThrow({ where: { id: req.params.id } })
+    const passwordHash = await bcrypt.hash(parsed.data.password, 12)
+    await prisma.adminBorne.update({
+      where: { id: req.params.id },
+      data: { passwordHash },
+    })
+    return res.json({
+      success: true,
+      data: { message: 'Mot de passe mis à jour' },
+    })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
 // ─── POST /api/admin-bornes/:id/reset-password ───────────────────────────────
 
 adminBornesRouter.post('/:id/reset-password', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
@@ -243,12 +275,14 @@ adminBornesRouter.post('/:id/reset-password', jwtAuthV2, requireRole('SUPER_ADMI
 })
 
 // ─── DELETE /api/admin-bornes/:id ─────────────────────────────────────────────
+// Autorisé si l'admin n'a aucune borne, ou si toutes ses bornes sont inactives.
+// Les bornes inactives sont réassignées au SuperAdmin (adminBorneId = null).
 
 adminBornesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   try {
     const admin = await prisma.adminBorne.findUnique({
       where: { id: req.params.id },
-      include: { bornes: true },
+      include: { bornes: { select: { id: true, statut: true } } },
     })
 
     if (!admin) {
@@ -258,18 +292,44 @@ adminBornesRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (r
       })
     }
 
-    if (admin.bornes && admin.bornes.length > 0) {
+    const bornesActives = admin.bornes.filter((b) => b.statut === 'actif')
+    if (bornesActives.length > 0) {
       return res.status(403).json({
         success: false,
-        error: { code: 'FORBIDDEN', message: 'Impossible de supprimer un admin associé à une ou plusieurs bornes' },
+        error: {
+          code: 'FORBIDDEN',
+          message: `Impossible de supprimer un admin associé à ${bornesActives.length} borne(s) active(s). Désactivez-les d'abord.`,
+          details: { bornesActivesCount: bornesActives.length },
+        },
       })
     }
 
-    await prisma.adminBorne.delete({
-      where: { id: req.params.id },
+    const bornesReassignees = admin.bornes.length
+
+    await prisma.$transaction(async (tx) => {
+      if (bornesReassignees > 0) {
+        await tx.borne.updateMany({
+          where: { adminBorneId: admin.id },
+          data: { adminBorneId: null },
+        })
+      }
+      await tx.adminBorne.delete({ where: { id: admin.id } })
     })
 
-    return res.json({ success: true, message: 'AdminBorne supprimé avec succès' })
+    logger.info({
+      message: '[ADMIN-BORNES DELETE]',
+      adminId: admin.id,
+      adminEmail: admin.email,
+      bornesReassignees,
+    })
+
+    return res.json({
+      success: true,
+      message: bornesReassignees > 0
+        ? `AdminBorne supprimé. ${bornesReassignees} borne(s) réassignée(s) au SuperAdmin.`
+        : 'AdminBorne supprimé avec succès',
+      data: { bornesReassignees },
+    })
   } catch (err) {
     return handlePrismaError(err, res)
   }

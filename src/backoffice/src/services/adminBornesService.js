@@ -43,6 +43,11 @@ export const adminBornesService = {
   resetPassword(id) {
     return api.post(`/api/admin-bornes/${id}/reset-password`).then((res) => res.data)
   },
+
+  /** Set a chosen password (SuperAdmin only). */
+  setPassword(id, password) {
+    return api.patch(`/api/admin-bornes/${id}/password`, { password }).then((res) => res.data)
+  },
 }
 
 export default adminBornesService

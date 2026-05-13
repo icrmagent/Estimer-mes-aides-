@@ -11,8 +11,9 @@
  * The native layer handles FLAG_FULLSCREEN and SYSTEM_UI_FLAG_HIDE_NAVIGATION.
  */
 
-// Import the ambient type declaration so TypeScript knows about window.AndroidBridge
-import '../types/android-bridge';
+// Reference the ambient type declaration so TypeScript knows about window.AndroidBridge.
+// Triple-slash reference is type-only and produces no runtime import (Vite cannot resolve .d.ts).
+/// <reference path="../types/android-bridge.d.ts" />
 
 const API_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) || 'http://localhost:3000';
 

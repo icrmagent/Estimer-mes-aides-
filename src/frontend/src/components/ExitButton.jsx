@@ -80,6 +80,16 @@ export default function ExitButton({ className, style, children }) {
       })
 
       if (res.ok) {
+        // Synchronise estConnectee = false côté backend pour le back-office
+        const borneId = import.meta.env.VITE_BORNE_ID || localStorage.getItem('borne_id')
+        if (borneId && token) {
+          try {
+            await fetch(`${API_URL}/api/bornes/${borneId}/session`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` },
+            })
+          } catch { /* tolérant : exit kiosque doit toujours réussir côté borne */ }
+        }
         closeModal()
         localStorage.removeItem('borne_token')
         localStorage.removeItem('borne_email')

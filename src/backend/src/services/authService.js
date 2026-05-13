@@ -94,3 +94,25 @@ export async function issueAccessToken(userId, userType) {
 
   return null
 }
+
+/**
+ * Issue a borne-scoped JWT for an AdminBorne without requiring their password.
+ * Used by the remote-login flow: a SuperAdmin (after re-auth with their own password)
+ * can grant a borne session in the name of the AdminBorne owning that borne.
+ *
+ * @param {string} adminBorneId
+ * @returns {Promise<{token: string, expiresIn: string, email: string}|null>}
+ */
+export async function issueBorneTokenForAdminBorne(adminBorneId) {
+  const adminBorne = await prisma.adminBorne.findUnique({ where: { id: adminBorneId } })
+  if (!adminBorne || !adminBorne.actif) return null
+
+  const expiresIn = '30d'
+  const jti = uuid()
+  const token = jwt.sign(
+    { sub: adminBorne.id, role: 'ADMIN_BORNE', email: adminBorne.email, jti },
+    JWT_SECRET(),
+    { expiresIn }
+  )
+  return { token, expiresIn, email: adminBorne.email }
+}
