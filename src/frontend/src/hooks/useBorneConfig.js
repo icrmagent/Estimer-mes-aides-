@@ -63,8 +63,18 @@ export function useBorneConfig(borneId, apiUrl) {
       })
 
       if (res.status === 401) {
-        localStorage.removeItem('borne_token')
-        const err = 'Session expirée — veuillez vous reconnecter'
+        // Règle métier : la borne reste toujours connectée — ne pas supprimer le token.
+        // Utiliser le cache existant si disponible.
+        try {
+          const cached = localStorage.getItem(`${CACHE_KEY}_${id}`)
+          if (cached) {
+            const { data } = JSON.parse(cached)
+            setConfig(data.borne, data.formulaire)
+            setLoading(false)
+            return
+          }
+        } catch { /* ignore */ }
+        const err = 'Configuration indisponible — veuillez contacter l\'administrateur'
         setError(err)
         setLoadError(err)
         setLoading(false)

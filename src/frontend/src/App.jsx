@@ -51,9 +51,9 @@ function KioskLayout() {
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#f5f6fa', fontFamily: 'sans-serif' }}>
         <h2 style={{ fontSize: '24px', color: '#e74c3c', marginBottom: '16px' }}>Erreur</h2>
         <p style={{ marginBottom: '24px', color: '#333' }}>{loadError}</p>
-        <button 
+        <button
           onClick={() => { localStorage.removeItem('borne_token'); window.location.href='/login' }}
-          style={{ background: '#5B2D8E', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}
+          style={{ background: '#5B2D8E', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold', minHeight: '52px', minWidth: '160px' }}
         >
           Se reconnecter
         </button>

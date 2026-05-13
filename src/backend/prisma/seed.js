@@ -983,6 +983,111 @@ const FIELD_OPTIONS_OVERRIDES = {
   2301: ['Bois', 'Fioul', 'Gaz', 'Pompe à chaleur', 'Électrique', 'Autre'],
 }
 
+const FIELD_LABEL_TRANSLATIONS = {
+  2262: { fr: 'Civilité', es: 'Tratamiento', en: 'Title' },
+  2087: { fr: 'Nom', es: 'Apellido', en: 'Last name' },
+  2088: { fr: 'Prénom', es: 'Nombre', en: 'First name' },
+  2217: { fr: 'Adresse', es: 'Dirección', en: 'Address' },
+  2089: { fr: 'Code Postal', es: 'Código postal', en: 'Postal code' },
+  2090: { fr: 'Ville', es: 'Ciudad', en: 'City' },
+  2015: { fr: 'Num. de Téléphone', es: 'Núm. de Teléfono', en: 'Phone number' },
+  2016: { fr: 'Adresse Email', es: 'Correo electrónico', en: 'Email address' },
+  2294: { fr: "À combien s'élève le revenu total de votre foyer fiscal ?", es: '¿A cuánto ascienden los ingresos totales de su hogar fiscal?', en: 'What is the total income of your tax household?' },
+  2293: { fr: 'Dans ce logement vous êtes', es: 'En esta vivienda usted es', en: 'In this home you are' },
+  2292: { fr: 'Votre projet concerne', es: 'Su proyecto se refiere a', en: 'Your project concerns' },
+  2306: { fr: 'Date de construction de votre logement', es: 'Fecha de construcción de su vivienda', en: 'Construction date of your home' },
+  2307: { fr: 'Quelle est la surface habitable de votre logement ?', es: '¿Cuál es la superficie habitable de su vivienda?', en: 'What is the living area of your home?' },
+  2296: { fr: 'Quel type de combles avez-vous ?', es: '¿Qué tipo de buhardilla tiene?', en: 'What type of attic do you have?' },
+  2298: { fr: 'Si vos combles sont non habitables : Type de plancher', es: 'Si su buhardilla no es habitable: Tipo de suelo', en: 'If your attic is non-habitable: Floor type' },
+  2300: { fr: "Accès aux combles : il existe une trappe d'accès ?", es: '¿Existe una trampilla de acceso a la buhardilla?', en: 'Attic access: is there an access hatch?' },
+  2301: { fr: 'Type de chauffage principal', es: 'Tipo de calefacción principal', en: 'Main heating type' },
+  2302: { fr: 'Autre type de chauffage principal', es: 'Otro tipo de calefacción principal', en: 'Other main heating type' },
+  2297: { fr: 'Si vos combles sont habitables, que souhaitez-vous isoler ?', es: 'Si su buhardilla es habitable: ¿Qué desea aislar?', en: 'If your attic is habitable: What do you want to insulate?' },
+  2299: { fr: "Type d'isolation souhaité", es: 'Tipo de aislamiento deseado', en: 'Desired insulation type' },
+  2303: { fr: 'Quels travaux souhaitez-vous réaliser dans votre logement ?', es: '¿Qué obras desea realizar en su vivienda?', en: 'What work do you want to carry out in your home?' },
+  2304: { fr: 'Disponibilité pour être contacté', es: 'Disponibilidad para ser contactado', en: 'Availability to be contacted' },
+  2305: { fr: 'Commentaires ou informations complémentaires', es: 'Comentarios o información adicional', en: 'Comments or additional information' },
+}
+
+const OPTION_TRANSLATIONS = {
+  2262: {
+    'Mr.': { fr: 'Mr.', es: 'Sr.', en: 'Mr.' },
+    'Mme': { fr: 'Mme', es: 'Sra.', en: 'Mrs.' },
+  },
+  2294: {
+    '1- Inférieur à 23734€': { fr: '1- Inférieur à 23 734 €', es: '1- Inferior a 23 734 €', en: '1- Less than €23,734' },
+    '2- Entre 23734€ et 30427€': { fr: '2- Entre 23 734 € et 30 427 €', es: '2- Entre 23 734 € y 30 427 €', en: '2- Between €23,734 and €30,427' },
+    '3- Entre 30428€ et 42848€': { fr: '3- Entre 30 428 € et 42 848 €', es: '3- Entre 30 428 € y 42 848 €', en: '3- Between €30,428 and €42,848' },
+    '4- Supérieur à 42849€': { fr: '4- Supérieur à 42 849 €', es: '4- Superior a 42 849 €', en: '4- More than €42,849' },
+  },
+  2293: {
+    'Propriétaire Bailleur': { fr: 'Propriétaire Bailleur', es: 'Propietario Arrendador', en: 'Landlord Owner' },
+    "Propriétaire d'une résidence secondaire": { fr: "Propriétaire d'une résidence secondaire", es: 'Propietario de una residencia secundaria', en: 'Owner of a secondary residence' },
+    'Propriétaire occupant': { fr: 'Propriétaire occupant', es: 'Propietario ocupante', en: 'Owner-occupier' },
+    'Résident': { fr: 'Résident', es: 'Residente', en: 'Resident' },
+  },
+  2292: {
+    'Appartement': { fr: 'Appartement', es: 'Apartamento', en: 'Apartment' },
+    'Maison': { fr: 'Maison', es: 'Casa', en: 'House' },
+  },
+  2306: {
+    '1- Entre 2 ans et 15 ans': { fr: '1- Entre 2 ans et 15 ans', es: '1- Entre 2 y 15 años', en: '1- Between 2 and 15 years' },
+    '2- Plus de 15 ans': { fr: '2- Plus de 15 ans', es: '2- Más de 15 años', en: '2- More than 15 years' },
+  },
+  2307: {
+    '1- 0 à 70 m2': { fr: '1- 0 à 70 m²', es: '1- 0 a 70 m²', en: '1- 0 to 70 m²' },
+    '2- 71 à 120 m2': { fr: '2- 71 à 120 m²', es: '2- 71 a 120 m²', en: '2- 71 to 120 m²' },
+    '3- 121 à 200 m2': { fr: '3- 121 à 200 m²', es: '3- 121 a 200 m²', en: '3- 121 to 200 m²' },
+    '4- + de 200 m2': { fr: '4- + de 200 m²', es: '4- + de 200 m²', en: '4- More than 200 m²' },
+  },
+  2296: {
+    'Combles aménagés / habitables (vous pouvez y vivre)': { fr: 'Combles aménagés / habitables (vous pouvez y vivre)', es: 'Buhardilla acondicionada / habitable (puede vivir en ella)', en: 'Converted / habitable attic (you can live in it)' },
+    'Combles perdus / non habitables (espace vide ou stockage)': { fr: 'Combles perdus / non habitables (espace vide ou stockage)', es: 'Buhardilla no habitable (espacio vacío o almacenamiento)', en: 'Non-habitable attic (empty space or storage)' },
+  },
+  2298: {
+    'Bois': { fr: 'Bois', es: 'Madera', en: 'Wood' },
+    'Béton': { fr: 'Béton', es: 'Hormigón', en: 'Concrete' },
+    'Je ne sais pas (besoin de conseil)': { fr: 'Je ne sais pas (besoin de conseil)', es: 'No lo sé (necesito consejo)', en: "I don't know (need advice)" },
+    'Plafond en placo / faux plafond': { fr: 'Plafond en placo / faux plafond', es: 'Techo de pladur / falso techo', en: 'Plasterboard ceiling / false ceiling' },
+    'Structure métallique': { fr: 'Structure métallique', es: 'Estructura metálica', en: 'Metal structure' },
+  },
+  2300: {
+    'NON': { fr: 'Non', es: 'No', en: 'No' },
+    'OUI': { fr: 'Oui', es: 'Sí', en: 'Yes' },
+  },
+  2301: {
+    'Bois': { fr: 'Bois', es: 'Leña', en: 'Wood' },
+    'Fioul': { fr: 'Fioul', es: 'Gasóleo', en: 'Oil' },
+    'Gaz': { fr: 'Gaz', es: 'Gas', en: 'Gas' },
+    'Pompe à chaleur': { fr: 'Pompe à chaleur', es: 'Bomba de calor', en: 'Heat pump' },
+    'Électrique': { fr: 'Électrique', es: 'Eléctrico', en: 'Electric' },
+    'Autre': { fr: 'Autre', es: 'Otro', en: 'Other' },
+  },
+  2297: {
+    '1- Rampants de toiture (sous le toit)': { fr: '1- Rampants de toiture (sous le toit)', es: '1- Pendientes del tejado (bajo el techo)', en: '1- Roof rafters (under the roof)' },
+    '2- Plafond intérieur': { fr: '2- Plafond intérieur', es: '2- Techo interior', en: '2- Interior ceiling' },
+    '3- Murs latéraux': { fr: '3- Murs latéraux', es: '3- Paredes laterales', en: '3- Side walls' },
+    '4- Je ne sais pas (besoin de conseil)': { fr: '4- Je ne sais pas (besoin de conseil)', es: '4- No lo sé (necesito consejo)', en: "4- I don't know (need advice)" },
+  },
+  2299: {
+    'Isolation en rouleaux': { fr: 'Isolation en rouleaux', es: 'Aislamiento en rollos', en: 'Roll insulation' },
+    'Isolation soufflée': { fr: 'Isolation soufflée', es: 'Aislamiento soplado', en: 'Blown insulation' },
+  },
+  2303: {
+    '1- Isolation thermique': { fr: '1- Isolation thermique', es: '1- Aislamiento térmico', en: '1- Thermal insulation' },
+    '2- Chauffage et ECS': { fr: '2- Chauffage et ECS', es: '2- Calefacción y ACS', en: '2- Heating and DHW' },
+    '3- Ventilation': { fr: '3- Ventilation', es: '3- Ventilación', en: '3- Ventilation' },
+    '4- Energie Solaire': { fr: '4- Énergie Solaire', es: '4- Energía Solar', en: '4- Solar Energy' },
+    '5- Rénovation Globale': { fr: '5- Rénovation Globale', es: '5- Renovación Global', en: '5- Global Renovation' },
+  },
+  2304: {
+    '1- Matin': { fr: '1- Matin', es: '1- Mañana', en: '1- Morning' },
+    '2- Après-midi': { fr: '2- Après-midi', es: '2- Tarde', en: '2- Afternoon' },
+    '3- Soir': { fr: '3- Soir', es: '3- Noche', en: '3- Evening' },
+    '4- A tout moment': { fr: '4- À tout moment', es: '4- En cualquier momento', en: '4- At any time' },
+  },
+}
+
 function normalizeQuestionText(text) {
   if (!text) return ''
   return FIELD_LABEL_OVERRIDES[text.id] || text.name || ''
@@ -1011,20 +1116,21 @@ function buildQuestionsV2FromFields() {
         const optionValues = FIELD_OPTIONS_OVERRIDES[field.id] || field.options?.map((option) => option.name) || []
         const hasOptions = optionValues.length > 0
         const typeOption = FIELD_TYPE_OVERRIDES[field.id] || (hasOptions ? 'option_unique' : FIELD_TYPE_TO_TYPE_OPTION[field.fieldtype_id] || 'texte_court')
-        const label = normalizeQuestionText(field)
+        const labelFr = normalizeQuestionText(field)
+        const libelleQuestion = FIELD_LABEL_TRANSLATIONS[field.id] || i18nSame(labelFr)
 
         questions.push({
           orderPage,
           ordreDansPage: field.ordre ?? 0,
           obligatoire: FIELD_REQUIRED_OVERRIDES[field.id] ?? field.required ?? false,
           typeOption,
-          libelleQuestion: i18nSame(label),
+          libelleQuestion,
           paragrapheInfo: { fr: null, es: null, en: null },
           options: hasOptions
             ? optionValues.map((value, index) => ({
                 id: optionId(field.id, value, index),
                 crmValue: value,
-                label: i18nSame(value),
+                label: (OPTION_TRANSLATIONS[field.id]?.[value]) || i18nSame(value),
               }))
             : null,
           crmFieldIds: [field.id],

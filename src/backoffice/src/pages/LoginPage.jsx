@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../services/api.js'
@@ -31,7 +31,7 @@ function SpinnerIcon() {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, isAuthenticated, user } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -39,15 +39,19 @@ export default function LoginPage() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      navigate(user.role === 'SUPER_ADMIN' ? '/superadmin/dashboard' : '/adminborne/dashboard', { replace: true })
+    }
+  }, [isAuthenticated, user, navigate])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
       const res = await api.post('/api/auth/login', { email, password })
-      login(res.data.token)
-      const role = res.data.role
-      navigate(role === 'SUPER_ADMIN' ? '/superadmin/dashboard' : '/adminborne/dashboard', { replace: true })
+      login(res.data.token, res.data.refreshToken)
     } catch (err) {
       setError(err.response?.data?.error || 'Identifiants invalides')
     } finally {

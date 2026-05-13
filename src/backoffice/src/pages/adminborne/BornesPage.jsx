@@ -27,7 +27,7 @@ export default function ABBornesPage() {
 
         <ErrorBanner message={error} onClose={() => setError(null)} />
 
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">

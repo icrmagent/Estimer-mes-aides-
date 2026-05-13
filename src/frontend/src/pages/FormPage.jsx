@@ -130,9 +130,9 @@ export function FormPage() {
   const config = formulaire?.pageDebutConfig || {}
   const defaultTexts = {
     titre: {
-      fr: 'Estimez vos aides à la rénovation2',
-      en: 'Estimate your renovation grants2',
-      es: 'Calcula tus ayudas para la renovación2',
+      fr: 'Estimez vos aides à la rénovation',
+      en: 'Estimate your renovation grants',
+      es: 'Calcula tus ayudas para la renovación',
     },
     sousTitre: {
       fr: 'Pour la rénovation énergétique de votre maison Répondez à quelques questions pour découvrir vos aides',
@@ -234,8 +234,8 @@ export function FormPage() {
     )
   }
 
-  const uniqueCategories = Array.from(new Set(pages.map(p => p.categorie?.nom).filter(Boolean)))
-  const pageTitle = currentPage.sousCategorie?.nom || (currentPage.categorie ? null : `Étape ${currentStep + 1}`)
+  const uniqueCategories = [...new Set(pages.map(p => t(p.categorie?.nom, langue)).filter(Boolean))]
+  const pageTitle = t(currentPage.sousCategorie?.nom, langue) || (currentPage.categorie ? null : `Étape ${currentStep + 1}`)
   const isLast = currentStep === totalSteps - 1
   const isHalfWidthField = (question, label) => {
     const normalized = label
@@ -339,8 +339,8 @@ export function FormPage() {
             {currentPage.categorie && (
               <div className={pageTitle ? 'mb-4' : 'mb-8'}>
                 <SectionHeader
-                  number={uniqueCategories.indexOf(currentPage.categorie.nom) + 1}
-                  title={currentPage.categorie.nom}
+                  number={uniqueCategories.indexOf(t(currentPage.categorie.nom, langue)) + 1}
+                  title={t(currentPage.categorie.nom, langue)}
                   total={uniqueCategories.length}
                 />
               </div>
@@ -389,7 +389,7 @@ export function FormPage() {
                   onClick={handleSubmit}
                   disabled={!isStepValid() || submitting}
                   className="text-white font-extrabold rounded-2xl py-4 px-12 text-xl transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md"
-                  style={{ background: '#7C3AED', minHeight: '64px', minWidth: '280px' }}
+                  style={{ background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)', minHeight: '64px', minWidth: '280px' }}
                 >
                   {submitting ? 'Envoi...' : (langue === 'es' ? 'Terminar' : langue === 'en' ? 'Finish' : 'Terminer')}
                 </button>
@@ -448,27 +448,27 @@ function BorneInfoBar() {
 
   return (
     <div
-      className="tablet-borne-info flex items-center justify-between px-10 py-2 text-xs font-bold uppercase tracking-wide w-full"
+      className="tablet-borne-info flex items-center justify-between px-2 sm:px-4 py-2 text-xs font-bold uppercase tracking-wide w-full"
       style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '40px' }}
     >
       {/* Logo — top left */}
-      <div className="flex items-center" style={{ width: '120px' }}>
-        <img src={ilaLogo} alt="ila 26" style={{ height: '24px', width: 'auto', objectFit: 'contain', marginLeft: '25px' }} />
+      <div className="flex items-center flex-shrink-0">
+        <img src={ilaLogo} alt="ila 26" style={{ height: '24px', width: 'auto', objectFit: 'contain' }} />
       </div>
 
       {/* Center: Info Parts */}
-      <div className="tablet-borne-text flex-1 text-center text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-6">
+      <div className="tablet-borne-text flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-4 md:gap-6 px-2 overflow-hidden">
         {infoParts.map((part, idx) => (
-          <span key={idx}>{part}</span>
+          <span key={idx} className="truncate max-w-[120px] sm:max-w-none">{part}</span>
         ))}
       </div>
 
       {/* Right: ExitButton */}
-      <div className="flex items-center justify-end" style={{ width: '120px' }}>
-        <ExitButton 
-          className="text-white hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer flex items-center justify-center" 
+      <div className="flex items-center justify-end flex-shrink-0">
+        <ExitButton
+          className="text-white hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer flex items-center justify-center"
           aria-label="Quitter le mode kiosque"
-          style={{ minHeight: 'auto', minWidth: 'auto', padding: '4px', marginRight: '20px' }}
+          style={{ minHeight: '48px', minWidth: '48px', padding: '8px' }}
         >
           <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

@@ -41,11 +41,11 @@ export async function loginUser({ email, password, context = 'backoffice' }) {
     const valid = await bcrypt.compare(password, adminBorne.passwordHash)
     if (!valid) return null
 
-    // Back-office sessions: 8h — borne sessions: 24h (R6.4)
-    const expiresIn = context === 'borne' ? '24h' : '8h'
+    // Back-office sessions: 8h — borne sessions: 30j (kiosque toujours connecté, R6.4)
+    const expiresIn = context === 'borne' ? '30d' : '8h'
     const jti = uuid()
     const token = jwt.sign(
-      { sub: adminBorne.id, role: 'ADMIN_BORNE', jti },
+      { sub: adminBorne.id, role: 'ADMIN_BORNE', email: adminBorne.email, jti },
       JWT_SECRET(),
       { expiresIn }
     )

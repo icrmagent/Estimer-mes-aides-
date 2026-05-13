@@ -1,0 +1,29 @@
+{
+  "name": "Estimer mes aides",
+  "short_name": "Mes Aides",
+  "description": "Plateforme d'estimation des aides à la rénovation énergétique",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#5B2D8E",
+  "theme_color": "#5B2D8E",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/logo-ila26.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

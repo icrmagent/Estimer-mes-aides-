@@ -361,7 +361,7 @@ export default function PartageJobsPage() {
         )}
 
         {/* Canaux configurés */}
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <div>
               <h2 className="font-bold text-gray-900">Canaux I-CRM</h2>
@@ -461,7 +461,7 @@ export default function PartageJobsPage() {
         />
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-gray-900">Enregistrements</h2>
@@ -502,7 +502,7 @@ export default function PartageJobsPage() {
             )}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm">
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
               <div>
                 <h2 className="font-bold text-gray-900">Jobs de transmission</h2>

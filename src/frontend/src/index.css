@@ -153,6 +153,9 @@ html, body {
   line-height: 1.2;
   margin-bottom: 3px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .app-header-highlight {
@@ -818,6 +821,12 @@ html, body {
 
   .pf-option-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .pf-option-grid:not(.pf-option-grid--compact-two) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1529,7 +1538,8 @@ html, body {
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px;
+  min-height: 44px;
   background: none;
   border: none;
   cursor: pointer;
@@ -1883,6 +1893,19 @@ body { overscroll-behavior: none; }
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+}
+
+/* Kiosk landscape 1024px+ — nav arrows stabilisées (évite dérive clavier Android) */
+@media (min-width: 1025px) {
+  .tablet-nav-prev,
+  .tablet-nav-next {
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    width: 64px !important;
+    height: 64px !important;
+  }
+  .tablet-nav-prev { left: 16px !important; }
+  .tablet-nav-next { right: 16px !important; }
 }
 
 /* Landscape mobile — header FormPage compact */

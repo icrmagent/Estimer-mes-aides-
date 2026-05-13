@@ -277,7 +277,7 @@ export default function EnregistrementsListPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           {loading ? (
             <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
           ) : enregistrements.length === 0 ? (

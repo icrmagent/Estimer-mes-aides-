@@ -30,6 +30,10 @@ const updateStatutSchema = z.object({
   statut: z.enum(['actif', 'inactif']),
 })
 
+const updateConnexionSchema = z.object({
+  estConnectee: z.boolean(),
+})
+
 const listQuerySchema = z.object({
   statut: z.enum(['actif', 'inactif']).optional(),
   adminBorneId: z.string().uuid().optional(),
@@ -229,6 +233,28 @@ bornesRouter.patch('/:id/statut', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
     // Invalidate borne config cache (task 26.7)
     await cacheService.delete(`borne-config:${req.params.id}`)
 
+    return res.json({ success: true, data: borne })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── PATCH /api/bornes/:id/connexion ─────────────────────────────────────────
+
+bornesRouter.patch('/:id/connexion', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = updateConnexionSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Valeur invalide', details: parsed.error.flatten() },
+    })
+  }
+
+  try {
+    const borne = await prisma.borne.update({
+      where: { id: req.params.id },
+      data: { estConnectee: parsed.data.estConnectee },
+    })
     return res.json({ success: true, data: borne })
   } catch (err) {
     return handlePrismaError(err, res)

@@ -78,7 +78,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
               onChange={e => onChange(e.target.value)}
               className="pf-select"
             >
-              <option value="" disabled>Sélectionner...</option>
+              <option value="" disabled>{langue === 'es' ? 'Seleccionar...' : langue === 'en' ? 'Select...' : 'Sélectionner...'}</option>
               {translatedOptions.map(opt => (
                 <option key={opt.id} value={opt.id}>
                   {opt.label}

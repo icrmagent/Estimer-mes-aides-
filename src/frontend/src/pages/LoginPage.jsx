@@ -201,6 +201,7 @@ export default function LoginPage() {
         // localStorage choisi intentionnellement : device kiosque dédié, pas de navigation inter-onglets.
         // httpOnly cookie complexifierait le timeout 60s (CLAUDE.md règle 3). Décision validée audit 2026-05-13.
         localStorage.setItem('borne_token', data.token)
+        localStorage.setItem('borne_email', email)
         localStorage.removeItem(ATTEMPTS_KEY)
         localStorage.removeItem(LOCKOUT_KEY)
         navigate('/start', { replace: true })

@@ -56,19 +56,19 @@ export default function ExitButton({ className, style, children }) {
     setError(null)
 
     try {
-      // Vérifier le mot de passe en tentant un login
-      const token = localStorage.getItem('borne_token')
-      // Décoder l'email depuis le JWT
+      // Email depuis le JWT (champ ajouté v2) ou fallback localStorage
       let email = ''
+      const token = localStorage.getItem('borne_token')
       if (token) {
         try {
           const payload = JSON.parse(atob(token.split('.')[1]))
           email = payload.email || ''
         } catch { /* ignore */ }
       }
+      if (!email) email = localStorage.getItem('borne_email') || ''
 
       if (!email) {
-        setError('Session expirée. Veuillez vous reconnecter.')
+        setError('Impossible d\'identifier la session. Veuillez contacter l\'administrateur.')
         setLoading(false)
         return
       }
@@ -81,6 +81,8 @@ export default function ExitButton({ className, style, children }) {
 
       if (res.ok) {
         closeModal()
+        localStorage.removeItem('borne_token')
+        localStorage.removeItem('borne_email')
         navigate('/login', { replace: true })
       } else {
         setError('Mot de passe incorrect')

@@ -189,18 +189,18 @@ function BorneInfoBar() {
       </div>
 
       {/* Center: Info Parts */}
-      <div className="flex-1 text-center text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-6">
-        {borne.commercant && <span>{l.master}: {borne.commercant}</span>}
-        {borne.regie && <span>{l.regie}: {borne.regie}</span>}
-        {borne.installateur && <span>{l.installateur}: {borne.installateur}</span>}
+      <div className="flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-4 md:gap-6 px-2 overflow-hidden">
+        {borne.commercant && <span className="truncate max-w-[100px] sm:max-w-none">{l.master}: {borne.commercant}</span>}
+        {borne.regie && <span className="truncate max-w-[100px] sm:max-w-none">{l.regie}: {borne.regie}</span>}
+        {borne.installateur && <span className="truncate max-w-[100px] sm:max-w-none">{l.installateur}: {borne.installateur}</span>}
       </div>
 
       {/* Right: ExitButton */}
-      <div className="flex items-center justify-end" style={{ width: '120px' }}>
-        <ExitButton 
-          className="text-white hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer flex items-center justify-center" 
+      <div className="flex items-center justify-end flex-shrink-0">
+        <ExitButton
+          className="text-white hover:opacity-80 transition-opacity bg-transparent border-none cursor-pointer flex items-center justify-center"
           aria-label="Quitter le mode kiosque"
-          style={{ minHeight: 'auto', minWidth: 'auto', padding: '4px', marginRight: '20px' }}
+          style={{ minHeight: '48px', minWidth: '48px', padding: '8px' }}
         >
           <svg className="w-5 h-5 md:w-6 md:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />

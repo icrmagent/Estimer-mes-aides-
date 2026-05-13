@@ -459,7 +459,7 @@ function QuestionForm({ question, onChange, onSave, onCancel, saving, title, cat
           >
             <option value="">Aucune catégorie</option>
             {categories.map(cat => (
-              <option key={cat.id} value={cat.id}>{cat.nom}</option>
+              <option key={cat.id} value={cat.id}>{(() => { try { const n = typeof cat.nom === 'string' ? JSON.parse(cat.nom) : cat.nom; return n?.fr || '' } catch { return cat.nom || '' } })()}</option>
             ))}
           </select>
         </div>
@@ -474,7 +474,7 @@ function QuestionForm({ question, onChange, onSave, onCancel, saving, title, cat
           >
             <option value="">Aucune sous-catégorie</option>
             {sousCategories.map(sub => (
-              <option key={sub.id} value={sub.id}>{sub.nom}</option>
+              <option key={sub.id} value={sub.id}>{(() => { try { const n = typeof sub.nom === 'string' ? JSON.parse(sub.nom) : sub.nom; return n?.fr || '' } catch { return sub.nom || '' } })()}</option>
             ))}
           </select>
         </div>

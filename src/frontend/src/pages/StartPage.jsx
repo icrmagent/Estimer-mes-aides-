@@ -173,7 +173,7 @@ export default function StartPage() {
         style={{
           position: 'relative',
           width: '100%',
-          minHeight: '100vh',
+          minHeight: '100dvh',
           background: isExiting
             ? '#060c2e'
             : 'linear-gradient(135deg, #0a1a6e 0%, #1a3aaa 30%, #2a3fb5 50%, #3b2fa0 70%, #6a3fb5 100%)',
@@ -183,7 +183,7 @@ export default function StartPage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '48px 32px 40px',
+          padding: 'clamp(20px, 6dvh, 48px) clamp(16px, 5vw, 32px) clamp(16px, 5dvh, 40px)',
           fontFamily: "'Segoe UI', system-ui, sans-serif",
           boxSizing: 'border-box',
         }}
@@ -211,11 +211,11 @@ export default function StartPage() {
           className="fade-all"
           style={{
             position: 'absolute',
-            top: '16px',
-            left: '16px',
+            top: '12px',
+            left: '12px',
             background: 'rgba(10,26,110,0.7)',
             borderRadius: '10px',
-            padding: '8px 12px',
+            padding: '6px 10px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
@@ -223,7 +223,7 @@ export default function StartPage() {
             zIndex: 20,
           }}
         >
-          <img src={ilaLogo} alt="ila 26" style={{ height: '32px', width: 'auto', objectFit: 'contain' }} />
+          <img src={ilaLogo} alt="ila 26" style={{ height: 'clamp(24px, 4dvh, 32px)', width: 'auto', objectFit: 'contain' }} />
         </div>
 
         {/* Language selector */}
@@ -231,8 +231,8 @@ export default function StartPage() {
           className="fade-all"
           style={{
             position: 'absolute',
-            top: '14px',
-            right: '16px',
+            top: '12px',
+            right: '12px',
             display: 'flex',
             flexDirection: 'column',
             gap: '4px',
@@ -243,9 +243,9 @@ export default function StartPage() {
         </div>
 
         {/* Sparkle decorations */}
-        <SparkleIcon className="fade-all" size={20} style={{ position: 'absolute', top: '60px', left: '55%', opacity: 0.5 }} />
-        <SparkleIcon className="fade-all" size={12} style={{ position: 'absolute', bottom: '50px', right: '70px', opacity: 0.4 }} />
-        <SparkleIcon className="fade-all" size={28} style={{ position: 'absolute', bottom: '30px', right: '30px', opacity: 0.55 }} />
+        <SparkleIcon className="fade-all" size={20} style={{ position: 'absolute', top: '60px', left: '55%', opacity: 0.5, pointerEvents: 'none' }} />
+        <SparkleIcon className="fade-all" size={12} style={{ position: 'absolute', bottom: '40px', right: '60px', opacity: 0.4, pointerEvents: 'none' }} />
+        <SparkleIcon className="fade-all" size={28} style={{ position: 'absolute', bottom: '20px', right: '20px', opacity: 0.55, pointerEvents: 'none' }} />
 
         <div className="hero-wrapper">
           {/* House icon — hidden the moment the overlay takes over */}
@@ -270,8 +270,8 @@ export default function StartPage() {
             color: '#1a1a2e',
             border: 'none',
             borderRadius: '50px',
-            padding: '16px 42px',
-            fontSize: '17px',
+            padding: 'clamp(12px, 2dvh, 16px) clamp(28px, 5vw, 42px)',
+            fontSize: 'clamp(15px, 2vw, 17px)',
             fontWeight: 800,
             cursor: 'pointer',
             display: 'flex',
@@ -280,6 +280,7 @@ export default function StartPage() {
             letterSpacing: '0.5px',
             position: 'relative',
             zIndex: 10,
+            minHeight: '52px',
           }}
         >
           {labelBouton} <span className="start-btn-icon" style={{ fontSize: '20px' }}>→</span>
@@ -299,8 +300,8 @@ export default function StartPage() {
           .hero-wrapper {
             position: relative;
             width: 100%;
-            height: 260px;
-            margin-bottom: 16px;
+            height: clamp(180px, 35dvh, 260px);
+            margin-bottom: clamp(8px, 2dvh, 16px);
             z-index: 10;
             transition: opacity 0.65s ease-out;
           }
@@ -314,8 +315,8 @@ export default function StartPage() {
             top: 0;
             left: 50%;
             transform: translateX(-50%);
-            width: 110px;
-            height: 110px;
+            width: clamp(80px, 13dvh, 110px);
+            height: clamp(80px, 13dvh, 110px);
             border-radius: 50%;
             background: rgba(140,160,255,0.22);
             border: 1.5px solid rgba(255,255,255,0.3);
@@ -327,37 +328,39 @@ export default function StartPage() {
             box-shadow: 0 4px 32px rgba(80,100,255,0.2);
           }
           .hero-icon img {
-            width: 70px;
-            height: 70px;
+            width: 65%;
+            height: 65%;
             object-fit: contain;
           }
 
           .hero-text {
             position: absolute;
-            top: 134px;
+            top: clamp(94px, 60%, 134px);
             left: 50%;
             transform: translateX(-50%);
             display: flex;
             flex-direction: column;
             align-items: center;
             width: max-content;
-            max-width: 90vw;
+            max-width: min(90vw, 480px);
           }
 
           .hero-title {
             color: white;
-            font-size: clamp(22px, 4vw, 36px);
+            font-size: clamp(18px, 4vw, 36px);
             font-weight: 800;
-            margin: 0 0 8px;
+            margin: 0 0 6px;
             letter-spacing: -0.3px;
             line-height: 1.15;
+            text-align: center;
           }
 
           .hero-subtitle {
             color: rgba(255,255,255,0.95);
-            font-size: clamp(14px, 2vw, 17px);
+            font-size: clamp(12px, 2vw, 17px);
             font-weight: 700;
             margin: 0 0 6px;
+            text-align: center;
           }
 
           /* Glow ring pulse — applied to the overlay icon once centered */

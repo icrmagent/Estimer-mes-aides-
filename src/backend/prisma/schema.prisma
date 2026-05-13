@@ -85,6 +85,7 @@ model Borne {
   installateur    String?
   canalTransmission String?
   statut          String           @default("actif")
+  estConnectee    Boolean          @default(false)
   formulaireId    String?
   formulaire      Formulaire?      @relation(fields: [formulaireId], references: [id])
   adminBorneId    String?
@@ -166,7 +167,7 @@ model Question {
 
 model CategorieQuestion {
   id              String                  @id @default(uuid())
-  nom             String                  @unique
+  nom             Json
   sousCategories  SousCategorieQuestion[]
   questions       Question[]
   createdAt       DateTime                @default(now())
@@ -177,7 +178,7 @@ model CategorieQuestion {
 
 model SousCategorieQuestion {
   id              String                  @id @default(uuid())
-  nom             String
+  nom             Json
   categorieId     String
   categorie       CategorieQuestion       @relation(fields: [categorieId], references: [id], onDelete: Cascade)
   questions       Question[]

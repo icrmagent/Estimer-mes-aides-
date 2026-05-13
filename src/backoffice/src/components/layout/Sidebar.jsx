@@ -59,6 +59,11 @@ const Icons = {
       <line x1="21" y1="12" x2="9" y2="12"/>
     </svg>
   ),
+  close: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  ),
 }
 
 function SectionLabel({ label }) {
@@ -71,18 +76,19 @@ function SectionLabel({ label }) {
   )
 }
 
-function NavItem({ to, label, icon }) {
+function NavItem({ to, label, icon, onClick }) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
-        `flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+        `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-150 ${
           isActive
             ? 'text-white shadow-sm'
             : 'text-gray-300 hover:text-white hover:bg-white/10'
         }`
       }
-      style={({ isActive }) => isActive ? { background: PRIMARY } : {}}
+      style={({ isActive }) => isActive ? { background: PRIMARY, minHeight: '48px' } : { minHeight: '48px' }}
     >
       <span className="flex-shrink-0 opacity-90">{icon}</span>
       <span>{label}</span>
@@ -90,7 +96,7 @@ function NavItem({ to, label, icon }) {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const isSuperAdmin = user?.role === 'SUPER_ADMIN'
@@ -103,10 +109,18 @@ export default function Sidebar() {
   const initiale = user?.email?.[0]?.toUpperCase() || '?'
 
   return (
-    <aside className="w-64 flex flex-col h-screen flex-shrink-0" style={{ background: '#1a1a2e' }}>
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <div className="flex items-center gap-3">
+    <aside
+      className={[
+        'fixed lg:static inset-y-0 left-0 z-30',
+        'w-64 flex flex-col h-screen flex-shrink-0',
+        'transition-transform duration-200 ease-in-out',
+        isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+      ].join(' ')}
+      style={{ background: '#1a1a2e' }}
+    >
+      {/* Logo + bouton fermer (mobile/tablette) */}
+      <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
           <div
             className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs flex-shrink-0"
             style={{ background: PRIMARY }}
@@ -118,6 +132,15 @@ export default function Sidebar() {
             <div className="text-gray-400 text-xs truncate">Estimer Mes Aides V2</div>
           </div>
         </div>
+        {/* Fermer — visible uniquement en dessous de lg */}
+        <button
+          onClick={onClose}
+          className="lg:hidden flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          style={{ minHeight: '40px', minWidth: '40px' }}
+          aria-label="Fermer le menu"
+        >
+          {Icons.close}
+        </button>
       </div>
 
       {/* Navigation */}
@@ -125,24 +148,24 @@ export default function Sidebar() {
         {isSuperAdmin ? (
           <>
             <SectionLabel label="Général" />
-            <NavItem to="/superadmin/dashboard" label="Tableau de bord" icon={Icons.dashboard} />
+            <NavItem to="/superadmin/dashboard" label="Tableau de bord" icon={Icons.dashboard} onClick={onClose} />
 
             <SectionLabel label="Gestion" />
-            <NavItem to="/superadmin/admin-bornes" label="AdminBornes" icon={Icons.users} />
-            <NavItem to="/superadmin/categories-questions" label="Catégories" icon={Icons.tag} />
-            <NavItem to="/superadmin/formulaires" label="Formulaires" icon={Icons.forms} />
-            <NavItem to="/superadmin/bornes" label="Bornes" icon={Icons.monitor} />
-            <NavItem to="/superadmin/enregistrements" label="Enregistrements" icon={Icons.inbox} />
+            <NavItem to="/superadmin/admin-bornes" label="AdminBornes" icon={Icons.users} onClick={onClose} />
+            <NavItem to="/superadmin/categories-questions" label="Catégories" icon={Icons.tag} onClick={onClose} />
+            <NavItem to="/superadmin/formulaires" label="Formulaires" icon={Icons.forms} onClick={onClose} />
+            <NavItem to="/superadmin/bornes" label="Bornes" icon={Icons.monitor} onClick={onClose} />
+            <NavItem to="/superadmin/enregistrements" label="Enregistrements" icon={Icons.inbox} onClick={onClose} />
 
             <SectionLabel label="Intégration" />
-            <NavItem to="/superadmin/partage" label="Partage CRM" icon={Icons.refresh} />
+            <NavItem to="/superadmin/partage" label="Partage CRM" icon={Icons.refresh} onClick={onClose} />
           </>
         ) : (
           <>
             <div className="pt-2" />
-            <NavItem to="/adminborne/dashboard" label="Tableau de bord" icon={Icons.dashboard} />
-            <NavItem to="/adminborne/bornes" label="Mes Bornes" icon={Icons.monitor} />
-            <NavItem to="/adminborne/enregistrements" label="Enregistrements" icon={Icons.inbox} />
+            <NavItem to="/adminborne/dashboard" label="Tableau de bord" icon={Icons.dashboard} onClick={onClose} />
+            <NavItem to="/adminborne/bornes" label="Mes Bornes" icon={Icons.monitor} onClick={onClose} />
+            <NavItem to="/adminborne/enregistrements" label="Enregistrements" icon={Icons.inbox} onClick={onClose} />
           </>
         )}
       </nav>
@@ -160,8 +183,8 @@ export default function Sidebar() {
         </div>
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
-          style={{ minHeight: '44px' }}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+          style={{ minHeight: '48px' }}
         >
           {Icons.logout}
           <span>Déconnexion</span>

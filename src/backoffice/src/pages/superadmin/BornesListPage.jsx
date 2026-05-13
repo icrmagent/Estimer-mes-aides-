@@ -8,7 +8,7 @@ import {
   Toast, ErrorBanner, SkeletonTableRows, EmptyState, BadgeBorneStatut,
 } from '../../components/ui.jsx'
 
-function BorneRowActions({ borne, toggleStatut }) {
+function BorneRowActions({ borne, toggleStatut, toggleConnexion }) {
   const [isOpen, setIsOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -43,6 +43,13 @@ function BorneRowActions({ borne, toggleStatut }) {
                   : <><path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/></>}
               </svg>
               {borne.statut === 'actif' ? 'Désactiver' : 'Activer'}
+            </button>
+            <button
+              onClick={() => { setIsOpen(false); toggleConnexion(borne) }}
+              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 transition-colors"
+            >
+              <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${borne.estConnectee ? 'bg-red-500' : 'bg-green-500'}`} />
+              {borne.estConnectee ? 'Déconnecter' : 'Connecter'}
             </button>
             <Link
               to={`/superadmin/bornes/${borne.id}/edit`}
@@ -129,6 +136,17 @@ export default function BornesListPage() {
     }
   }
 
+  async function toggleConnexion(borne) {
+    const newVal = !borne.estConnectee
+    try {
+      await api.patch(`/api/bornes/${borne.id}/connexion`, { estConnectee: newVal })
+      setBornes(prev => prev.map(b => b.id === borne.id ? { ...b, estConnectee: newVal } : b))
+      setToast({ message: `Borne ${newVal ? 'connectée' : 'déconnectée'}` })
+    } catch (err) {
+      setError(err.response?.data?.error || 'Erreur lors de la mise à jour')
+    }
+  }
+
   const inputClass = 'border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }
   const totalPages = Math.ceil(total / limit)
@@ -194,11 +212,12 @@ export default function BornesListPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="text-left px-4 py-3 font-semibold text-gray-600 rounded-tl-2xl">ID Borne</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">Connexion</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Adresse</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire</th>
@@ -211,7 +230,7 @@ export default function BornesListPage() {
                 <SkeletonTableRows cols={6} rows={4} />
               ) : bornes.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <EmptyState
                       icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
                       title="Aucune borne trouvée"
@@ -223,6 +242,14 @@ export default function BornesListPage() {
                 bornes.map(borne => (
                   <tr key={borne.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">{borne.idBorne}</td>
+                    <td className="px-4 py-3">
+                      <span className="flex items-center gap-1.5">
+                        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${borne.estConnectee ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <span className={`text-xs font-medium ${borne.estConnectee ? 'text-green-700' : 'text-red-600'}`}>
+                          {borne.estConnectee ? 'Connectée' : 'Déconnectée'}
+                        </span>
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-gray-700 max-w-xs truncate">{borne.adresse}</td>
                     <td className="px-4 py-3"><BadgeBorneStatut statut={borne.statut} /></td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{borne.formulaire?.label || '—'}</td>
@@ -230,7 +257,7 @@ export default function BornesListPage() {
                       {borne.adminBorne ? `${borne.adminBorne.nom} ${borne.adminBorne.prenom}` : '—'}
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <BorneRowActions borne={borne} toggleStatut={toggleStatut} />
+                      <BorneRowActions borne={borne} toggleStatut={toggleStatut} toggleConnexion={toggleConnexion} />
                     </td>
                   </tr>
                 ))

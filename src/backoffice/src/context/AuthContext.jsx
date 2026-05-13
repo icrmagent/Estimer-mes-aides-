@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback } from 'react'
 import axios from 'axios'
 
 const AuthContext = createContext(null)
@@ -15,12 +15,6 @@ function decodeJwt(token) {
   }
 }
 
-/** Returns true if the token's exp claim is in the past. */
-function isTokenExpired(token) {
-  const payload = decodeJwt(token)
-  if (!payload?.exp) return true
-  return Date.now() >= payload.exp * 1000
-}
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(ACCESS_TOKEN_KEY))
@@ -29,18 +23,6 @@ export function AuthProvider({ children }) {
     if (!t) return null
     return decodeJwt(t)
   })
-
-  // ── Auto-logout: check refresh token expiry on mount ─────────────────────
-  useEffect(() => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY)
-    if (refreshToken && isTokenExpired(refreshToken)) {
-      // Refresh token has expired — force logout
-      localStorage.removeItem(ACCESS_TOKEN_KEY)
-      localStorage.removeItem(REFRESH_TOKEN_KEY)
-      setToken(null)
-      setUser(null)
-    }
-  }, [])
 
   const login = useCallback((newAccessToken, newRefreshToken) => {
     localStorage.setItem(ACCESS_TOKEN_KEY, newAccessToken)
@@ -67,12 +49,6 @@ export function AuthProvider({ children }) {
     if (!storedRefresh) {
       logout()
       throw new Error('No refresh token available')
-    }
-
-    // Check if refresh token itself is expired before making the request
-    if (isTokenExpired(storedRefresh)) {
-      logout()
-      throw new Error('Refresh token expired')
     }
 
     const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3000'

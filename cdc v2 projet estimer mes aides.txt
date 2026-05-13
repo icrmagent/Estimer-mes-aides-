@@ -1,0 +1,63 @@
+projet estimer mes aides
+
+1.Backoffice / 2.FrontOffice 
+
+1.BackOffice :
+--> application web 
+- acteur : superadmin , adminBorne
+******************************
+** superAdmin ** : 
+--> Dashboard : statistiques sur les enregistrements
+--> Gestion des utilisateurs(adminBorne) : Nom Admin , prénom Admin , Email Admin , Entreprise admin raison sociale , Entreprise siret ,Borne[liste ID Borne ] .
+--> Gestion des borne : ID Borne , Language par défaut , Adresse , Commerçant , Régie , Installateur , formulaire-ID .
+--> Gestion des enregistrement : Afficher, exporter , filtrer , rechercher . 
+--> Gestion des formulaires : crud formulaires : label formulaire , description , version --> configuration : page début formulaire / formulaire / page fin formulaire /duré avant retour en (s) / annulation registrement si pas actif en (s) 
+* configuration page début formulaire : 
+- Titre début
+- sous titre début
+- paragraphe début
+
+* configuration question de formulaire
+- Grand titre des pages formulaires 
+- Sous titre des pages formulaires
+- crud Catégories question 
+- crud question : Catégories , question , options , order(page num) , obligation (obligatoire / optionnel) , paragraphe explicative ou informative , type option (option unisue / multiple option)
+
+* configuration page fin formulaire
+- Titre fin
+- sous titre fin
+- paragraphe fin
+
+
+
+--> template de formulaire : 
+- information borne (dans chaque page soit affiché (figé)) : Master filiale : Entreprise admin raison sociale regie : regie borne installateur : installateur borne 
+- Grand titre des pages (dans chaque page soit affiché)
+- sous titre (dans chaque page soit affiché)
+If page one : 
+- Titre 
+- sous titre
+- paragraphe
+eles if page end : 
+- Titre 
+- sous titre
+- paragraphe
+- compteur de retour page one en (s)
+
+eles :
+--> question de formulaire : 
+- catégorie question (dynamique selon le question)(soit affiché dans le formulaire seulement)
+- Question (soit affiché dans le formulaire seulement)
+- liste option des réponse  (soit affiché dans le formulaire seulement)
+-  paragraphe explicative ou informative (soit affiché dans le formulaire seulement)
+--> Gestion de partage enregistrements 
+- send enregistrements to I-CRM : select borne , select entreprise , saisie siret entreprise , choix option de visibilité donné : visible / cached --> confirmé --> send --> job  / pusher --> retern status (fails /success)
+******************************************************
+** AdminBorne ** 
+--> Dashboard : statistiques sur les enregistrements
+--> Gestion des borne : ID Borne , Language par défaut , Adresse , Commerçant , Régie , Installateur
+--> Gestion des enregistrement : Afficher , filtrer , rechercher .
+****************************************************************
+2.Frontoffice
+--> application web / mobile (spécialement tablette) android
+page de connexions (pour l'admin borne) --> admin Borne se connecter(login /mot de passe) --> admin borne cliqué sur démmarer le formulaire --> récupération formulaire selon la configuration (id-adminBorne --> Id-borne-->id-formulaire-->id-configuration --> get configuration --> démmaré formulaire --> formulaire set pour les saisie des données par les passagés //stop formulaire par le admin borne clique sur exit (petit bouton) le admin doit entrer son password pour quitté NB :cette écran ne dépasse pas 60 s --> mot de passe non rensigné(pendant 60s) ou erroné --> retour au formulaire page d'accueille. 

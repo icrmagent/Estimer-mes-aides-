@@ -66,17 +66,17 @@ export function ConfirmationPage() {
       >
         {/* Icône succès */}
         <div
-          className="w-24 h-24 rounded-full flex items-center justify-center mb-8"
+          className="w-24 h-24 lg:w-32 lg:h-32 rounded-full flex items-center justify-center mb-8"
           style={{ background: 'rgba(255,255,255,0.2)' }}
         >
-          <span className="text-5xl">✓</span>
+          <span className="text-5xl lg:text-6xl">✓</span>
         </div>
 
-        <h1 className="text-3xl font-bold text-white mb-4 leading-tight max-w-sm">
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-4 leading-tight max-w-sm md:max-w-lg text-center">
           {titre}
         </h1>
 
-        <p className="text-white/80 text-lg mb-12 leading-relaxed max-w-sm">
+        <p className="text-white/80 text-lg md:text-xl mb-12 leading-relaxed max-w-sm md:max-w-md text-center">
           {message}
         </p>
 
