@@ -66,6 +66,18 @@ const FIELD_ID_MAP = {
   2089: 'code_postale',
   2090: 'ville',
   2262: 'civility',
+  2015: 'phone_number',
+  2016: 'email_adress',
+  2217: 'adresse',
+}
+
+// Transformation de valeur par champ I-CRM (valeurs radio/select encodées → texte brut)
+const VALUE_TRANSFORMS = {
+  // "2262-1-mr" → "Mr", "2262-2-mme" → "Mme"
+  civility: (v) => {
+    const part = v.split('-').pop()
+    return part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : v
+  },
 }
 
 // Fallback : libellé FR normalisé → nom de champ I-CRM API
@@ -118,7 +130,8 @@ function mapReponsesToICRM(reponses) {
     }
 
     if (icrmField) {
-      payload[icrmField] = r.valeur
+      const transform = VALUE_TRANSFORMS[icrmField]
+      payload[icrmField] = transform ? transform(r.valeur) : r.valeur
     }
   }
 
