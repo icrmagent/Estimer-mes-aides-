@@ -92,19 +92,6 @@ function computeNextRetry(tentatives) {
 async function processJob(job) {
   const jobStart = Date.now()
 
-  // Task 30.6 — Validate CRM_API_URL and CRM_API_KEY exist before processing
-  const crmUrl = process.env.CRM_API_URL
-  const crmKey = process.env.CRM_API_KEY
-
-  if (!crmUrl || !crmKey) {
-    logger.error({
-      message: 'CRM_API_URL ou CRM_API_KEY non configuré — job ignoré',
-      jobId: job.id,
-      enregistrementId: job.enregistrementId,
-    })
-    return
-  }
-
   // Marquer le job comme en cours
   await prisma.partageJob.update({
     where: { id: job.id },
@@ -112,11 +99,22 @@ async function processJob(job) {
   })
 
   try {
-    // Récupérer l'enregistrement avec ses réponses
+    // Récupérer l'enregistrement avec ses réponses et le canal actif de la borne
     const enregistrement = await prisma.enregistrement.findUnique({
       where: { id: job.enregistrementId },
       include: {
-        borne: { select: { id: true, idBorne: true, canalTransmission: true } },
+        borne: {
+          select: {
+            id: true,
+            idBorne: true,
+            canalTransmission: true,
+            canaux: {
+              where: { actif: true },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
+          },
+        },
         reponses: {
           include: {
             question: { select: { libelleQuestion: true, orderPage: true, crmFieldIds: true } },
@@ -127,6 +125,15 @@ async function processJob(job) {
 
     if (!enregistrement) {
       throw new Error(`Enregistrement ${job.enregistrementId} introuvable`)
+    }
+
+    // Résoudre les credentials : canal de la borne en priorité, env vars en fallback
+    const canal = enregistrement.borne?.canaux?.[0]
+    const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
+    const crmKey = canal?.token || canal?.apiKey || process.env.CRM_API_KEY
+
+    if (!crmUrl || !crmKey) {
+      throw new Error('Canal I-CRM non configuré pour cette borne — configurer via le back-office')
     }
 
     const icrmPayload = mapReponsesToICRM(enregistrement.reponses)
