@@ -135,6 +135,11 @@ function mapReponsesToICRM(reponses) {
     }
   }
 
+  // Vérifier que les champs obligatoires I-CRM sont présents
+  if (!payload.last_name || !payload.first_name) {
+    throw new Error('Données insuffisantes : Nom et Prénom requis pour créer un contact I-CRM')
+  }
+
   return payload
 }
 
