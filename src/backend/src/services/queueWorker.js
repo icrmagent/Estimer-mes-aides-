@@ -2,8 +2,62 @@ import { prisma } from '../lib/prisma.js'
 import { notifyPartageSucces, notifyPartageEchec, publishEvent } from './pusherService.js'
 import logger from '../lib/logger.js'
 
-const POLL_INTERVAL = 30 * 1000 // 30 secondes
-const MAX_TENTATIVES = 5        // Task 30.3 — échec_définitif after 5 failures
+const POLL_INTERVAL = 30 * 1000
+const MAX_TENTATIVES = 5
+
+const ICRM_AUTH_URL = 'https://auth.dev.ila26.fr/8abd8e97-1720-4fe0-aff1-00abd2d676fb/oauth2/v2.0/token'
+const ICRM_CLIENT_ID = '2fd6a486-ec0c-4c67-af2f-00ccf530f3af'
+const ICRM_SCOPE = 'https://auth.dev.ila26.fr/98236e68-4156-4a1a-b7b5-be69c87cf1d4/access_as_user'
+
+// Renvoie un access_token valide : le token actuel s'il reste > 5 min, sinon refresh
+async function getValidToken(canal) {
+  const token = canal.token
+  if (!token) return null
+
+  // Décoder l'exp du JWT (si JWS à 3 segments)
+  const parts = token.split('.')
+  if (parts.length === 3) {
+    try {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url'))
+      const remainingSec = (payload.exp || 0) - Math.floor(Date.now() / 1000)
+      if (remainingSec > 300) return token // encore 5+ min de validité
+    } catch { /* pas un JWT standard, utiliser tel quel */ }
+  }
+
+  // Token expiré ou proche — essayer de rafraîchir via refresh_token (apiKey)
+  const refreshToken = canal.apiKey
+  if (!refreshToken) return token // pas de refresh_token, retourner quand même
+
+  try {
+    const res = await fetch(ICRM_AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: ICRM_CLIENT_ID,
+        refresh_token: refreshToken,
+        scope: ICRM_SCOPE,
+      }),
+    })
+    if (!res.ok) return token
+    const data = await res.json()
+    if (!data.access_token) return token
+
+    // Persister le nouveau token et refresh_token en DB
+    await prisma.canal.update({
+      where: { id: canal.id },
+      data: {
+        token: data.access_token,
+        apiKey: data.refresh_token || refreshToken,
+      },
+    })
+    logger.info({ message: '[QUEUE] Token I-CRM rafraîchi automatiquement', canalId: canal.id })
+    return data.access_token
+  } catch (err) {
+    logger.warn({ message: '[QUEUE] Échec refresh token I-CRM', error: err.message, canalId: canal.id })
+    return token
+  }
+}
 
 // Mapping CRM field ID → nom de champ I-CRM API
 const FIELD_ID_MAP = {
@@ -132,7 +186,9 @@ async function processJob(job) {
       ? (enregistrement.borne?.canaux?.find(c => c.label === canalLabel) ?? enregistrement.borne?.canaux?.[0])
       : enregistrement.borne?.canaux?.[0]
     const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
-    const crmKey = canal?.token || canal?.apiKey || process.env.CRM_API_KEY
+    const crmKey = canal
+      ? await getValidToken(canal)
+      : process.env.CRM_API_KEY
 
     if (!crmUrl || !crmKey) {
       throw new Error('Canal I-CRM non configuré pour cette borne — configurer via le back-office')
