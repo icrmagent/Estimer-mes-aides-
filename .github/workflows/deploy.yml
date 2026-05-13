@@ -1,5 +1,9 @@
 name: Deploy Production
 
+# Railway et Vercel sont liés au repo GitHub : push sur main → auto-deploy
+# par leurs intégrations Git natives (pas besoin de RAILWAY_TOKEN / VERCEL_TOKEN).
+# Ce workflow s'occupe de : tests + migration DB + healthcheck + build APK + tag.
+
 on:
   push:
     branches: [main]
@@ -11,6 +15,10 @@ on:
         default: false
       skip_migration:
         description: 'Skip Prisma migrate deploy'
+        type: boolean
+        default: false
+      skip_healthcheck:
+        description: "Skip healthcheck (n'attend pas Railway)"
         type: boolean
         default: false
       skip_webview:
@@ -27,7 +35,7 @@ env:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # 1. SYNC — Vérifie la cohérence du repo (sources, lockfiles)
+  # 1. SYNC — Cohérence repo (lockfiles)
   # ─────────────────────────────────────────────────────────────
   sync:
     name: Sync repo & install
@@ -56,7 +64,7 @@ jobs:
           done
 
   # ─────────────────────────────────────────────────────────────
-  # 2. TESTS — Backend Jest (29 V1 + 72+ V2)
+  # 2. TESTS — Backend Jest (491 tests)
   # ─────────────────────────────────────────────────────────────
   tests:
     name: Tests backend
@@ -105,102 +113,53 @@ jobs:
       - name: prisma migrate deploy
         run: npx prisma migrate deploy
         env:
-          # DIRECT_URL = pooler session port 5432 (requis pour migrate)
+          # DIRECT_URL = pooler session port 5432 (IPv4, requis pour migrate)
           DATABASE_URL: ${{ secrets.DIRECT_URL }}
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
   # ─────────────────────────────────────────────────────────────
-  # 4. DEPLOY BACKEND — Railway
+  # 4. HEALTHCHECK — Attend que Railway ait redéployé le backend
   # ─────────────────────────────────────────────────────────────
-  deploy-backend:
-    name: Deploy Backend → Railway
+  healthcheck:
+    name: Healthcheck backend (Railway auto-deploy)
     needs: [tests, migrate]
-    # Ne tourne que si :
-    # - tests OK (ou explicitement sautés via inputs)
-    # - ET migrate OK (ou explicitement sautée via inputs)
     if: ${{ always()
         && (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && inputs.skip_tests == true))
-        && (needs.migrate.result == 'success' || (needs.migrate.result == 'skipped' && inputs.skip_migration == true)) }}
+        && (needs.migrate.result == 'success' || (needs.migrate.result == 'skipped' && inputs.skip_migration == true))
+        && inputs.skip_healthcheck != true }}
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Railway deploy
-        run: npx -y @railway/cli@latest up --service ${{ secrets.RAILWAY_SERVICE }} --detach
+      - name: Wait for Railway redeploy + /health
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      - name: Healthcheck
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            sleep 15
-            if curl -fsS "${{ secrets.BACKEND_URL }}/health"; then
-              echo "Backend healthy"
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL non configuré — skip healthcheck"
+            exit 0
+          fi
+          # Railway peut prendre 1–3 min pour redéployer après push
+          for i in $(seq 1 20); do
+            if curl -fsS --max-time 10 "$BACKEND_URL/health"; then
+              echo ""
+              echo "✓ Backend healthy after $((i * 15))s"
               exit 0
             fi
-            echo "Try $i failed, retry..."
+            echo "Try $i KO — wait 15s..."
+            sleep 15
           done
-          echo "Backend healthcheck failed"
+          echo "✗ Backend ne répond pas après 5 min"
           exit 1
 
   # ─────────────────────────────────────────────────────────────
-  # 5. DEPLOY VITE APPS — Vercel (frontend, back-office, CRM)
-  # ─────────────────────────────────────────────────────────────
-  deploy-vercel:
-    name: Deploy ${{ matrix.app.name }} → Vercel
-    needs: deploy-backend
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        app:
-          - name: frontend
-            dir: src/frontend
-            project_id_secret: VERCEL_PROJECT_ID_FRONTEND
-          - name: backoffice
-            dir: src/backoffice
-            project_id_secret: VERCEL_PROJECT_ID_BACKOFFICE
-          - name: crm-module
-            dir: src/crm-module
-            project_id_secret: VERCEL_PROJECT_ID_CRM
-    defaults:
-      run:
-        working-directory: ${{ matrix.app.dir }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: ${{ matrix.app.dir }}/package-lock.json
-      - run: npm ci
-      - name: Pull Vercel env
-        run: npx -y vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
-      - name: Build
-        run: npx -y vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
-      - name: Deploy
-        run: npx -y vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets[matrix.app.project_id_secret] }}
-
-  # ─────────────────────────────────────────────────────────────
-  # 6. WEBVIEW — Build APK Android signé
+  # 5. WEBVIEW — Build APK Android (versionName ← frontend package.json)
   # ─────────────────────────────────────────────────────────────
   build-webview:
     name: Build Android WebView APK
-    needs: [sync, deploy-vercel]
-    if: ${{ inputs.skip_webview != true && needs.deploy-vercel.result == 'success' }}
+    needs: [sync, healthcheck]
+    if: ${{ always()
+        && needs.sync.result == 'success'
+        && (needs.healthcheck.result == 'success' || needs.healthcheck.result == 'skipped')
+        && inputs.skip_webview != true }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -245,7 +204,7 @@ jobs:
           if [ -f keystore/release.keystore ]; then
             ./gradlew assembleRelease --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
           else
-            echo "No keystore secret — building debug APK"
+            echo "Pas de keystore — build debug"
             ./gradlew assembleDebug --no-daemon -PversionCodeOverride=${{ steps.version.outputs.code }}
           fi
 
@@ -260,12 +219,16 @@ jobs:
           retention-days: 30
 
   # ─────────────────────────────────────────────────────────────
-  # 7. POST-DEPLOY — Tag git + résumé
+  # 6. TAG — git tag + résumé
   # ─────────────────────────────────────────────────────────────
   finalize:
     name: Tag & summary
-    needs: [sync, deploy-backend, deploy-vercel]
-    if: ${{ always() && needs.deploy-backend.result == 'success' && needs.deploy-vercel.result == 'success' }}
+    needs: [sync, tests, migrate, healthcheck, build-webview]
+    if: ${{ always()
+        && needs.sync.result == 'success'
+        && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
+        && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
+        && (needs.healthcheck.result == 'success' || needs.healthcheck.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -284,19 +247,21 @@ jobs:
           echo "TAG=$TAG" >> $GITHUB_ENV
 
       - name: Summary
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
           ## ✅ Déploiement réussi
 
           | Étape | Statut |
           |-------|--------|
-          | Tests backend | ${{ needs.tests.result || 'skipped' }} |
-          | Migration DB | ${{ needs.migrate.result || 'skipped' }} |
-          | Backend Railway | ${{ needs.deploy-backend.result }} |
-          | Vercel (frontend, backoffice, CRM) | ${{ needs.deploy-vercel.result }} |
-          | WebView APK | ${{ needs.build-webview.result || 'skipped' }} |
+          | Tests backend | ${{ needs.tests.result }} |
+          | Migration DB | ${{ needs.migrate.result }} |
+          | Healthcheck Railway | ${{ needs.healthcheck.result }} |
+          | WebView APK | ${{ needs.build-webview.result }} |
 
           - **Commit** : \`${{ needs.sync.outputs.short_sha }}\`
           - **Tag** : \`$TAG\`
-          - **Backend** : ${{ secrets.BACKEND_URL }}
+          - **Backend** : $BACKEND_URL
+          - **Vercel** : auto-déployé via intégration Git (frontend / backoffice / crm-module)
           EOF

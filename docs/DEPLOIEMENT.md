@@ -197,34 +197,36 @@ import('./src/lib/prisma.js').then(async ({prisma}) => {
 
 #### Pipeline automatique (recommandé)
 
-À chaque `push` sur `main`, [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) exécute :
+**Architecture** : Railway et Vercel sont liés au repo GitHub. Un `push` sur `main` déclenche **en parallèle** :
+
+- Railway → auto-deploy du backend (via son intégration Git, sans token)
+- Vercel → auto-deploy des 3 apps (via son intégration Git, sans token)
+- GitHub Actions [.github/workflows/deploy.yml](../.github/workflows/deploy.yml) :
 
 ```
 1. sync         → checkout + vérif lockfiles
-2. tests        → npm test (backend Jest, 72+ tests V1+V2)
-3. migrate      → prisma migrate deploy sur Supabase (DIRECT_URL port 5432)
-4. deploy-backend → Railway (npx @railway/cli up) + healthcheck /health
-5. deploy-vercel  → matrix [frontend, backoffice, crm-module] en parallèle
-6. build-webview  → APK Android signé (artefact 30 j)
-7. finalize       → tag git `deploy-YYYYMMDD-HHMMSS-<sha>` + summary
+2. tests        → npm test (491 tests Jest, V1 + V2)
+3. migrate      → prisma migrate deploy sur Supabase (DIRECT_URL pooler 5432)
+4. healthcheck  → curl /health (attend Railway max 5 min)
+5. build-webview → APK Android (versionName ← src/frontend/package.json)
+6. finalize     → tag git `deploy-YYYYMMDD-HHMMSS-<sha>` + summary
 ```
 
 Déclenchement manuel avec options dans **GitHub → Actions → Deploy Production → Run workflow** :
 - `skip_tests` (hotfix d'urgence)
 - `skip_migration` (si déjà appliquée)
+- `skip_healthcheck` (n'attend pas Railway)
 - `skip_webview` (deploy web uniquement)
 
 **Secrets GitHub requis** (Settings → Secrets and variables → Actions) :
 
-| Catégorie | Secret |
-|-----------|--------|
-| DB | `DATABASE_URL`, `DIRECT_URL` |
-| Backend | `JWT_SECRET`, `API_KEY_MOBILE`, `API_KEY_CRM`, `BACKEND_URL` |
-| Railway | `RAILWAY_TOKEN`, `RAILWAY_SERVICE` |
-| Vercel | `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID_FRONTEND`, `VERCEL_PROJECT_ID_BACKOFFICE`, `VERCEL_PROJECT_ID_CRM` |
-| Android (optionnel) | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` |
+| Catégorie | Secret | Statut |
+|-----------|--------|--------|
+| DB | `DATABASE_URL`, `DIRECT_URL` | obligatoire (migration + tests) |
+| Backend | `JWT_SECRET`, `API_KEY_MOBILE`, `API_KEY_CRM`, `BACKEND_URL` | obligatoire (tests + healthcheck) |
+| Android | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | optionnel — sans → APK debug au lieu de release signé |
 
-> Si les 4 secrets Android sont absents, le job produit un APK **debug** au lieu d'un APK release signé.
+> **Railway / Vercel** : aucun token nécessaire — ces deux plateformes déploient via leur intégration Git native. Pour redéployer sans push, utiliser leurs dashboards respectifs ou le script local.
 
 #### Pipeline local (scripts/deploy)
 
