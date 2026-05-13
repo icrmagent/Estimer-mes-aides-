@@ -84,13 +84,16 @@ export default function QuestionEditor({ questions = [], onReorder, onDelete, on
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Actions — onMouseDown stops the parent draggable from consuming the click */}
+          <div
+            className="flex items-center gap-2 flex-shrink-0"
+            onMouseDown={e => e.stopPropagation()}
+          >
             <button
               type="button"
               onClick={() => onEdit(q)}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-              style={{ minHeight: '36px' }}
+              style={{ minHeight: '36px', cursor: 'pointer' }}
             >
               Modifier
             </button>
@@ -98,7 +101,7 @@ export default function QuestionEditor({ questions = [], onReorder, onDelete, on
               type="button"
               onClick={() => onDelete(q.id)}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-              style={{ minHeight: '36px' }}
+              style={{ minHeight: '36px', cursor: 'pointer' }}
             >
               Supprimer
             </button>

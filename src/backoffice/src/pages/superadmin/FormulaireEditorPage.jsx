@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import I18nTextInput from '../../components/forms/I18nTextInput.jsx'
@@ -45,11 +45,16 @@ function normalizeOptions(opts) {
   if (!Array.isArray(opts)) return []
   return opts.map(opt => {
     if (opt && typeof opt === 'object' && opt.id && opt.label) return opt
-    const id = typeof crypto !== 'undefined' && crypto.randomUUID 
-      ? crypto.randomUUID() 
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
       : Math.random().toString(36).substring(2, 15)
     return { id, label: opt.label || opt }
   })
+}
+
+function safeI18n(v) {
+  if (!v || typeof v !== 'object') return { fr: '', es: '', en: '' }
+  return { fr: v.fr || '', es: v.es || '', en: v.en || '' }
 }
 
 
@@ -65,8 +70,9 @@ export default function FormulaireEditorPage() {
   const [error, setError] = useState(null)
   const [validationErrors, setValidationErrors] = useState([])
   const [showAddQuestion, setShowAddQuestion] = useState(false)
-  const [editingQuestion, setEditingQuestion] = useState(null) // question being edited
+  const [editingQuestion, setEditingQuestion] = useState(null)
   const [newQuestion, setNewQuestion] = useState(emptyQuestion())
+  const editFormRef = useRef(null)
 
   // Formulaire metadata
   const [meta, setMeta] = useState({
@@ -86,12 +92,21 @@ export default function FormulaireEditorPage() {
       .then(([fRes, qRes, cRes]) => {
         const f = fRes.data.formulaire || fRes.data.data || fRes.data
         setFormulaire(f)
+        const pdc = f.pageDebutConfig && typeof f.pageDebutConfig === 'object' ? f.pageDebutConfig : {}
+        const pfc = f.pageFinConfig && typeof f.pageFinConfig === 'object' ? f.pageFinConfig : {}
         setMeta({
           label: f.label || '',
           dureeRetourAccueil: f.dureeRetourAccueil || 30,
           annulationInactivite: f.annulationInactivite || 60,
-          pageDebutConfig: f.pageDebutConfig || { titre: {}, sousTitre: {}, labelBouton: {} },
-          pageFinConfig: f.pageFinConfig || { titre: {}, message: {} },
+          pageDebutConfig: {
+            titre: safeI18n(pdc.titre),
+            sousTitre: safeI18n(pdc.sousTitre),
+            labelBouton: safeI18n(pdc.labelBouton),
+          },
+          pageFinConfig: {
+            titre: safeI18n(pfc.titre),
+            message: safeI18n(pfc.message),
+          },
         })
         const qs = qRes.data.questions || qRes.data.data || qRes.data || []
         setQuestions(qs.sort((a, b) => (a.orderPage || 0) - (b.orderPage || 0)))
@@ -109,8 +124,26 @@ export default function FormulaireEditorPage() {
     setSaving(true)
     setError(null)
     try {
-      await api.put(`/api/formulaires/${id}`, meta)
-      setFormulaire(prev => ({ ...prev, ...meta }))
+      const res = await api.put(`/api/formulaires/${id}`, meta)
+      const updated = res.data.data || res.data
+      setFormulaire(prev => ({ ...prev, ...updated }))
+      const pdc = updated.pageDebutConfig && typeof updated.pageDebutConfig === 'object' ? updated.pageDebutConfig : {}
+      const pfc = updated.pageFinConfig && typeof updated.pageFinConfig === 'object' ? updated.pageFinConfig : {}
+      setMeta(m => ({
+        ...m,
+        label: updated.label || m.label,
+        dureeRetourAccueil: updated.dureeRetourAccueil ?? m.dureeRetourAccueil,
+        annulationInactivite: updated.annulationInactivite ?? m.annulationInactivite,
+        pageDebutConfig: {
+          titre: safeI18n(pdc.titre),
+          sousTitre: safeI18n(pdc.sousTitre),
+          labelBouton: safeI18n(pdc.labelBouton),
+        },
+        pageFinConfig: {
+          titre: safeI18n(pfc.titre),
+          message: safeI18n(pfc.message),
+        },
+      }))
     } catch (err) {
       const e = err.response?.data?.error
       setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la sauvegarde'))
@@ -156,6 +189,12 @@ export default function FormulaireEditorPage() {
       setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la suppression'))
     }
   }
+
+  useEffect(() => {
+    if (editingQuestion && editFormRef.current) {
+      editFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [editingQuestion])
 
   function handleEditQuestion(q) {
     setEditingQuestion({ ...q, options: normalizeOptions(q.options) })
@@ -414,15 +453,17 @@ export default function FormulaireEditorPage() {
 
           {/* Edit question inline form */}
           {editingQuestion && (
-          <QuestionForm
-            question={editingQuestion}
-            onChange={setEditingQuestion}
-            onSave={handleSaveEditQuestion}
-            onCancel={() => setEditingQuestion(null)}
-            saving={saving}
-            title="Modifier la question"
-            categories={categories}
-          />
+          <div ref={editFormRef}>
+            <QuestionForm
+              question={editingQuestion}
+              onChange={setEditingQuestion}
+              onSave={handleSaveEditQuestion}
+              onCancel={() => setEditingQuestion(null)}
+              saving={saving}
+              title="Modifier la question"
+              categories={categories}
+            />
+          </div>
           )}
         </div>
       </div>
