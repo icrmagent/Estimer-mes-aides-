@@ -29,7 +29,10 @@ const {
 
   cookieOptions: {
     httpOnly: false,   // Must be false so the JS client can read the cookie value
-    sameSite: 'strict',
+    // sameSite='none' obligatoire en cross-site (backend Railway, back-office Vercel = sites différents).
+    // 'none' requiert secure=true. En dev local (NODE_ENV=development), on tombe sur 'lax' qui marche
+    // pour http://localhost:5175 → http://localhost:3000 (port différent = même site).
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     secure: process.env.NODE_ENV === 'production',
     path: '/',
   },
