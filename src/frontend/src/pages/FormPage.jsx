@@ -354,7 +354,7 @@ export function FormPage() {
                     />
 
                     {paragrapheInfo && (
-                      <p className="font-medium mt-2 text-[15px] md:text-[17px]" style={{ color: '#1A56A0' }}>
+                      <p className="font-medium mt-2 text-[15px] md:text-[17px] break-words" style={{ color: '#1A56A0' }}>
                         {paragrapheInfo}
                       </p>
                     )}
@@ -439,7 +439,7 @@ function BorneInfoBar() {
       {/* Center: Info Parts */}
       <div className="tablet-borne-text flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-4 md:gap-6 px-2 overflow-hidden">
         {infoParts.map((part, idx) => (
-          <span key={idx} className="truncate max-w-[120px] sm:max-w-none">{part}</span>
+          <span key={idx} className="truncate max-w-[min(140px,30vw)] sm:max-w-none">{part}</span>
         ))}
       </div>
 
