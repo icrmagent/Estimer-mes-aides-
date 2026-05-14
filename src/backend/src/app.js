@@ -45,6 +45,14 @@ process.on('uncaughtException', (err) => {
 
 const app = express()
 
+// Trust proxy : Railway (et la plupart des PaaS) place un load balancer devant le backend.
+// Sans cela, req.ip = IP du LB (peut varier entre connections) → casse :
+//  - la validation CSRF dont la session identifier dépend de req.ip
+//  - les rate limiters par IP
+//  - les logs d'audit
+// Avec '1' : Express fait confiance à 1 hop de proxy et lit X-Forwarded-For.
+app.set('trust proxy', 1)
+
 app.use(helmet())
 app.use(compression())
 
