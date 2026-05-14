@@ -856,7 +856,7 @@ html, body {
   }
 }
 
-@media (max-width: 359px) {
+@media (max-width: 480px) {
   .pf-option-grid--compact-two {
     grid-template-columns: 1fr;
   }
