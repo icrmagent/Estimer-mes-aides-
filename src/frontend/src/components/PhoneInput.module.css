@@ -129,8 +129,8 @@
   color: var(--c-text-2, #8b7dae);
   font-size: 11px;
   padding: 4px 8px;
-  min-width: 32px;
-  min-height: 32px;
+  min-width: 48px;
+  min-height: 48px;
   display: flex;
   align-items: center;
   justify-content: center;
