@@ -58,10 +58,16 @@ app.use(compression())
 
 // CORS — allow all origins in development, restrict to CORS_ALLOWED_ORIGINS in production
 // CORS_ALLOWED_ORIGINS: comma-separated list of allowed origins (required in production)
+// Always-allowed origins (system, non-configurable) :
+//  - https://appassets.androidplatform.net : WebViewAssetLoader Android (APK borne)
 const isProduction = process.env.NODE_ENV === 'production'
-const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
-  ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim())
-  : []
+const SYSTEM_ALLOWED_ORIGINS = ['https://appassets.androidplatform.net']
+const allowedOrigins = [
+  ...SYSTEM_ALLOWED_ORIGINS,
+  ...(process.env.CORS_ALLOWED_ORIGINS
+    ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+    : []),
+]
 
 app.use(cors({
   origin: isProduction
