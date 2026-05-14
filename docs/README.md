@@ -46,6 +46,7 @@ npm run dev
 | `docs/USE_CASES.md` | Cas d'utilisation détaillés |
 | `docs/COMMANDS.md` | Commandes Claude Code prêtes à l'emploi |
 | `docs/OPTIMIZATION.md` | Optimisation tokens Claude + performance app |
+| `docs/RESPONSIVE.md` | **Plan d'exécution audit & fixes responsive** (mobile/tablette/kiosk/web) |
 
 ---
 
