@@ -21,14 +21,14 @@ export function DialCodePicker({ value, onChange }) {
 
   const openDropdown = () => {
     const rect      = triggerRef.current.getBoundingClientRect()
-    const dropW     = Math.max(rect.width, 160)
+    const dropW     = Math.min(window.innerWidth - 16, Math.max(rect.width, 160))
     const spaceBelow = window.innerHeight - rect.bottom - 8
     const spaceAbove = rect.top - 8
     const dropH     = Math.min(340, window.innerHeight * 0.5)
     const top = spaceBelow >= Math.min(dropH, 200) || spaceBelow >= spaceAbove
       ? rect.bottom + 4
       : rect.top - dropH - 4
-    const left = Math.min(rect.left, window.innerWidth - dropW - 8)
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - dropW - 8))
     setPos({ top, left, width: dropW })
     setOpen(true)
     setTimeout(() => searchRef.current?.focus(), 40)
