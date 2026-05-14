@@ -1711,7 +1711,7 @@ body { overscroll-behavior: none; }
 
   .tablet-nav-prev,
   .tablet-nav-next {
-    top: 142px !important;
+    top: clamp(120px, 18vh, 180px) !important;
     transform: none !important;
     width: 54px !important;
     height: 54px !important;
