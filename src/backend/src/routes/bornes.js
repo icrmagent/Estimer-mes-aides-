@@ -13,6 +13,11 @@ import * as authService from '../services/authService.js'
 
 export const bornesRouter = Router()
 
+// Router dédié aux routes "session" appelées par la borne elle-même (kiosque).
+// Auth = JWT AdminBorne (Bearer). Pas de CSRF (ADR-4 : routes côté borne sans
+// cookie session). Monté à part de bornesRouter dans app.js.
+export const borneSessionRouter = Router()
+
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 const createBorneSchema = z.object({
@@ -272,8 +277,9 @@ bornesRouter.patch('/:id/connexion', jwtAuthV2, requireRole('SUPER_ADMIN'), asyn
 // ─── POST /api/bornes/:id/session ─────────────────────────────────────────────
 // Appelé par la borne elle-même juste après le login direct (LoginPage) pour
 // synchroniser estConnectee = true en DB. Auth : JWT AdminBorne propriétaire.
+// Monté HORS du backofficeRouter (pas de CSRF — auth Bearer, origine borne).
 
-bornesRouter.post('/:id/session', jwtAuthV2, requireRole('ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
+borneSessionRouter.post('/:id/session', jwtAuthV2, requireRole('ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
   try {
     const borne = await prisma.borne.update({
       where: { id: req.params.id },
@@ -288,8 +294,9 @@ bornesRouter.post('/:id/session', jwtAuthV2, requireRole('ADMIN_BORNE'), checkBo
 // ─── DELETE /api/bornes/:id/session ───────────────────────────────────────────
 // Appelé par la borne juste avant l'exit kiosque (ExitButton) pour
 // synchroniser estConnectee = false. Auth : JWT AdminBorne propriétaire.
+// Monté HORS du backofficeRouter (pas de CSRF — auth Bearer, origine borne).
 
-bornesRouter.delete('/:id/session', jwtAuthV2, requireRole('ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
+borneSessionRouter.delete('/:id/session', jwtAuthV2, requireRole('ADMIN_BORNE'), checkBorneOwnership, async (req, res) => {
   try {
     const borne = await prisma.borne.update({
       where: { id: req.params.id },

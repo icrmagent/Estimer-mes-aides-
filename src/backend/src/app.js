@@ -7,7 +7,7 @@ import { configurationRouter } from './routes/configuration.js'
 import { submissionsRouter } from './routes/submissions.js'
 import { authRouter } from './routes/auth.js'
 import { requestLogger } from './middleware/requestLogger.js'
-import { bornesRouter } from './routes/bornes.js'
+import { bornesRouter, borneSessionRouter } from './routes/bornes.js'
 import { bornesConfigRouter } from './routes/bornes-config.js'
 import { adminBornesRouter } from './routes/admin-bornes.js'
 import { formulairesRouter } from './routes/formulaires.js'
@@ -145,9 +145,11 @@ app.use('/api/submissions', submissionsRouter)
 // V2 auth routes — no CSRF (login/refresh are public or use Bearer tokens)
 app.use('/api/auth', authRouter)
 
-// V2 Borne routes — no CSRF per ADR-4 (API key auth, not browser session)
-// /api/enregistrements POST is borne-submitted data — must NOT have CSRF
+// V2 Borne routes — no CSRF per ADR-4 (Bearer JWT auth, not browser session)
+// /api/enregistrements POST    : données soumises par la borne
+// /api/bornes/:id/session POST/DELETE : sync estConnectee côté borne (kiosque)
 app.use('/api/enregistrements', enregistrementsRouter)
+app.use('/api/bornes', borneSessionRouter)
 
 // V2 Backoffice routes — CSRF protected per ADR-4
 // All state-changing admin routes are grouped under csrfProtectionMiddleware
