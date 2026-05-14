@@ -295,7 +295,13 @@ export function FormPage() {
             
             {/* Titre et Sous-titre */}
             <div className="hero-text flex-1 text-center px-4">
-              <h1 className="hero-title text-[28px] md:text-[40px] font-extrabold text-white mb-1" style={{ textShadow: 'rgba(0, 0, 0, 0.2) 0px 2px 4px' }}>
+              <h1
+                className="hero-title font-extrabold text-white mb-1 break-words"
+                style={{
+                  fontSize: 'clamp(20px, 4vw, 40px)',
+                  textShadow: 'rgba(0, 0, 0, 0.2) 0px 2px 4px',
+                }}
+              >
                 {titre}
               </h1>
               <p className="hero-subtitle text-white font-medium italic text-[14px] md:text-[18px]">
