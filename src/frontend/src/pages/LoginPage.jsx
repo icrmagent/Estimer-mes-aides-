@@ -337,6 +337,9 @@ export default function LoginPage() {
           .kiosk-brand  { display: none !important; }
           .kiosk-form   { padding: 40px 28px !important; }
         }
+        @media (max-width: 480px) {
+          .kiosk-form   { padding: 28px 18px !important; }
+        }
         @media (min-width: 701px) and (max-width: 960px) {
           .kiosk-brand  { width: 44% !important; }
           .kiosk-form   { padding: 48px 36px !important; }
