@@ -100,7 +100,8 @@ export default function LanguageSelector({ currentLang: propLang, onChange: prop
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
             overflow: 'hidden',
-            minWidth: '180px',
+            minWidth: 'min(180px, calc(100vw - 32px))',
+            maxWidth: 'calc(100vw - 32px)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
             zIndex: 50,
           }}
