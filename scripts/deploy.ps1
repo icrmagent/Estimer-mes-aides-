@@ -98,11 +98,11 @@ if (-not $SkipBackend) {
   }
 } else { Write-Host "⊘ Backend sauté" -ForegroundColor Yellow }
 
-# ── 5. DEPLOY VERCEL (frontend, backoffice, crm-module) ──────
+# ── 5. DEPLOY VERCEL (frontend, backoffice) ──────────────────
 if (-not $SkipVercel) {
-  Step "5/7 — Deploy Vercel (3 apps)"
+  Step "5/7 — Deploy Vercel (2 apps)"
   if (-not $env:VERCEL_TOKEN) { Fail "VERCEL_TOKEN manquant" }
-  $apps = @('src/frontend','src/backoffice','src/crm-module')
+  $apps = @('src/frontend','src/backoffice')
   foreach ($app in $apps) {
     Write-Host "→ $app" -ForegroundColor White
     Push-Location $app

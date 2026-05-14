@@ -11,7 +11,7 @@
 Phase 1 — Setup & Architecture    ✅ Terminé
 Phase 2 — Backend API             ✅ Terminé (4 endpoints, 29 tests Jest)
 Phase 3 — Frontend WebView        ✅ Terminé (15 étapes, mobile + tablette)
-Phase 4 — Module CRM Sync         ✅ Terminé (src/crm-module/, port 5174)
+Phase 4 — Module CRM Sync         ✅ Terminé (déprécié 2026-05 → supprimé, remplacé par partage I-CRM async V2 Phase 8)
 Phase 5 — Tests E2E & Déploiement ✅ Terminé (9 tests Playwright, CI/CD)
 ```
 
@@ -41,8 +41,8 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 [Backend Node.js :3000]  ←→  [PostgreSQL Supabase]
         ↑ WebSocket
 [Pusher — Notifications temps réel]
-        ↑ HTTPS + JWT
-[Module CRM V1 :5174] (conservé)
+        ↓ Queue worker async
+[I-CRM externe] (partage automatique V2)
 ```
 
 ---
@@ -54,7 +54,6 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 | `src/backend/` | API REST Node.js + Express + Prisma V2 | 3000 |
 | `src/frontend/` | Front-Office Borne (kiosque tablette) | 5173 |
 | `src/backoffice/` | Back-Office SuperAdmin + AdminBorne | 5175 |
-| `src/crm-module/` | Module CRM Sync V1 (conservé) | 5174 |
 
 ---
 
@@ -86,9 +85,6 @@ cd src/frontend && npm run dev
 
 # Back-Office (port 5175)
 cd src/backoffice && npm install && npm run dev
-
-# CRM Sync V1 (port 5174)
-cd src/crm-module && npm run dev
 
 # Migration DB V2
 cd src/backend && npx prisma migrate deploy

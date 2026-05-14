@@ -13,12 +13,6 @@ export default defineConfig({
     {
       name: 'Mobile Chrome',
       use: { ...devices['Pixel 5'] },
-      testIgnore: ['**/crm-sync.spec.js'],
-    },
-    {
-      name: 'CRM Desktop',
-      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5174' },
-      testMatch: ['**/crm-sync.spec.js'],
     },
   ],
   webServer: [
@@ -26,13 +20,6 @@ export default defineConfig({
       command: 'npm run dev',
       cwd: '../../src/frontend',
       url: 'http://localhost:5173',
-      reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-    },
-    {
-      command: 'npm run dev',
-      cwd: '../../src/crm-module',
-      url: 'http://localhost:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

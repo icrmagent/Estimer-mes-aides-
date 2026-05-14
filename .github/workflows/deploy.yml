@@ -59,7 +59,7 @@ jobs:
 
       - name: Verify lockfiles present
         run: |
-          for dir in src/backend src/frontend src/backoffice src/crm-module; do
+          for dir in src/backend src/frontend src/backoffice; do
             test -f "$dir/package-lock.json" || { echo "Missing lockfile in $dir"; exit 1; }
           done
 
@@ -296,5 +296,5 @@ jobs:
           - **Commit** : \`${{ needs.sync.outputs.short_sha }}\`
           - **Tag** : \`$TAG\`
           - **Backend** : $BACKEND_URL
-          - **Vercel** : auto-déployé via intégration Git (frontend / backoffice / crm-module)
+          - **Vercel** : auto-déployé via intégration Git (frontend / backoffice)
           EOF

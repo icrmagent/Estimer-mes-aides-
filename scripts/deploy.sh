@@ -69,7 +69,7 @@ else echo "⊘ Backend sauté"; fi
 if [ "$SKIP_VERCEL" -eq 0 ]; then
   step "5/7 — Deploy Vercel"
   [ -n "${VERCEL_TOKEN:-}" ] || die "VERCEL_TOKEN manquant"
-  for app in src/frontend src/backoffice src/crm-module; do
+  for app in src/frontend src/backoffice; do
     echo "→ $app"
     (cd "$app" \
       && npm ci \

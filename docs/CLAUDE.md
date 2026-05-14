@@ -21,9 +21,9 @@ estimer-mes-aides/
 │   ├── COMMANDS.md        ← Commandes Claude Code personnalisées
 │   └── OPTIMIZATION.md   ← Optimisation tokens & performance
 └── src/
-    ├── frontend/          ← SPA WebView (React/Vite)
+    ├── frontend/          ← Front-Office Borne (React/Vite)
     ├── backend/           ← API REST (Node.js/Express)
-    └── crm-module/        ← Module de synchronisation CRM
+    └── backoffice/        ← Back-Office SuperAdmin + AdminBorne (V2)
 ```
 
 ---

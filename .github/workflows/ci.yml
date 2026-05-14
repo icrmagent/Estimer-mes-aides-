@@ -51,10 +51,6 @@ jobs:
         run: npm ci
         working-directory: src/frontend
 
-      - name: Install CRM module dependencies
-        run: npm ci
-        working-directory: src/crm-module
-
       - name: Install E2E dependencies
         run: npm ci
         working-directory: tests/e2e

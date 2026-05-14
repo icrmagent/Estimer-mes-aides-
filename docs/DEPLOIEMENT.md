@@ -35,9 +35,8 @@
                            ▲
                            │ HTTPS + JWT
 ┌─────────────────────────────────────────────────────────────────┐
-│              MODULE CRM  (Vercel — git-linked)                  │
-│              https://crm-module-ivory.vercel.app                │
-│              React 19 + Vite 8 + SheetJS                        │
+│              (Module CRM V1 supprimé 2026-05 —                  │
+│               remplacé par partage async backend + I-CRM)       │
 └─────────────────────────────────────────────────────────────────┘
 
          ┌──────────────────────────────────────────┐
@@ -53,7 +52,7 @@
 
 **Trois pipelines indépendants** se déclenchent à chaque `push` sur `main` :
 1. **Railway** → redeploy backend (intégration Git native, sans token)
-2. **Vercel** → redeploy frontend + backoffice + crm-module (intégration Git native, sans token)
+2. **Vercel** → redeploy frontend + backoffice (intégration Git native, sans token)
 3. **GitHub Actions** → tests + migration DB + healthcheck + build APK + tag git
 
 ---
@@ -64,7 +63,6 @@
 |---------|-----|-------|
 | Frontend (app web/WebView) | https://estimer-mes-aides.vercel.app | Formulaire utilisateur final |
 | Backend API | https://estimer-mes-aides-production.up.railway.app | API REST (config + soumissions) |
-| CRM Sync | https://crm-module-ivory.vercel.app | Interface de synchronisation CRM + export Excel |
 | Supabase Dashboard | https://supabase.com/dashboard | Visualisation directe de la base |
 | Railway Dashboard | https://railway.com/project/c33e8de1-9d45-40d2-9a53-6a865dce2b70 | Logs backend, variables, redéploiement |
 | Vercel Dashboard | https://vercel.com/icrmagents-projects | Gestion des deux projets Vercel |
@@ -127,13 +125,13 @@ Username pooler = `postgres.<project_ref>` (pas `postgres` tout court).
 
 Password URL-encoder les caractères spéciaux : `!` → `%21`, `?` → `%3F`, `$` → `%24`, etc.
 
-### Générer un token JWT CRM (valable 24h)
+### Générer un token JWT CRM legacy (valable 24h)
 
 ```bash
 cd src/backend && node scripts/generate-crm-jwt.js
 ```
 
-Coller le token généré dans l'écran de connexion de https://crm-module-ivory.vercel.app
+Utilité résiduelle : tests manuels d'auth Bearer sur les routes legacy `GET /api/submissions?synced=false` et `PUT /api/submissions/:id/sync`. Le module CRM frontend (V1) qui consommait ces routes a été supprimé en 2026-05 — remplacé par le partage I-CRM async backend (V2 Phase 8, [src/backend/src/services/queueWorker.js](../src/backend/src/services/queueWorker.js)).
 
 ---
 
@@ -174,12 +172,6 @@ VITE_API_KEY=<API_KEY_MOBILE>
 VITE_API_URL=https://estimer-mes-aides-production.up.railway.app
 VITE_PUSHER_KEY=<PUSHER_KEY>
 VITE_PUSHER_CLUSTER=eu
-```
-
-### CRM Module (Vercel — projet crm-module)
-
-```env
-VITE_BACKEND_URL=https://estimer-mes-aides-production.up.railway.app
 ```
 
 ### GitHub Actions (repo → Settings → Secrets → Actions)
@@ -324,9 +316,6 @@ cd src/frontend && npx vercel --prod
 # Back-Office → Vercel
 cd src/backoffice && npx vercel --prod
 
-# CRM Module → Vercel
-cd src/crm-module && npx vercel --prod
-
 # Migration DB seule
 cd src/backend && DATABASE_URL="$DIRECT_URL" npx prisma migrate deploy
 ```
@@ -371,9 +360,9 @@ Si tu repars de zéro (nouveau repo, nouveau compte Railway/Vercel/Supabase), vo
 
 ### 3. Vercel (3 projets)
 
-Pour chacun des 3 projets (`estimer-mes-aides`, `backoffice`, `crm-module`) :
+Pour chacun des 2 projets (`estimer-mes-aides`, `backoffice`) :
 1. New Project → Import Git Repository
-2. Root directory : `src/frontend` (ou `src/backoffice` / `src/crm-module`)
+2. Root directory : `src/frontend` (ou `src/backoffice`)
 3. Framework : Vite
 4. Environment Variables : voir section dédiée
 5. Production branch : `main`
@@ -482,13 +471,13 @@ cd tests/e2e && npm test
 # Backend (port 3000)
 cd src/backend && npm run dev
 
-# Frontend (port 5173)
+# Frontend Borne (port 5173)
 cd src/frontend && npm run dev
 
-# CRM Module (port 5174)
-cd src/crm-module && npm run dev
+# Back-Office (port 5175)
+cd src/backoffice && npm run dev
 
-# Générer un JWT CRM
+# Générer un JWT CRM legacy (pour tester routes /api/submissions Bearer)
 cd src/backend && node scripts/generate-crm-jwt.js
 ```
 

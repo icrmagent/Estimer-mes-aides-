@@ -1,6 +1,6 @@
 # Estimer Mes Aides
 
-Application mobile WebView permettant aux utilisateurs d'estimer leurs aides à la rénovation énergétique, avec backend autonome, base de données dédiée et synchronisation manuelle vers un CRM.
+Application multi-bornes permettant aux utilisateurs d'estimer leurs aides à la rénovation énergétique, avec backend autonome, base de données dédiée et partage automatique async vers I-CRM (V2).
 
 ## Structure
 
@@ -8,10 +8,10 @@ Application mobile WebView permettant aux utilisateurs d'estimer leurs aides à 
 estimer-mes-aides/
 ├── src/
 │   ├── backend/      # API REST — Node.js / Express / Prisma / PostgreSQL
-│   ├── frontend/     # SPA WebView — React 19 / Vite / TailwindCSS v4
-│   └── crm-module/   # Module sync CRM — React / Vite
+│   ├── frontend/     # Front-Office Borne — React 19 / Vite / TailwindCSS v4
+│   └── backoffice/   # Back-Office SuperAdmin + AdminBorne — React / Vite
 ├── tests/
-│   └── e2e/          # Tests Playwright (form journey, offline, CRM sync)
+│   └── e2e/          # Tests Playwright (form journey, offline)
 ├── docs/             # Documentation complète du projet
 └── README.md
 ```
@@ -40,15 +40,12 @@ npm install
 npm run dev            # http://localhost:5173
 ```
 
-### Module CRM Sync
+### Back-Office (V2)
 ```bash
-cd src/crm-module
-cp .env.example .env   # remplir VITE_BACKEND_URL
+cd src/backoffice
+cp .env.example .env   # remplir VITE_API_URL, VITE_PUSHER_KEY
 npm install
-npm run dev            # http://localhost:5174
-
-# Générer un JWT pour le login CRM
-cd ../backend && node scripts/generate-crm-jwt.js
+npm run dev            # http://localhost:5175
 ```
 
 ## Tests
