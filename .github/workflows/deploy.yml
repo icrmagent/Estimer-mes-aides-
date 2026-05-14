@@ -163,16 +163,43 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # Le repo n'a que gradlew.bat (Windows) — installer gradle directement via l'action officielle
+      # Le repo n'a que gradlew.bat — installer gradle directement
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.6'
+
+      # 1/3 — Build frontend production (assets bundlés dans l'APK)
+      - name: Build frontend (mode production)
+        working-directory: src/frontend
+        env:
+          VITE_API_URL: ${{ secrets.BACKEND_URL }}
+          VITE_API_KEY: ${{ secrets.API_KEY_MOBILE }}
+        run: |
+          npm ci
+          npm run build
+          ls -la dist/
+
+      # 2/3 — Copier le build frontend dans les assets de la WebView
+      - name: Copy frontend dist → android assets
+        run: |
+          rm -rf android-webview/app/src/main/assets
+          mkdir -p android-webview/app/src/main/assets
+          cp -r src/frontend/dist/* android-webview/app/src/main/assets/
+          echo "Assets contents:"
+          ls -la android-webview/app/src/main/assets/
 
       - name: Decode keystore
         env:
@@ -200,6 +227,7 @@ jobs:
           echo "code=$VERSION_CODE"  >> $GITHUB_OUTPUT
           echo "APK versionName=$FRONT_VERSION  versionCode=$VERSION_CODE"
 
+      # 3/3 — Build APK avec le frontend prod embarqué
       - name: Build APK
         working-directory: android-webview
         run: |
