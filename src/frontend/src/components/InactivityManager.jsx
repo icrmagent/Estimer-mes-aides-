@@ -18,7 +18,7 @@ export default function InactivityManager({ children }) {
   const location = useLocation()
   const { borne, formulaire, langue, resetLangue } = useBorne()
   const { values, currentStep, reset } = useForm()
-  const { saveOffline } = useOfflineSync()
+  const { saveOffline, markSynced } = useOfflineSync()
 
   const isFormPage = location.pathname === '/form'
   const isConfirmationPage = location.pathname === '/confirmation'
@@ -44,11 +44,11 @@ export default function InactivityManager({ children }) {
           reponses,
         }
 
-        await saveOffline(enregistrement)
+        const localId = await saveOffline(enregistrement)
 
         try {
           const token = localStorage.getItem('borne_token')
-          await fetch(`${API_URL}/api/enregistrements`, {
+          const res = await fetch(`${API_URL}/api/enregistrements`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -56,8 +56,9 @@ export default function InactivityManager({ children }) {
             },
             body: JSON.stringify(enregistrement),
           })
+          if (res.ok && localId) await markSynced(localId)
         } catch {
-          // Failure handled by offline queue
+          // Failure handled by offline queue (sera retenté par syncPending)
         }
       }
     }

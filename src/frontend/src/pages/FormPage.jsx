@@ -97,7 +97,7 @@ export function FormPage() {
   const navigate = useNavigate()
   const { borne, formulaire, questions, langue, configLoaded } = useBorne()
   const { values, setValue, currentStep, nextStep, prevStep, reset, setResult, setSubmitting, submitting } = useForm()
-  const { saveOffline } = useOfflineSync()
+  const { saveOffline, markSynced } = useOfflineSync()
 
   const pages = groupQuestionsByPage(questions)
   const totalSteps = pages.length
@@ -158,7 +158,7 @@ export function FormPage() {
     }
 
     // Offline-first: sauvegarder en IndexedDB avant l'envoi API
-    await saveOffline(enregistrement)
+    const localId = await saveOffline(enregistrement)
 
     try {
       const token = localStorage.getItem('borne_token')
@@ -172,6 +172,8 @@ export function FormPage() {
       })
 
       if (res.ok) {
+        // Retirer l'entrée de la queue offline pour empêcher un re-post par syncPending().
+        if (localId) await markSynced(localId)
         const data = await res.json()
         setResult({ ok: true, data: data.data })
       } else {
@@ -248,11 +250,11 @@ export function FormPage() {
           reponses,
         }
 
-        await saveOffline(enregistrement)
+        const localId = await saveOffline(enregistrement)
 
         try {
           const token = localStorage.getItem('borne_token')
-          await fetch(`${API_URL}/api/enregistrements`, {
+          const res = await fetch(`${API_URL}/api/enregistrements`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -260,8 +262,9 @@ export function FormPage() {
             },
             body: JSON.stringify(enregistrement),
           })
+          if (res.ok && localId) await markSynced(localId)
         } catch {
-          // Ignoré
+          // Ignoré — l'entrée reste en queue et sera retentée par syncPending().
         }
       }
     }
