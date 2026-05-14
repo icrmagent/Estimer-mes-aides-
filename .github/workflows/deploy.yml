@@ -163,6 +163,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Récupérer l'historique complet pour `git rev-list --count HEAD` → versionCode monotone
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
