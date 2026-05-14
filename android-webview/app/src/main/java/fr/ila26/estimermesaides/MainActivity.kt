@@ -8,7 +8,10 @@ import android.view.View
 import android.webkit.*
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewFeature
@@ -27,7 +30,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Edge-to-edge (WebView occupe tout l'écran)
+        // Edge-to-edge (WebView occupe tout l'écran, status bar transparente)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -36,7 +39,25 @@ class MainActivity : AppCompatActivity() {
         setupAssetLoader()
         setupBackNavigation()
         setupWebView()
+        setupWindowInsets()
         loadApp()
+    }
+
+    /**
+     * Android WebView ne propage pas env(safe-area-inset-*) au document HTML.
+     * On applique le padding-top correspondant à la status bar directement sur
+     * la WebView, et on lui donne un background violet primaire pour assurer
+     * la continuité visuelle avec le header de l'app.
+     */
+    private fun setupWindowInsets() {
+        binding.webView.setBackgroundColor(ContextCompat.getColor(this, R.color.primary))
+        binding.root.setBackgroundColor(ContextCompat.getColor(this, R.color.primary))
+
+        ViewCompat.setOnApplyWindowInsetsListener(binding.webView) { view, insets ->
+            val sys = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(sys.left, sys.top, sys.right, sys.bottom)
+            insets
+        }
     }
 
     // ── AssetLoader : sert les fichiers depuis assets/ avec URL HTTPS ─
