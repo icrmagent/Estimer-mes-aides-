@@ -95,8 +95,8 @@ export function ConfirmationPage() {
 
         <button
           onClick={handleRetour}
-          className="text-white/70 text-sm underline mt-4"
-          style={{ minHeight: '48px', fontSize: '14px' }}
+          className="mt-4 px-6 py-3 bg-white text-[#5B2D8E] font-semibold rounded-xl shadow-lg hover:bg-white/90 active:scale-[0.98] transition-all"
+          style={{ minHeight: '52px', fontSize: '16px' }}
         >
           Retourner à l'accueil maintenant
         </button>
