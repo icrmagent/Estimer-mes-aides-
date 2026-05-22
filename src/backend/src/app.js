@@ -77,7 +77,8 @@ app.use(cors({
         if (allowedOrigins.includes(origin)) return callback(null, true)
         return callback(new Error(`CORS: origin ${origin} not allowed`))
       }
-    : '*',
+    // En dev : refléter l'origine de la requête. '*' est incompatible avec credentials:true.
+    : (origin, callback) => callback(null, origin ?? true),
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
   credentials: true,
