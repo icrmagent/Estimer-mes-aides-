@@ -167,7 +167,7 @@ export default function KioskShell({ children }) {
       {/* Main content */}
       {children}
 
-      {/* Hidden 40×40 px corner trigger (bottom-right, transparent) */}
+      {/* Hidden 48×48 px corner trigger (bottom-right, transparent) — règle CLAUDE.md n°1 */}
       <div
         data-testid="kiosk-hold-zone"
         onMouseDown={handleHoldStart}
@@ -180,8 +180,8 @@ export default function KioskShell({ children }) {
           position: 'fixed',
           bottom: 0,
           right: 0,
-          width: 40,
-          height: 40,
+          width: 48,
+          height: 48,
           background: 'transparent',
           zIndex: 9998,
           cursor: 'default',

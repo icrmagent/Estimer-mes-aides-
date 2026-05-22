@@ -107,7 +107,7 @@ function Field({ label, icon, type, value, onChange, disabled, placeholder, auto
           placeholder={placeholder}
           style={{
             flex: 1, border: 'none', outline: 'none', background: 'transparent',
-            fontSize: 17, color: '#1a1040',
+            fontSize: 17, color: '#1a1040', height: '100%', minHeight: 48,
             cursor: disabled ? 'not-allowed' : 'text',
           }}
         />
@@ -337,6 +337,9 @@ export default function LoginPage() {
           .kiosk-brand  { display: none !important; }
           .kiosk-form   { padding: 40px 28px !important; }
         }
+        @media (max-width: 480px) {
+          .kiosk-form   { padding: 28px 18px !important; }
+        }
         @media (min-width: 701px) and (max-width: 960px) {
           .kiosk-brand  { width: 44% !important; }
           .kiosk-form   { padding: 48px 36px !important; }
@@ -426,7 +429,7 @@ export default function LoginPage() {
                 style={{
                   background: 'none', border: 'none', padding: 4, cursor: 'pointer',
                   color: '#a08fc0', display: 'flex', alignItems: 'center',
-                  minWidth: 40, minHeight: 40, justifyContent: 'center',
+                  minWidth: 48, minHeight: 48, justifyContent: 'center',
                 }}
               >
                 <IconEye off={showPw} />

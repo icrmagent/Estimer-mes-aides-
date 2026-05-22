@@ -127,7 +127,10 @@ export default function ExitButton({ className, style, children }) {
           style={{ background: 'rgba(0,0,0,0.7)' }}
           onClick={e => { if (e.target === e.currentTarget) closeModal() }}
         >
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+          <div
+            className="bg-white rounded-3xl shadow-2xl w-full overflow-hidden"
+            style={{ maxWidth: 'min(24rem, calc(100vw - 32px))' }}
+          >
             {/* Header band */}
             <div className="px-8 pt-7 pb-5">
               <div className="flex items-center gap-3 mb-1">

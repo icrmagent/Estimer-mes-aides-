@@ -81,7 +81,7 @@ export function ConfirmationPage() {
         </p>
 
         {/* Barre de progression countdown */}
-        <div className="w-full max-w-xs mb-4">
+        <div className="w-full mb-4" style={{ maxWidth: 'min(20rem, 90vw)' }}>
           <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
             <div
               className="h-full bg-white rounded-full transition-all duration-1000"
