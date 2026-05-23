@@ -1,15 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBorne } from '../context/BorneContext.jsx'
 import { useForm } from '../context/FormContext.jsx'
-import { t, tOptions } from '../utils/i18n.js'
+import { t } from '../utils/i18n.js'
 import LanguageSelector from '../components/LanguageSelector.jsx'
 import StepBadge from '../components/StepBadge.jsx'
 import FieldRenderer from '../components/FieldRenderer.jsx'
 import ExitButton from '../components/ExitButton.jsx'
 import InactivityManager from '../components/InactivityManager.jsx'
 import { useOfflineSync } from '../hooks/useOfflineSync.js'
-import { groupQuestionsByPage as sharedGroupQuestionsByPage } from '../utils/groupQuestionsByPage.js'
+import { groupQuestionsByPage } from '../utils/groupQuestionsByPage.js'
 import ilaLogo from '../assets/logo.png'
 import homeEnv from '../assets/homeenv.png'
 
@@ -86,9 +85,6 @@ const SectionHeader = ({ number = 1, title = "", total = 1 }) => {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
-// Re-export pour compat tests existants — la logique vit dans utils/groupQuestionsByPage.js
-export const groupQuestionsByPage = sharedGroupQuestionsByPage
-
 /**
  * FormPage V2 — formulaire dynamique avec questions depuis BorneContext.
  * Remplace le FormPage V1 hardcodé.
@@ -120,17 +116,13 @@ export function FormPage() {
   const titre = t(config.titre, langue) || t(defaultTexts.titre, langue)
   const sousTitre = t(config.sousTitre, langue) || t(defaultTexts.sousTitre, langue)
 
-  // Validation de l'étape courante
-  const isStepValid = useCallback(() => {
-    if (!currentPage) return true
-    return currentQuestions.every((question) => {
-      if (!question.obligatoire) return true
-      const val = values[question.id]
-      if (val === undefined || val === null || val === '') return false
-      if (Array.isArray(val) && val.length === 0) return false
-      return true
-    })
-  }, [currentPage, currentQuestions, values])
+  const isStepValid = !currentPage || currentQuestions.every((question) => {
+    if (!question.obligatoire) return true
+    const val = values[question.id]
+    if (val === undefined || val === null || val === '') return false
+    if (Array.isArray(val) && val.length === 0) return false
+    return true
+  })
 
   const handleNext = () => {
     if (currentStep < totalSteps - 1) {
@@ -274,7 +266,7 @@ export function FormPage() {
 
   return (
     <InactivityManager>
-      <div className="form-page min-h-screen flex flex-col bg-white">
+      <div className="form-page flex flex-col bg-white" style={{ height: '100dvh', overflow: 'hidden' }}>
         {/* Barre info borne */}
         <BorneInfoBar />
 
@@ -296,6 +288,7 @@ export function FormPage() {
                     width: 'clamp(48px, 7vw, 80px)',
                     height: 'auto',
                     display: 'block',
+                    margin: '5px 0 5px 5px',
                   }}
                 />
               </button>
@@ -326,7 +319,7 @@ export function FormPage() {
               className="tablet-lang-zone flex items-center justify-end flex-shrink-0"
               style={{ minWidth: 'clamp(64px, 9vw, 120px)' }}
             >
-              <LanguageSelector buttonMarginRight="0px" />
+              <LanguageSelector buttonMarginRight="10px" />
             </div>
           </div>
         </header>
@@ -335,7 +328,10 @@ export function FormPage() {
         <StepBadge current={currentStep + 1} total={totalSteps} />
 
         {/* Contenu */}
-        <div className="tablet-form-content flex-1 overflow-y-auto px-4 py-8 pb-32 flex flex-col items-center justify-start">
+        <div
+          className="tablet-form-content flex-1 px-4 flex flex-col items-center justify-start"
+          style={{ overflow: 'hidden', minHeight: 0, paddingTop: '16px', paddingBottom: '16px' }}
+        >
           <div className="form-page-panel max-w-5xl mx-auto my-auto w-full" style={{ marginTop: '0px' }}>
             {currentPage.categorie && (
               <div className={pageTitle ? 'mb-4' : 'mb-8'}>
@@ -388,7 +384,7 @@ export function FormPage() {
               <div className="flex justify-center mt-10 mb-6 px-4">
                 <button
                   onClick={handleSubmit}
-                  disabled={!isStepValid() || submitting}
+                  disabled={!isStepValid || submitting}
                   className="group inline-flex items-center justify-center gap-3 text-white font-extrabold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
                   style={{
                     background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)',
@@ -422,37 +418,82 @@ export function FormPage() {
                 </button>
               </div>
             )}
+
+            {!isLast && (
+              <div
+                className="flex flex-wrap justify-end items-center gap-4 px-4"
+                style={{ marginTop: '48px', marginBottom: '24px' }}
+              >
+                {currentStep > 0 && (
+                  <button
+                    onClick={prevStep}
+                    disabled={submitting}
+                    className="group inline-flex items-center justify-center gap-2.5 font-bold rounded-full bg-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+                    style={{
+                      color: '#5B2D8E',
+                      border: '2px solid #5B2D8E',
+                      minHeight: '56px',
+                      padding: '0 26px',
+                      fontSize: 'clamp(15px, 1.8vw, 18px)',
+                      boxShadow: '0 4px 14px rgba(91, 45, 142, 0.15)',
+                    }}
+                    aria-label={langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
+                  >
+                    <svg
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="transition-transform duration-300 group-hover:-translate-x-1 shrink-0"
+                    >
+                      <path d="M15 19l-7-7 7-7" />
+                    </svg>
+                    <span className="whitespace-nowrap">
+                      {langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
+                    </span>
+                  </button>
+                )}
+                <button
+                  onClick={handleNext}
+                  disabled={!isStepValid || submitting}
+                  className="group inline-flex items-center justify-center gap-2.5 text-white font-extrabold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+                  style={{
+                    background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)',
+                    minHeight: '56px',
+                    minWidth: '200px',
+                    padding: '0 32px',
+                    fontSize: 'clamp(15px, 1.8vw, 18px)',
+                    boxShadow: '0 10px 28px rgba(91, 45, 142, 0.35), 0 3px 8px rgba(0,0,0,0.1)',
+                  }}
+                  aria-label={langue === 'es' ? 'Siguiente' : langue === 'en' ? 'Next' : 'Suivant'}
+                >
+                  <span className="whitespace-nowrap">
+                    {langue === 'es' ? 'Siguiente' : langue === 'en' ? 'Next' : 'Suivant'}
+                  </span>
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className="transition-transform duration-300 group-hover:translate-x-1 shrink-0"
+                  >
+                    <path d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* Navigation Flèches */}
-        {currentStep > 0 && (
-          <button
-            onClick={prevStep}
-            disabled={submitting}
-            className="form-nav-arrow tablet-nav-prev fixed z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 focus:outline-none focus:ring-4 focus:ring-purple-300/50"
-            style={{ width: '64px', height: '64px', left: 'clamp(16px, 2.5vw, 56px)' }}
-            aria-label="Précédent"
-          >
-            <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-        )}
-
-        {!isLast && (
-          <button
-            onClick={handleNext}
-            disabled={!isStepValid() || submitting}
-            className="form-nav-arrow tablet-nav-next fixed z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-purple-300/50"
-            style={{ width: '64px', height: '64px', right: 'clamp(16px, 2.5vw, 56px)' }}
-            aria-label="Suivant"
-          >
-            <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
-        )}
       </div>
     </InactivityManager>
   )
@@ -490,6 +531,7 @@ function BorneInfoBar() {
             width: 'auto',
             objectFit: 'contain',
             display: 'block',
+            marginLeft: '15px',
           }}
         />
       </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupQuestionsByPage } from './FormPage.jsx'
+import { groupQuestionsByPage } from '../utils/groupQuestionsByPage.js'
 
 describe('groupQuestionsByPage', () => {
   it('affiche une page par sous-categorie avec ses questions relatives triees', () => {
