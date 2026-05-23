@@ -447,9 +447,9 @@ function BorneInfoBar() {
   const { borne, langue } = useBorne()
   if (!borne) return null
   const labels = {
-    fr: { master: 'Master Filiale', regie: 'Régie', installateur: 'Installateur' },
-    es: { master: 'Filial Master', regie: 'Agencia', installateur: 'Instalador' },
-    en: { master: 'Master Branch', regie: 'Agency', installateur: 'Installer' },
+    fr: { master: 'Commerçant', regie: 'Régie', installateur: 'Installateur', idBorne: 'ID Borne', adresse: 'Adresse Borne' },
+    es: { master: 'Comerciante', regie: 'Agencia', installateur: 'Instalador', idBorne: 'ID Terminal', adresse: 'Dirección Terminal' },
+    en: { master: 'Merchant', regie: 'Agency', installateur: 'Installer', idBorne: 'Kiosk ID', adresse: 'Kiosk Address' },
   }
   const l = labels[langue] || labels.fr
 
@@ -457,6 +457,8 @@ function BorneInfoBar() {
   if (borne.commercant) infoParts.push(`${l.master}: ${borne.commercant}`)
   if (borne.regie) infoParts.push(`${l.regie}: ${borne.regie}`)
   if (borne.installateur) infoParts.push(`${l.installateur}: ${borne.installateur}`)
+  if (borne.idBorne) infoParts.push(`${l.idBorne}: ${borne.idBorne}`)
+  if (borne.adresse) infoParts.push(`${l.adresse}: ${borne.adresse}`)
 
   return (
     <div
