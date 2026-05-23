@@ -183,7 +183,11 @@ export default function StartPage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: 'clamp(20px, 6dvh, 48px) clamp(16px, 5vw, 32px) clamp(16px, 5dvh, 40px)',
+          padding:
+            'calc(clamp(20px, 6dvh, 48px) + env(safe-area-inset-top)) ' +
+            'calc(clamp(16px, 5vw, 32px) + env(safe-area-inset-right)) ' +
+            'calc(clamp(16px, 5dvh, 40px) + env(safe-area-inset-bottom)) ' +
+            'calc(clamp(16px, 5vw, 32px) + env(safe-area-inset-left))',
           fontFamily: "'Segoe UI', system-ui, sans-serif",
           boxSizing: 'border-box',
         }}
@@ -211,8 +215,8 @@ export default function StartPage() {
           className="fade-all"
           style={{
             position: 'absolute',
-            top: '12px',
-            left: '12px',
+            top: 'calc(12px + env(safe-area-inset-top))',
+            left: 'calc(12px + env(safe-area-inset-left))',
             background: 'rgba(10,26,110,0.7)',
             borderRadius: '10px',
             padding: '6px 10px',
@@ -231,8 +235,8 @@ export default function StartPage() {
           className="fade-all"
           style={{
             position: 'absolute',
-            top: '12px',
-            right: '12px',
+            top: 'calc(12px + env(safe-area-inset-top))',
+            right: 'calc(12px + env(safe-area-inset-right))',
             display: 'flex',
             flexDirection: 'column',
             gap: '4px',
@@ -242,9 +246,9 @@ export default function StartPage() {
           <LanguageSelector currentLang={langue} onChange={setLangue} />
         </div>
 
-        {/* Sparkle decorations */}
-        <SparkleIcon className="fade-all" size={20} style={{ position: 'absolute', top: '60px', left: '55%', opacity: 0.5, pointerEvents: 'none' }} />
-        <SparkleIcon className="fade-all" size={12} style={{ position: 'absolute', bottom: '40px', right: '60px', opacity: 0.4, pointerEvents: 'none' }} />
+        {/* Sparkle decorations — coin bas-droit uniquement, équilibré avec les hexagones */}
+        <SparkleIcon className="fade-all" size={14} style={{ position: 'absolute', bottom: '180px', right: '90px', opacity: 0.35, pointerEvents: 'none' }} />
+        <SparkleIcon className="fade-all" size={20} style={{ position: 'absolute', bottom: '60px', right: '180px', opacity: 0.45, pointerEvents: 'none' }} />
         <SparkleIcon className="fade-all" size={28} style={{ position: 'absolute', bottom: '20px', right: '20px', opacity: 0.55, pointerEvents: 'none' }} />
 
         <div className="hero-wrapper">
@@ -410,6 +414,39 @@ export default function StartPage() {
           }
           .start-btn:hover .start-btn-icon {
             transform: translateX(6px);
+          }
+
+          /* Tablette landscape (≥ 900px et + large que haut) : layout plus aéré */
+          @media (orientation: landscape) and (min-width: 900px) {
+            .hero-wrapper {
+              height: clamp(220px, 42dvh, 320px);
+              margin-bottom: clamp(20px, 4dvh, 36px);
+            }
+            .hero-icon {
+              width: clamp(96px, 16dvh, 128px);
+              height: clamp(96px, 16dvh, 128px);
+            }
+            .hero-title {
+              font-size: clamp(28px, 4.5vw, 44px);
+            }
+            .hero-subtitle {
+              font-size: clamp(15px, 2.2vw, 20px);
+            }
+          }
+
+          /* Très petite hauteur (paysage mobile) : compresse le hero */
+          @media (max-height: 500px) {
+            .hero-wrapper {
+              height: clamp(140px, 32dvh, 180px);
+              margin-bottom: 12px;
+            }
+            .hero-icon {
+              width: clamp(64px, 10dvh, 80px);
+              height: clamp(64px, 10dvh, 80px);
+            }
+            .hero-text {
+              top: clamp(70px, 45%, 90px);
+            }
           }
         `}</style>
       </div>

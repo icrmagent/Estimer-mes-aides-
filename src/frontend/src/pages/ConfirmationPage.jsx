@@ -86,43 +86,86 @@ export function ConfirmationPage() {
         </p>
 
         {/* Barre de progression countdown */}
-        <div className="w-full mb-4" style={{ maxWidth: 'min(20rem, 90vw)' }}>
+        <div className="w-full" style={{ maxWidth: 'min(20rem, 90vw)', marginBottom: 'clamp(40px, 8vh, 80px)' }}>
           <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
             <div
               className="h-full bg-white rounded-full transition-all duration-1000"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <p className="text-white/60 text-sm mt-2">
+          <p className="text-white/60 text-sm mt-2 text-center">
             Retour dans {countdown}s
           </p>
         </div>
 
         <button
           onClick={handleRetour}
-          className="group mt-6 inline-flex items-center justify-center gap-2.5 px-7 py-4 bg-white text-[#5B2D8E] font-semibold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wide focus:outline-none focus:ring-4 focus:ring-white/40"
+          className="start-btn"
           style={{
-            minHeight: '56px',
-            fontSize: '16px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.1)',
+            color: '#1a1a2e',
+            border: 'none',
+            borderRadius: '50px',
+            padding: 'clamp(12px, 2dvh, 16px) clamp(28px, 5vw, 42px)',
+            fontSize: 'clamp(15px, 2vw, 17px)',
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            letterSpacing: '0.5px',
+            position: 'relative',
+            zIndex: 10,
+            minHeight: '52px',
+            overflow: 'hidden',
           }}
         >
-          <svg
-            width="18"
-            height="18"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            className="transition-transform duration-300 group-hover:-translate-x-1"
-          >
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
-          <span className="whitespace-nowrap">Retourner à l'accueil</span>
+          <span className="start-btn-icon" style={{ fontSize: '20px' }}>←</span>
+          <span className="whitespace-nowrap">
+            {langue === 'es' ? 'Volver al inicio' : langue === 'en' ? 'Back to home' : "Retourner à l'accueil"}
+          </span>
         </button>
+
+        <style>{`
+          @keyframes floatAndPulse {
+            0%   { transform: translateY(0) scale(1);     box-shadow: 0 0 0 0 rgba(255,255,255,0.35), 0 6px 18px rgba(0,0,0,0.25); }
+            50%  { transform: translateY(-2px) scale(1.01); box-shadow: 0 0 0 8px rgba(255,255,255,0),  0 10px 24px rgba(0,0,0,0.3); }
+            100% { transform: translateY(0) scale(1);     box-shadow: 0 0 0 0 rgba(255,255,255,0),    0 6px 18px rgba(0,0,0,0.25); }
+          }
+          @keyframes shimmer {
+            0%   { left: -100%; opacity: 0; }
+            20%  { opacity: 1; }
+            80%  { left: 200%; opacity: 0; }
+            100% { left: 200%; opacity: 0; }
+          }
+          .start-btn {
+            animation: floatAndPulse 3s infinite ease-in-out;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            background: linear-gradient(135deg, #ffffff 0%, #f0f0f5 100%) !important;
+          }
+          .start-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 50%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(100,150,255,0.4), transparent);
+            transform: skewX(-25deg);
+            animation: shimmer 3s infinite ease-in-out;
+            pointer-events: none;
+          }
+          .start-btn:hover {
+            animation: none;
+            transform: translateY(-6px) scale(1.06) !important;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4), 0 0 20px rgba(255,255,255,0.6) !important;
+          }
+          .start-btn-icon {
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+          }
+          .start-btn:hover .start-btn-icon {
+            transform: translateX(-6px);
+          }
+        `}</style>
       </div>
     </InactivityManager>
   )

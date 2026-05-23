@@ -52,3 +52,6 @@ Thumbs.db
 # Éditeurs
 .vscode/
 .idea/
+!android-webview/.idea/
+android-webview/.idea/*
+!android-webview/.idea/runConfigurations/

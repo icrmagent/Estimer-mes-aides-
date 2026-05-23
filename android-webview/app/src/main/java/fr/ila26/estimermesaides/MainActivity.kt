@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewFeature
@@ -30,17 +31,36 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Edge-to-edge (WebView occupe tout l'écran, status bar transparente)
+        // Edge-to-edge (WebView occupe tout l'écran)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        setupImmersiveMode()
         setupAssetLoader()
         setupBackNavigation()
         setupWebView()
         setupWindowInsets()
         loadApp()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Re-applique l'immersif si l'utilisateur a swipé pour révéler les barres
+        if (hasFocus) setupImmersiveMode()
+    }
+
+    /**
+     * Mode kiosque borne : masque la status bar et la nav bar Android.
+     * Le swipe utilisateur révèle temporairement les barres puis elles se recachent.
+     */
+    private fun setupImmersiveMode() {
+        WindowInsetsControllerCompat(window, binding.root).apply {
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     /**

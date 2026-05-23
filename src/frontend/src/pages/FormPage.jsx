@@ -330,7 +330,14 @@ export function FormPage() {
         {/* Contenu */}
         <div
           className="tablet-form-content flex-1 px-4 flex flex-col items-center justify-start"
-          style={{ overflow: 'hidden', minHeight: 0, paddingTop: '16px', paddingBottom: '16px' }}
+          style={{
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            minHeight: 0,
+            paddingTop: '16px',
+            paddingBottom: 'calc(24px + env(safe-area-inset-bottom))',
+            WebkitOverflowScrolling: 'touch',
+          }}
         >
           <div className="form-page-panel max-w-5xl mx-auto my-auto w-full" style={{ marginTop: '0px' }}>
             {currentPage.categorie && (
@@ -380,29 +387,67 @@ export function FormPage() {
               })}
             </div>
 
-            {isLast && (
-              <div className="flex justify-center mt-10 mb-6 px-4">
+            <div
+              className="flex flex-wrap justify-end items-center gap-4 px-4"
+              style={{ marginTop: '48px', marginBottom: '24px' }}
+            >
+              {currentStep > 0 && (
+                <button
+                  onClick={prevStep}
+                  disabled={submitting}
+                  className="group inline-flex items-center justify-center gap-2.5 font-bold rounded-full bg-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+                  style={{
+                    color: '#5B2D8E',
+                    border: '2px solid #5B2D8E',
+                    minHeight: '56px',
+                    padding: '0 26px',
+                    fontSize: 'clamp(15px, 1.8vw, 18px)',
+                    boxShadow: '0 4px 14px rgba(91, 45, 142, 0.15)',
+                  }}
+                  aria-label={langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
+                >
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    className="transition-transform duration-300 group-hover:-translate-x-1 shrink-0"
+                  >
+                    <path d="M15 19l-7-7 7-7" />
+                  </svg>
+                  <span className="whitespace-nowrap">
+                    {langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
+                  </span>
+                </button>
+              )}
+
+              {isLast ? (
                 <button
                   onClick={handleSubmit}
                   disabled={!isStepValid || submitting}
-                  className="group inline-flex items-center justify-center gap-3 text-white font-extrabold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+                  className="group inline-flex items-center justify-center gap-2.5 text-white font-extrabold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
                   style={{
                     background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)',
-                    minHeight: '64px',
-                    minWidth: '280px',
-                    maxWidth: '420px',
-                    padding: '0 36px',
-                    fontSize: 'clamp(17px, 2.2vw, 20px)',
-                    boxShadow: '0 12px 32px rgba(91, 45, 142, 0.38), 0 4px 10px rgba(0,0,0,0.1)',
+                    minHeight: '56px',
+                    minWidth: '200px',
+                    padding: '0 32px',
+                    fontSize: 'clamp(15px, 1.8vw, 18px)',
+                    boxShadow: '0 10px 28px rgba(91, 45, 142, 0.35), 0 3px 8px rgba(0,0,0,0.1)',
                   }}
+                  aria-label={langue === 'es' ? 'Terminar' : langue === 'en' ? 'Finish' : 'Terminer'}
                 >
                   <span className="whitespace-nowrap">
                     {submitting ? 'Envoi...' : (langue === 'es' ? 'Terminar' : langue === 'en' ? 'Finish' : 'Terminer')}
                   </span>
                   {!submitting && (
                     <svg
-                      width="22"
-                      height="22"
+                      width="20"
+                      height="20"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -416,48 +461,7 @@ export function FormPage() {
                     </svg>
                   )}
                 </button>
-              </div>
-            )}
-
-            {!isLast && (
-              <div
-                className="flex flex-wrap justify-end items-center gap-4 px-4"
-                style={{ marginTop: '48px', marginBottom: '24px' }}
-              >
-                {currentStep > 0 && (
-                  <button
-                    onClick={prevStep}
-                    disabled={submitting}
-                    className="group inline-flex items-center justify-center gap-2.5 font-bold rounded-full bg-white transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
-                    style={{
-                      color: '#5B2D8E',
-                      border: '2px solid #5B2D8E',
-                      minHeight: '56px',
-                      padding: '0 26px',
-                      fontSize: 'clamp(15px, 1.8vw, 18px)',
-                      boxShadow: '0 4px 14px rgba(91, 45, 142, 0.15)',
-                    }}
-                    aria-label={langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
-                  >
-                    <svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                      className="transition-transform duration-300 group-hover:-translate-x-1 shrink-0"
-                    >
-                      <path d="M15 19l-7-7 7-7" />
-                    </svg>
-                    <span className="whitespace-nowrap">
-                      {langue === 'es' ? 'Anterior' : langue === 'en' ? 'Previous' : 'Précédent'}
-                    </span>
-                  </button>
-                )}
+              ) : (
                 <button
                   onClick={handleNext}
                   disabled={!isStepValid || submitting}
@@ -490,8 +494,8 @@ export function FormPage() {
                     <path d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -503,22 +507,22 @@ function BorneInfoBar() {
   const { borne, langue } = useBorne()
   if (!borne) return null
   const labels = {
-    fr: { master: 'Commerçant', regie: 'Régie', installateur: 'Installateur', idBorne: 'ID Borne', adresse: 'Adresse Borne' },
-    es: { master: 'Comerciante', regie: 'Agencia', installateur: 'Instalador', idBorne: 'ID Terminal', adresse: 'Dirección Terminal' },
-    en: { master: 'Merchant', regie: 'Agency', installateur: 'Installer', idBorne: 'Kiosk ID', adresse: 'Kiosk Address' },
+    fr: { master: 'Commerçant', regie: 'Régie', installateur: 'Installateur', idBorne: 'ID', adresse: 'Adresse' },
+    es: { master: 'Comerciante', regie: 'Agencia', installateur: 'Instalador', idBorne: 'ID', adresse: 'Dirección' },
+    en: { master: 'Merchant', regie: 'Agency', installateur: 'Installer', idBorne: 'ID', adresse: 'Address' },
   }
   const l = labels[langue] || labels.fr
 
   const infoParts = []
-  if (borne.commercant) infoParts.push(`${l.master}: ${borne.commercant}`)
-  if (borne.regie) infoParts.push(`${l.regie}: ${borne.regie}`)
-  if (borne.installateur) infoParts.push(`${l.installateur}: ${borne.installateur}`)
-  if (borne.idBorne) infoParts.push(`${l.idBorne}: ${borne.idBorne}`)
-  if (borne.adresse) infoParts.push(`${l.adresse}: ${borne.adresse}`)
+  if (borne.commercant) infoParts.push({ label: l.master, value: borne.commercant })
+  if (borne.regie) infoParts.push({ label: l.regie, value: borne.regie })
+  if (borne.installateur) infoParts.push({ label: l.installateur, value: borne.installateur })
+  if (borne.idBorne) infoParts.push({ label: l.idBorne, value: borne.idBorne })
+  if (borne.adresse) infoParts.push({ label: l.adresse, value: borne.adresse })
 
   return (
     <div
-      className="tablet-borne-info flex items-center justify-between px-3 sm:px-5 md:px-6 lg:px-8 py-2 gap-3 text-xs font-bold uppercase tracking-wide w-full overflow-hidden"
+      className="tablet-borne-info flex items-center justify-between px-3 sm:px-4 md:px-5 lg:px-6 py-2 gap-2 text-xs font-bold uppercase tracking-wide w-full overflow-hidden"
       style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '48px' }}
     >
       {/* Logo — top left */}
@@ -527,19 +531,35 @@ function BorneInfoBar() {
           src={ilaLogo}
           alt="ila 26"
           style={{
-            height: 'clamp(30px, 3.4vw, 40px)',
+            height: 'clamp(28px, 3.2vw, 38px)',
             width: 'auto',
             objectFit: 'contain',
             display: 'block',
-            marginLeft: '15px',
+            marginLeft: '10px',
           }}
         />
       </div>
 
-      {/* Center: Info Parts */}
-      <div className="tablet-borne-text flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[12px] lg:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-3 md:gap-4 lg:gap-6 px-2 overflow-hidden">
+      {/* Center: Info Parts — wrap autorisé sur tablette si dépassement */}
+      <div
+        className="tablet-borne-text flex-1 min-w-0 text-white flex flex-wrap justify-center items-center px-2"
+        style={{
+          fontSize: 'clamp(9px, 0.95vw, 12px)',
+          columnGap: 'clamp(8px, 1.4vw, 18px)',
+          rowGap: '2px',
+          lineHeight: 1.25,
+        }}
+      >
         {infoParts.map((part, idx) => (
-          <span key={idx} className="truncate max-w-[120px] sm:max-w-[150px] md:max-w-[180px] lg:max-w-none">{part}</span>
+          <span
+            key={idx}
+            className="truncate"
+            title={`${part.label}: ${part.value}`}
+            style={{ maxWidth: 'clamp(110px, 16vw, 240px)' }}
+          >
+            <span style={{ opacity: 0.75, marginRight: '4px' }}>{part.label}:</span>
+            <span style={{ fontWeight: 800 }}>{part.value}</span>
+          </span>
         ))}
       </div>
 
