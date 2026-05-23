@@ -22,13 +22,12 @@ export default function ExitButton({ className, style, children }) {
   // Countdown auto-close
   useEffect(() => {
     if (!showModal) return
-    setCountdown(MODAL_TIMEOUT)
 
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           closeModal()
-          return MODAL_TIMEOUT
+          return 0
         }
         return prev - 1
       })
@@ -41,6 +40,7 @@ export default function ExitButton({ className, style, children }) {
     setShowModal(true)
     setPassword('')
     setError(null)
+    setCountdown(MODAL_TIMEOUT)
   }
 
   function closeModal() {

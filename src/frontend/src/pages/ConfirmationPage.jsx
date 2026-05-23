@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBorne } from '../context/BorneContext.jsx'
 import { useForm } from '../context/FormContext.jsx'
@@ -25,6 +25,7 @@ export function ConfirmationPage() {
   const duree = formulaire?.dureeRetourAccueil || 10
 
   const [countdown, setCountdown] = useState(duree)
+  const handleRetourRef = useRef(null)
 
   // Countdown retour accueil automatique (R3.7 critère 35)
   useEffect(() => {
@@ -32,7 +33,7 @@ export function ConfirmationPage() {
       setCountdown(prev => {
         if (prev <= 1) {
           clearInterval(interval)
-          handleRetour()
+          handleRetourRef.current?.()
           return 0
         }
         return prev - 1
@@ -55,6 +56,10 @@ export function ConfirmationPage() {
     resetLangue()
     navigate('/start', { replace: true })
   }
+
+  useEffect(() => {
+    handleRetourRef.current = handleRetour
+  })
 
   const progress = ((duree - countdown) / duree) * 100
 
