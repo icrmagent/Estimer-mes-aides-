@@ -415,11 +415,11 @@ export function FormPage() {
           <button
             onClick={prevStep}
             disabled={submitting}
-            className="tablet-nav-prev fixed left-4 md:left-8 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center rounded-full bg-white shadow-lg border border-gray-100 transition-all hover:bg-gray-50 active:scale-95 disabled:opacity-30 disabled:hover:bg-white"
-            style={{ width: '64px', height: '64px', color: '#5B2D8E' }}
+            className="form-nav-arrow tablet-nav-prev fixed left-4 md:left-8 z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+            style={{ width: '64px', height: '64px' }}
             aria-label="Précédent"
           >
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+            <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
             </svg>
           </button>
@@ -429,11 +429,11 @@ export function FormPage() {
           <button
             onClick={handleNext}
             disabled={!isStepValid() || submitting}
-            className="tablet-nav-next fixed right-4 md:right-8 top-1/2 -translate-y-1/2 z-30 flex items-center justify-center rounded-full bg-white shadow-lg border border-gray-100 transition-all hover:bg-gray-50 active:scale-95 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed"
-            style={{ width: '64px', height: '64px', color: '#5B2D8E' }}
+            className="form-nav-arrow tablet-nav-next fixed right-4 md:right-8 z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+            style={{ width: '64px', height: '64px' }}
             aria-label="Suivant"
           >
-            <svg className="w-8 h-8" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
+            <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
             </svg>
           </button>
