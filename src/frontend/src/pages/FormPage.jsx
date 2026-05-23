@@ -280,37 +280,52 @@ export function FormPage() {
 
         {/* Header */}
         <header className="relative bg-gradient-to-r from-[#5B2D8E] to-[#1A56A0] shadow-md">
-          <div className="tablet-form-header w-full px-6 py-6 md:py-8 flex items-center justify-between relative z-10">
-            {/* Logo ILA26 à gauche */}
-            <div className="hero-icon tablet-home-zone">
+          <div className="tablet-form-header w-full px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-5 md:py-6 lg:py-8 flex items-center justify-between gap-3 sm:gap-4 relative z-10">
+            {/* Icône maison à gauche */}
+            <div className="hero-icon tablet-home-zone flex-shrink-0">
               <button
                 type="button"
                 onClick={handleManualAbandon}
                 aria-label="Retour à la page de démarrage"
-                style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' }}
+                style={{ border: 'none', background: 'transparent', padding: 0, cursor: 'pointer', display: 'block' }}
               >
-                <img alt="Maison" src={homeEnv} style={{ width: '90px', marginBottom: '5px', marginRight: '5px', marginTop: '5px', marginLeft: '5px' }} />
+                <img
+                  alt="Maison"
+                  src={homeEnv}
+                  style={{
+                    width: 'clamp(48px, 7vw, 80px)',
+                    height: 'auto',
+                    display: 'block',
+                  }}
+                />
               </button>
             </div>
-            
+
             {/* Titre et Sous-titre */}
-            <div className="hero-text flex-1 text-center px-4">
+            <div className="hero-text flex-1 min-w-0 text-center px-2">
               <h1
                 className="hero-title font-extrabold text-white mb-1 break-words"
                 style={{
-                  fontSize: 'clamp(20px, 4vw, 40px)',
+                  fontSize: 'clamp(18px, 3.6vw, 36px)',
+                  lineHeight: 1.2,
                   textShadow: 'rgba(0, 0, 0, 0.2) 0px 2px 4px',
                 }}
               >
                 {titre}
               </h1>
-              <p className="hero-subtitle text-white font-medium italic text-[14px] md:text-[18px]">
+              <p
+                className="hero-subtitle text-white font-medium italic"
+                style={{ fontSize: 'clamp(12px, 1.6vw, 17px)' }}
+              >
                 {sousTitre}
               </p>
             </div>
-            
+
             {/* Sélecteur de langue */}
-            <div className="tablet-lang-zone flex items-center justify-end w-[120px]">
+            <div
+              className="tablet-lang-zone flex items-center justify-end flex-shrink-0"
+              style={{ minWidth: 'clamp(64px, 9vw, 120px)' }}
+            >
               <LanguageSelector buttonMarginRight="0px" />
             </div>
           </div>
@@ -415,8 +430,8 @@ export function FormPage() {
           <button
             onClick={prevStep}
             disabled={submitting}
-            className="form-nav-arrow tablet-nav-prev fixed left-4 md:left-8 z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 focus:outline-none focus:ring-4 focus:ring-purple-300/50"
-            style={{ width: '64px', height: '64px' }}
+            className="form-nav-arrow tablet-nav-prev fixed z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+            style={{ width: '64px', height: '64px', left: 'clamp(16px, 2.5vw, 56px)' }}
             aria-label="Précédent"
           >
             <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
@@ -429,8 +444,8 @@ export function FormPage() {
           <button
             onClick={handleNext}
             disabled={!isStepValid() || submitting}
-            className="form-nav-arrow tablet-nav-next fixed right-4 md:right-8 z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-purple-300/50"
-            style={{ width: '64px', height: '64px' }}
+            className="form-nav-arrow tablet-nav-next fixed z-30 flex items-center justify-center rounded-full transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+            style={{ width: '64px', height: '64px', right: 'clamp(16px, 2.5vw, 56px)' }}
             aria-label="Suivant"
           >
             <svg className="w-7 h-7" fill="none" stroke="currentColor" strokeWidth="3" viewBox="0 0 24 24">
@@ -462,18 +477,18 @@ function BorneInfoBar() {
 
   return (
     <div
-      className="tablet-borne-info flex items-center justify-between px-2 sm:px-4 py-2 text-xs font-bold uppercase tracking-wide w-full"
-      style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '40px' }}
+      className="tablet-borne-info flex items-center justify-between px-2 sm:px-4 py-2 text-xs font-bold uppercase tracking-wide w-full overflow-hidden"
+      style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '44px' }}
     >
       {/* Logo — top left */}
-      <div className="flex items-center flex-shrink-0">
-        <img src={ilaLogo} alt="ila 26" style={{ height: '24px', width: 'auto', objectFit: 'contain' }} />
+      <div className="flex items-center flex-shrink-0" style={{ minWidth: 'clamp(56px, 7vw, 96px)' }}>
+        <img src={ilaLogo} alt="ila 26" style={{ height: 'clamp(28px, 3.2vw, 36px)', width: 'auto', objectFit: 'contain', display: 'block' }} />
       </div>
 
       {/* Center: Info Parts */}
-      <div className="tablet-borne-text flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-4 md:gap-6 px-2 overflow-hidden">
+      <div className="tablet-borne-text flex-1 min-w-0 text-center text-[10px] sm:text-[11px] md:text-[12px] lg:text-[13px] tracking-wider text-white flex justify-center items-center gap-2 sm:gap-3 md:gap-4 lg:gap-6 px-2 overflow-hidden">
         {infoParts.map((part, idx) => (
-          <span key={idx} className="truncate max-w-[min(140px,30vw)] sm:max-w-none">{part}</span>
+          <span key={idx} className="truncate max-w-[120px] sm:max-w-[150px] md:max-w-[180px] lg:max-w-none">{part}</span>
         ))}
       </div>
 

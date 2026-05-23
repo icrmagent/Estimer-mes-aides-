@@ -1746,11 +1746,11 @@ body { overscroll-behavior: none; }
   }
 
   .tablet-nav-prev {
-    left: 12px !important;
+    left: 16px !important;
   }
 
   .tablet-nav-next {
-    right: 12px !important;
+    right: 16px !important;
   }
 
   .tablet-nav-prev:disabled,
