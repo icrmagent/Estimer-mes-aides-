@@ -477,12 +477,21 @@ function BorneInfoBar() {
 
   return (
     <div
-      className="tablet-borne-info flex items-center justify-between px-2 sm:px-4 py-2 text-xs font-bold uppercase tracking-wide w-full overflow-hidden"
-      style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '44px' }}
+      className="tablet-borne-info flex items-center justify-between px-3 sm:px-5 md:px-6 lg:px-8 py-2 gap-3 text-xs font-bold uppercase tracking-wide w-full overflow-hidden"
+      style={{ backgroundColor: 'rgb(120, 89, 173)', color: 'white', minHeight: '48px' }}
     >
       {/* Logo — top left */}
-      <div className="flex items-center flex-shrink-0" style={{ minWidth: 'clamp(56px, 7vw, 96px)' }}>
-        <img src={ilaLogo} alt="ila 26" style={{ height: 'clamp(28px, 3.2vw, 36px)', width: 'auto', objectFit: 'contain', display: 'block' }} />
+      <div className="flex items-center flex-shrink-0">
+        <img
+          src={ilaLogo}
+          alt="ila 26"
+          style={{
+            height: 'clamp(30px, 3.4vw, 40px)',
+            width: 'auto',
+            objectFit: 'contain',
+            display: 'block',
+          }}
+        />
       </div>
 
       {/* Center: Info Parts */}
