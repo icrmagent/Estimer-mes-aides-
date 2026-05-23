@@ -95,10 +95,28 @@ export function ConfirmationPage() {
 
         <button
           onClick={handleRetour}
-          className="mt-4 px-6 py-3 bg-white text-[#5B2D8E] font-semibold rounded-xl shadow-lg hover:bg-white/90 active:scale-[0.98] transition-all"
-          style={{ minHeight: '52px', fontSize: '16px' }}
+          className="group mt-6 inline-flex items-center justify-center gap-2.5 px-7 py-4 bg-white text-[#5B2D8E] font-semibold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] tracking-wide focus:outline-none focus:ring-4 focus:ring-white/40"
+          style={{
+            minHeight: '56px',
+            fontSize: '16px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.1)',
+          }}
         >
-          Retourner à l'accueil maintenant
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="transition-transform duration-300 group-hover:-translate-x-1"
+          >
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          <span className="whitespace-nowrap">Retourner à l'accueil</span>
         </button>
       </div>
     </InactivityManager>
