@@ -1655,6 +1655,29 @@ body { overscroll-behavior: none; }
   transform: translateY(-50%);
 }
 
+/* ═══════════════════════════════════════════
+   FORMPAGE LANGUAGE SELECTOR (dans header)
+   Agrandi pour meilleure visibilité tactile
+═══════════════════════════════════════════ */
+.tablet-lang-zone > div > button {
+  min-height: 52px;
+  padding: 10px 14px !important;
+}
+
+.tablet-lang-zone > div > button > img {
+  width: 26px !important;
+}
+
+@media (max-width: 767px) {
+  .tablet-lang-zone > div > button {
+    min-height: 44px;
+    padding: 8px 10px !important;
+  }
+  .tablet-lang-zone > div > button > img {
+    width: 22px !important;
+  }
+}
+
 .form-nav-arrow:disabled {
   background: linear-gradient(135deg, #b8a8c9 0%, #a8b8d0 100%);
   color: rgba(255,255,255,0.85);
