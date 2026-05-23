@@ -370,14 +370,40 @@ export function FormPage() {
             </div>
 
             {isLast && (
-              <div className="flex justify-center mt-12">
+              <div className="flex justify-center mt-10 mb-6 px-4">
                 <button
                   onClick={handleSubmit}
                   disabled={!isStepValid() || submitting}
-                  className="text-white font-extrabold rounded-2xl py-4 px-12 text-xl transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 shadow-md"
-                  style={{ background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)', minHeight: '64px', minWidth: '280px' }}
+                  className="group inline-flex items-center justify-center gap-3 text-white font-extrabold rounded-full transition-all duration-300 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed tracking-wide focus:outline-none focus:ring-4 focus:ring-purple-300/50"
+                  style={{
+                    background: 'linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%)',
+                    minHeight: '64px',
+                    minWidth: '280px',
+                    maxWidth: '420px',
+                    padding: '0 36px',
+                    fontSize: 'clamp(17px, 2.2vw, 20px)',
+                    boxShadow: '0 12px 32px rgba(91, 45, 142, 0.38), 0 4px 10px rgba(0,0,0,0.1)',
+                  }}
                 >
-                  {submitting ? 'Envoi...' : (langue === 'es' ? 'Terminar' : langue === 'en' ? 'Finish' : 'Terminer')}
+                  <span className="whitespace-nowrap">
+                    {submitting ? 'Envoi...' : (langue === 'es' ? 'Terminar' : langue === 'en' ? 'Finish' : 'Terminer')}
+                  </span>
+                  {!submitting && (
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                      className="transition-transform duration-300 group-hover:scale-110 shrink-0"
+                    >
+                      <path d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
                 </button>
               </div>
             )}
