@@ -300,8 +300,8 @@ export default function StartPage() {
           .hero-wrapper {
             position: relative;
             width: 100%;
-            height: clamp(180px, 35dvh, 260px);
-            margin-bottom: clamp(8px, 2dvh, 16px);
+            height: clamp(180px, 38dvh, 300px);
+            margin-bottom: clamp(16px, 3dvh, 32px);
             z-index: 10;
             transition: opacity 0.65s ease-out;
           }
@@ -335,7 +335,7 @@ export default function StartPage() {
 
           .hero-text {
             position: absolute;
-            top: clamp(94px, 60%, 134px);
+            top: clamp(94px, 50%, 130px);
             left: 50%;
             transform: translateX(-50%);
             display: flex;
