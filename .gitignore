@@ -35,6 +35,11 @@ dist-ssr/
 # Playwright
 tests/e2e/playwright-report/
 tests/e2e/test-results/
+tests/test-results/
+test-results/
+
+# Artefacts de build locaux (APK, etc.)
+artifacts/
 
 # Logs
 *.log
