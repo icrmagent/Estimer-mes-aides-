@@ -1641,6 +1641,27 @@ body { overscroll-behavior: none; }
   .confirmation-card { max-width: 420px; }
 }
 
+/* ═══════════════════════════════════════════
+   FORMPAGE NAV ARROWS — Default (Desktop)
+   Mobile + tablette overrides plus bas
+═══════════════════════════════════════════ */
+.form-nav-arrow {
+  background: linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%);
+  color: #fff;
+  border: none;
+  box-shadow: 0 8px 24px rgba(91, 45, 142, 0.35), 0 2px 6px rgba(0,0,0,0.1);
+  /* Desktop : centré verticalement */
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.form-nav-arrow:disabled {
+  background: linear-gradient(135deg, #b8a8c9 0%, #a8b8d0 100%);
+  color: rgba(255,255,255,0.85);
+  cursor: not-allowed;
+  box-shadow: 0 4px 12px rgba(91, 45, 142, 0.15);
+}
+
 /* FormPage tablet only (no desktop impact) */
 @media (min-width: 768px) and (max-width: 1024px) {
   .tablet-form-header {
@@ -1709,18 +1730,19 @@ body { overscroll-behavior: none; }
     white-space: nowrap;
   }
 
+  /* Mobile + tablette : boutons alignés avec la catégorie (SectionHeader) */
   .tablet-nav-prev,
   .tablet-nav-next {
-    top: clamp(120px, 18vh, 180px) !important;
+    top: clamp(150px, 20vh, 210px) !important;
     transform: none !important;
-    width: 54px !important;
-    height: 54px !important;
+    width: 56px !important;
+    height: 56px !important;
     z-index: 36;
-    background: #f3f5fa !important;
-    border-color: #d9deea !important;
-    color: #6f7692 !important;
+    background: linear-gradient(135deg, #5B2D8E 0%, #1A56A0 100%) !important;
+    border: none !important;
+    color: #fff !important;
     opacity: 1 !important;
-    box-shadow: 0 8px 20px rgba(91, 45, 142, 0.10) !important;
+    box-shadow: 0 8px 22px rgba(91, 45, 142, 0.35), 0 2px 6px rgba(0,0,0,0.1) !important;
   }
 
   .tablet-nav-prev {
@@ -1733,10 +1755,10 @@ body { overscroll-behavior: none; }
 
   .tablet-nav-prev:disabled,
   .tablet-nav-next:disabled {
-    background: #eceff6 !important;
+    background: linear-gradient(135deg, #b8a8c9 0%, #a8b8d0 100%) !important;
     opacity: 0.55 !important;
-    border-color: #d3d9e6 !important;
-    color: #8f96ad !important;
+    color: rgba(255,255,255,0.85) !important;
+    box-shadow: 0 4px 12px rgba(91, 45, 142, 0.15) !important;
   }
 
   .form-page-panel {
@@ -1847,17 +1869,16 @@ body { overscroll-behavior: none; }
 
 /* ═══════════════════════════════════════════
    FORMPAGE MOBILE — < 768px
-   Fix: flèches nav au bas de l'écran
-   (évite le chevauchement avec le contenu)
+   Flèches nav alignées avec la catégorie (SectionHeader)
 ═══════════════════════════════════════════ */
 @media (max-width: 767px) {
   .tablet-nav-prev,
   .tablet-nav-next {
-    top: auto !important;
-    bottom: 24px;
+    top: clamp(135px, 19vh, 175px) !important;
+    bottom: auto !important;
     transform: none !important;
-    width: 56px !important;
-    height: 56px !important;
+    width: 52px !important;
+    height: 52px !important;
     z-index: 36;
   }
 
