@@ -208,6 +208,42 @@ export function FormPage() {
   const uniqueCategories = [...new Set(pages.map(p => t(p.categorie?.nom, langue)).filter(Boolean))]
   const pageTitle = t(currentPage.sousCategorie?.nom, langue) || (currentPage.categorie ? null : `Étape ${currentStep + 1}`)
   const isLast = currentStep === totalSteps - 1
+
+  // Identifie les question IDs adresse / code postal / ville dans TOUT le formulaire
+  // (pas seulement la page courante) car Adresse, CP et Ville peuvent être sur des pages
+  // différentes — l'auto-complétion les pré-remplit toutes en une fois.
+  const normalize = (s) => (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .trim()
+
+  const matchLabel = (libelle, candidates, excludes = []) => {
+    if (!libelle) return false
+    const values = typeof libelle === 'string' ? [libelle] : Object.values(libelle)
+    return values.some(v => {
+      const n = normalize(v)
+      if (excludes.some(ex => n.includes(ex))) return false
+      return candidates.some(c => n === c || n.startsWith(c + ' ') || n.endsWith(' ' + c))
+    })
+  }
+
+  const adresseQuestionId = questions.find(q =>
+    matchLabel(q.libelleQuestion, ['adresse', 'adresse postale', 'direccion', 'address', 'rue'], ['email', 'mail', 'correo'])
+  )?.id
+  const codePostalQuestionId = questions.find(q =>
+    matchLabel(q.libelleQuestion, ['code postal', 'codigo postal', 'postal code', 'cp', 'code post'])
+  )?.id
+  const villeQuestionId = questions.find(q =>
+    matchLabel(q.libelleQuestion, ['ville', 'ciudad', 'city', 'commune'])
+  )?.id
+
+  const handleAddressSelected = ({ adresse, codePostal, ville }) => {
+    if (adresseQuestionId && adresse) setValue(adresseQuestionId, adresse.toUpperCase())
+    if (codePostalQuestionId && codePostal) setValue(codePostalQuestionId, codePostal.toUpperCase())
+    if (villeQuestionId && ville) setValue(villeQuestionId, ville.toUpperCase())
+  }
+
   const isHalfWidthField = (question, label) => {
     const normalized = label
       .toLowerCase()
@@ -374,6 +410,8 @@ export function FormPage() {
                       question={question}
                       value={values[question.id]}
                       onChange={(val) => setValue(question.id, val)}
+                      onAddressSelected={handleAddressSelected}
+                      countryCode={borne?.pays || 'FR'}
                       langue={langue}
                     />
 

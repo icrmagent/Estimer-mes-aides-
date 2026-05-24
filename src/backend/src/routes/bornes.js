@@ -23,6 +23,7 @@ export const borneSessionRouter = Router()
 const createBorneSchema = z.object({
   idBorne: z.string().min(1).optional(),
   langueDefaut: z.enum(['fr', 'es', 'en']).default('fr'),
+  pays: z.string().length(2).regex(/^[A-Z]{2}$/, 'Code pays ISO 3166-1 alpha-2 (ex: FR, ES, BE)').default('FR'),
   adresse: z.string().min(1),
   commercant: z.string().optional(),
   regie: z.string().optional(),

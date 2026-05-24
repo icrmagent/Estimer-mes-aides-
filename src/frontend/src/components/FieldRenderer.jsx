@@ -1,5 +1,6 @@
 import { t, tOptions } from '../utils/i18n.js'
 import { PhoneInput } from './PhoneInput'
+import AddressAutocomplete from './AddressAutocomplete.jsx'
 
 const CheckIcon = () => (
   <svg className="pf-option-check-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -8,7 +9,19 @@ const CheckIcon = () => (
   </svg>
 )
 
-export default function FieldRenderer({ question, value, onChange, langue }) {
+// Capitalisation : UPPERCASE complet sur tous les champs texte.
+// Cohérent avec l'usage administratif français (CERFA, etc.).
+const toUpper = (v) => (typeof v === 'string' ? v.toUpperCase() : v)
+
+// Le label "adresse" déclenche l'auto-complétion (cross-field via onAddressSelected).
+// Exclut "adresse email" / "adresse e-mail" / "correo" / "mail" qui ne sont pas des adresses postales.
+function isAdresseField(normalizedLabel) {
+  if (!normalizedLabel) return false
+  if (/(email|e-mail|mail|correo)/.test(normalizedLabel)) return false
+  return /(^|\s)(adresse|direccion|address|rue)(\s|$)/.test(normalizedLabel)
+}
+
+export default function FieldRenderer({ question, value, onChange, onAddressSelected, countryCode, langue }) {
   const { typeOption, options } = question
   const translatedOptions = tOptions(options, langue)
   const useCompactTwoColumns = translatedOptions.length > 0 && translatedOptions.length <= 4
@@ -17,7 +30,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
   const normalizedLabel = fieldLabel
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
 
   const renderFrame = (control) => (
     <div className="grad-border">
@@ -28,25 +41,42 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
   )
 
   switch (typeOption) {
-    case 'texte_court':
+    case 'texte_court': {
+      // Auto-complétion d'adresse si le label correspond
+      if (isAdresseField(normalizedLabel) && onAddressSelected) {
+        return renderFrame(
+          <AddressAutocomplete
+            value={value || ''}
+            onChange={v => onChange(toUpper(v))}
+            onSelect={onAddressSelected}
+            countryCode={countryCode}
+            ariaLabel={fieldLabel}
+          />
+        )
+      }
       return renderFrame(
         <input
           type="text"
           aria-label={fieldLabel}
           value={value || ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => onChange(toUpper(e.target.value))}
           className="pf-input"
+          autoCapitalize="characters"
+          style={{ textTransform: 'uppercase' }}
         />
       )
+    }
 
     case 'texte_long':
       return renderFrame(
         <textarea
           aria-label={fieldLabel}
           value={value || ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => onChange(toUpper(e.target.value))}
           rows={4}
           className="pf-input pf-textarea"
+          autoCapitalize="characters"
+          style={{ textTransform: 'uppercase' }}
         />
       )
 
@@ -56,6 +86,7 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
       )
 
     case 'email':
+      // Convention email = lowercase (la casse n'a pas de sens sémantique côté serveurs SMTP).
       return renderFrame(
         <input
           type="email"
@@ -153,8 +184,10 @@ export default function FieldRenderer({ question, value, onChange, langue }) {
           type="text"
           aria-label={fieldLabel}
           value={value || ''}
-          onChange={e => onChange(e.target.value)}
+          onChange={e => onChange(toUpper(e.target.value))}
           className="pf-input"
+          autoCapitalize="characters"
+          style={{ textTransform: 'uppercase' }}
         />
       )
   }

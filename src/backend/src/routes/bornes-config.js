@@ -45,6 +45,7 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
         id: true,
         idBorne: true,
         langueDefaut: true,
+        pays: true,
         adresse: true,
         commercant: true,
         regie: true,

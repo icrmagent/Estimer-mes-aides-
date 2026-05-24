@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import { ErrorBanner } from '../../components/ui.jsx'
+import { COUNTRIES } from '../../utils/countries.js'
 
 export default function BorneFormPage() {
   const { id } = useParams()
@@ -12,6 +13,7 @@ export default function BorneFormPage() {
   const [form, setForm] = useState({
     idBorne: '',
     langueDefaut: 'fr',
+    pays: 'FR',
     adresse: '',
     commercant: '',
     regie: '',
@@ -43,6 +45,7 @@ export default function BorneFormPage() {
           setForm({
             idBorne: b.idBorne || '',
             langueDefaut: b.langueDefaut || 'fr',
+            pays: b.pays || 'FR',
             adresse: b.adresse || '',
             commercant: b.commercant || '',
             regie: b.regie || '',
@@ -113,7 +116,7 @@ export default function BorneFormPage() {
         <ErrorBanner message={error} onClose={() => setError(null)} />
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm p-6 space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1">
                 ID Borne <span className="text-red-500">*</span>
@@ -145,6 +148,27 @@ export default function BorneFormPage() {
                 <option value="es">🇪🇸 Español</option>
                 <option value="en">🇬🇧 English</option>
               </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Pays <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={form.pays}
+                onChange={e => handleChange('pays', e.target.value)}
+                className={inputClass}
+                style={inputStyle}
+                required
+              >
+                {COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Détermine le filtrage de l'auto-complétion d'adresse côté borne.
+              </p>
+              {fieldErrors.pays && <p className="text-red-500 text-xs mt-1">{fieldErrors.pays}</p>}
             </div>
           </div>
 

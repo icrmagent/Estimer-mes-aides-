@@ -79,6 +79,7 @@ model Borne {
   id              String           @id @default(uuid())
   idBorne         String           @unique
   langueDefaut    String           @default("fr")
+  pays            String           @default("FR")
   adresse         String
   commercant      String?
   regie           String?
