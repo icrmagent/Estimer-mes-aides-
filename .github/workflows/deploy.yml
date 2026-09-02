@@ -224,10 +224,17 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.BACKEND_URL }}
           VITE_API_KEY: ${{ secrets.API_KEY_MOBILE }}
+          # Sans ces deux variables AU MOMENT DU BUILD, le tree-shaking Vite reduit
+          # connectBorneChannel() a un no-op : le forcage login/logout d'une borne
+          # depuis le back-office cesse de fonctionner sur les tablettes, en silence.
+          VITE_PUSHER_KEY: ${{ secrets.VITE_PUSHER_KEY }}
+          VITE_PUSHER_CLUSTER: ${{ secrets.VITE_PUSHER_CLUSTER }}
         run: |
           npm ci
           npm run build
           ls -la dist/
+          # Garde-fou : l'APK ne doit jamais partir sans le pilotage temps reel.
+          test "$(grep -ro 'force-login' dist/assets/ | wc -l)" -gt 0             || { echo "::error::force-login absent du bundle — VITE_PUSHER_KEY manquante au build"; exit 1; }
 
       # 2/3 — Copier le build frontend dans les assets de la WebView
       - name: Copy frontend dist → android assets
