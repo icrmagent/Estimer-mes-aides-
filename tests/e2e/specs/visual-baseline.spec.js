@@ -1,13 +1,18 @@
-import { test, expect } from '@playwright/test'
-import { MOCK_BORNE_CONFIG, BORNE_ID } from '../fixtures/mock-config.js'
+import { test, expect } from '../fixtures/borne-session.js'
 
 /**
  * Visual baseline — capture des écrans clés sur 7 viewports cibles.
  * Phase 0 du plan RESPONSIVE.md : générer la référence pour valider
  * la non-régression à chaque fix (Phases 1-3).
  *
- * Création initiale  : npx playwright test visual-baseline --update-snapshots
- * Validation         : npx playwright test visual-baseline
+ * Projet Playwright « visual » (cf. playwright.config.js) : les baselines sont
+ * suffixées par la plateforme d'enregistrement, et le projet ne s'active que là
+ * où des baselines existent pour la plateforme courante. Le rendu des polices
+ * n'étant pas portable, une baseline Windows n'est jamais comparée à un rendu
+ * Linux — le seuil reste strict (0,5 % de pixels).
+ *
+ * Enregistrement   : PW_VISUAL=1 npx playwright test --project=visual --update-snapshots
+ * Validation       : npx playwright test --project=visual
  */
 
 const VIEWPORTS = [
@@ -19,22 +24,6 @@ const VIEWPORTS = [
   { name: 'kiosk-standard',   width: 1280, height: 800  },
   { name: 'kiosk-large',      width: 1920, height: 1080 },
 ]
-
-test.beforeEach(async ({ page }) => {
-  await page.route(/\/api\/bornes\/[^/]+\/config/, route =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(MOCK_BORNE_CONFIG),
-    })
-  )
-  await page.addInitScript((borneId) => {
-    try {
-      localStorage.setItem('borne_token', 'mock-jwt-e2e-token')
-      localStorage.setItem('borne_id', borneId)
-    } catch (_) {}
-  }, BORNE_ID)
-})
 
 for (const vp of VIEWPORTS) {
   test.describe(`baseline ${vp.name} (${vp.width}x${vp.height})`, () => {

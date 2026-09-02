@@ -1,5 +1,4 @@
-import { test, expect } from '@playwright/test'
-import { MOCK_BORNE_CONFIG, BORNE_ID } from '../fixtures/mock-config.js'
+import { test, expect } from '../fixtures/borne-session.js'
 
 /**
  * Responsive guards — vérifie sur tous les viewports cibles :
@@ -24,22 +23,6 @@ const PAGES = [
   { name: 'start',  path: '/start'  },
   { name: 'form',   path: '/form'   },
 ]
-
-test.beforeEach(async ({ page }) => {
-  await page.route(/\/api\/bornes\/[^/]+\/config/, route =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(MOCK_BORNE_CONFIG),
-    })
-  )
-  await page.addInitScript((borneId) => {
-    try {
-      localStorage.setItem('borne_token', 'mock-jwt-e2e-token')
-      localStorage.setItem('borne_id', borneId)
-    } catch (_) {}
-  }, BORNE_ID)
-})
 
 for (const vp of VIEWPORTS) {
   test.describe(`${vp.name} (${vp.width}x${vp.height})`, () => {

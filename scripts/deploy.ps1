@@ -1,9 +1,9 @@
 # scripts/deploy.ps1 — Pipeline de déploiement local (Windows)
 # Usage : .\scripts\deploy.ps1 [-SkipTests] [-SkipMigration] [-SkipWebview] [-SkipVercel] [-SkipBackend]
 #
-# Étapes : sync git → tests → migration Prisma → backend Railway → Vercel (x3) → APK WebView → tag git
+# Étapes : sync git → tests → migration Prisma → backend Render → Vercel (x3) → APK WebView → tag git
 # Variables d'env requises (.env.deploy à la racine, voir .env.deploy.example) :
-#   DATABASE_URL, DIRECT_URL, RAILWAY_TOKEN, VERCEL_TOKEN, BACKEND_URL
+#   DATABASE_URL, DIRECT_URL, RENDER_API_KEY, RENDER_SERVICE_ID, VERCEL_TOKEN, BACKEND_URL
 
 [CmdletBinding()]
 param(
@@ -73,27 +73,52 @@ if (-not $SkipMigration) {
   } finally { Pop-Location }
 } else { Write-Host "⊘ Migration sautée" -ForegroundColor Yellow }
 
-# ── 4. DEPLOY BACKEND (Railway) ──────────────────────────────
+# ── 4. DEPLOY BACKEND (Render) ───────────────────────────────
+# Render redeploie automatiquement a chaque push sur main (autoDeployTrigger: commit).
+# On declenche malgre tout un deploiement explicite pour pouvoir en suivre l'etat.
 if (-not $SkipBackend) {
-  Step "4/7 — Deploy Backend → Railway"
-  if (-not $env:RAILWAY_TOKEN) { Fail "RAILWAY_TOKEN manquant" }
-  Push-Location src/backend
+  Step "4/7 — Deploy Backend → Render"
+  if (-not $env:RENDER_API_KEY) { Fail "RENDER_API_KEY manquant" }
+  $serviceId = if ($env:RENDER_SERVICE_ID) { $env:RENDER_SERVICE_ID } else { "srv-dac30kbm8hqs73eb1d20" }
+  $headers = @{ Authorization = "Bearer $($env:RENDER_API_KEY)" }
+
   try {
-    npx -y '@railway/cli@latest' up --detach
-    if ($LASTEXITCODE) { Fail "Railway up échec" }
-  } finally { Pop-Location }
+    $dep = Invoke-RestMethod -Method Post -Headers $headers -ContentType 'application/json' `
+      -Uri "https://api.render.com/v1/services/$serviceId/deploys" `
+      -Body '{"clearCache":"do_not_clear"}' -TimeoutSec 60
+  } catch { Fail "Render : deploiement non declenche — $_" }
+  if (-not $dep.id) { Fail "Render : aucun id de deploiement retourne" }
+  Write-Host "  deploy=$($dep.id)"
+
+  # Attente de l'etat terminal (build ~2-4 min sur le plan free)
+  $ok = $false
+  for ($i = 1; $i -le 40; $i++) {
+    Start-Sleep -Seconds 20
+    try {
+      $st = (Invoke-RestMethod -Headers $headers -TimeoutSec 40 `
+        -Uri "https://api.render.com/v1/services/$serviceId/deploys/$($dep.id)").status
+    } catch { Write-Host "  [$i] poll KO"; continue }
+    if ($st -eq 'live') { $ok = $true; break }
+    if ($st -in @('build_failed','update_failed','pre_deploy_failed','canceled','deactivated')) {
+      Fail "Render : deploiement $st (logs : https://dashboard.render.com)"
+    }
+    Write-Host "  [$i] $st"
+  }
+  if (-not $ok) { Fail "Render : deploiement non live apres ~13 min" }
 
   if ($env:BACKEND_URL) {
     Step "4b — Healthcheck backend"
+    # /health renvoie 503 si la base est injoignable : l'echec est alors voulu.
+    # Le plan free met le service en veille ; le premier appel peut prendre ~50 s.
     $ok = $false
-    for ($i = 1; $i -le 10; $i++) {
+    for ($i = 1; $i -le 12; $i++) {
       Start-Sleep -Seconds 15
       try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri "$($env:BACKEND_URL)/health" -TimeoutSec 10
+        $r = Invoke-WebRequest -UseBasicParsing -Uri "$($env:BACKEND_URL)/health" -TimeoutSec 75
         if ($r.StatusCode -eq 200) { $ok = $true; break }
       } catch { Write-Host "  try $i KO" }
     }
-    if (-not $ok) { Fail "Backend ne répond pas après 10 tentatives" }
+    if (-not $ok) { Fail "Backend healthcheck (503 = base injoignable, timeout = service endormi)" }
     Write-Host "✓ Backend healthy"
   }
 } else { Write-Host "⊘ Backend sauté" -ForegroundColor Yellow }

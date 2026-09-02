@@ -1,21 +1,17 @@
-import { test, expect } from '@playwright/test'
-import { MOCK_SUBMISSION_RESPONSE, MOCK_BORNE_CONFIG } from '../fixtures/mock-config.js'
+import { test, expect } from '../fixtures/borne-session.js'
+
+// La session borne (borne_token + borne_id) et la route de config sont fournies
+// par la fixture partagée ../fixtures/borne-session.js.
 
 const MOCK_ENREGISTREMENT_RESPONSE = { success: true, data: { id: 'enr-e2e-uuid', statutPartage: 'en_attente' } }
 
 test.beforeEach(async ({ page }) => {
-  await page.route(/\/api\/bornes\/[^/]+\/config/, route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_BORNE_CONFIG) })
-  )
   await page.route('**/api/enregistrements', route => {
     if (route.request().method() === 'POST') {
       route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(MOCK_ENREGISTREMENT_RESPONSE) })
+    } else {
+      route.fallback()
     }
-  })
-
-  await page.goto('/login')
-  await page.evaluate(() => {
-    localStorage.setItem('borne_token', 'mock-jwt-e2e-token')
   })
 })
 

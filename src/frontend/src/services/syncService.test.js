@@ -370,6 +370,7 @@ describe('syncService', () => {
 
       // One should have run, the other should have been a no-op
       expect(apiSubmit).toHaveBeenCalledTimes(1)
+      expect(r1).toEqual({ synced: 1, failed: 0 })
       expect(r2).toEqual({ synced: 0, failed: 0 })
     })
 

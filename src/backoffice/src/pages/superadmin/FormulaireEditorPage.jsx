@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import I18nTextInput from '../../components/forms/I18nTextInput.jsx'
 import QuestionEditor from '../../components/forms/QuestionEditor.jsx'
@@ -60,7 +60,6 @@ function safeI18n(v) {
 
 export default function FormulaireEditorPage() {
   const { id } = useParams()
-  const navigate = useNavigate()
 
   const [formulaire, setFormulaire] = useState(null)
   const [questions, setQuestions] = useState([])

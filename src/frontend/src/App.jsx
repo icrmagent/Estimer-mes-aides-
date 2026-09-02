@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
-import { BorneProvider } from './context/BorneContext.jsx'
-import { FormProvider } from './context/FormContext.jsx'
+import { BorneProvider } from './context/BorneProvider.jsx'
+import { FormProvider } from './context/FormProvider.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import StartPage from './pages/StartPage.jsx'
 import { FormPage } from './pages/FormPage.jsx'
@@ -44,20 +44,37 @@ function BorneRemoteControlBridge() {
   return null
 }
 
-/* Redirige vers /start si un token valide est présent, sinon vers /login.
-   Permet la reprise automatique de session après coupure de courant. */
-function RootRedirect() {
+/* Décode le JWT borne stocké et indique si la session est encore utilisable.
+   Un token illisible (tronqué, base64 invalide, payload non-JSON, `exp` absent)
+   est journalisé puis purgé : la borne repart proprement sur /login au lieu de
+   rester bloquée sur un jeton inexploitable. */
+function hasValidBorneSession() {
   const token = localStorage.getItem('borne_token')
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      if (payload.exp * 1000 > Date.now()) {
-        return <Navigate to="/start" replace />
-      }
-    } catch {}
-    localStorage.removeItem('borne_token')
+  if (!token) return false
+
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    if (typeof payload?.exp !== 'number') {
+      throw new Error('champ `exp` absent ou non numérique')
+    }
+    if (payload.exp * 1000 > Date.now()) return true
+    console.info('[App] Session borne expirée, retour à l\'écran de connexion')
+  } catch (err) {
+    console.warn('[App] Token borne illisible, session purgée :', err?.message ?? err)
   }
-  return <Navigate to="/login" replace />
+
+  localStorage.removeItem('borne_token')
+  localStorage.removeItem('borne_email')
+  return false
+}
+
+/* Redirige vers /start si un token valide est présent, sinon vers /login.
+   Permet la reprise automatique de session après coupure de courant.
+   La décision est figée au montage (initialiseur useState) : le rendu reste pur
+   et la redirection ne bascule pas si le composant re-rend. */
+function RootRedirect() {
+  const [sessionValid] = useState(hasValidBorneSession)
+  return <Navigate to={sessionValid ? '/start' : '/login'} replace />
 }
 
 function KioskLayout() {

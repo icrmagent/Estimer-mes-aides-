@@ -159,7 +159,10 @@ export default function KioskShell({ children }) {
   }, [password, attempts, lockedUntil, closeModal, navigate])
 
   // ── Derived: is currently locked ──────────────────────────────────────────
-  const isLocked = lockedUntil !== null && Date.now() < lockedUntil
+  // Le ticker ci-dessus remet `lockedUntil` à null dès la fin du verrouillage :
+  // sa seule présence suffit à savoir si l'on est verrouillé, et le rendu reste
+  // pur (pas de lecture d'horloge pendant le render).
+  const isLocked = lockedUntil !== null
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (

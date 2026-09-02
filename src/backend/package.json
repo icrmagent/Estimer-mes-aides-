@@ -1,6 +1,6 @@
 {
   "name": "estimer-mes-aides-backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Backend API pour l'application Estimer Mes Aides",
   "type": "module",
   "main": "server.js",
@@ -11,7 +11,9 @@
     "postinstall": "prisma generate",
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "start:prod": "prisma migrate deploy && node server.js",
+    "start:prod": "npm run prisma:deploy:strict && npm run db:check:runtime && node server.js",
+    "db:check:runtime": "node -e \"import('dotenv/config').then(() => import('./src/lib/validateEnv.js')).then((m) => m.assertDatabaseUrlReachable()).catch((e) => { console.error('[db:check:runtime] FATAL -', (e && e.message) || e); process.exit(1) })\"",
+    "prisma:deploy:strict": "prisma migrate deploy || node -e \"console.error('\\n============================================================\\n[start:prod] FATAL - prisma migrate deploy a echoue.\\nLe schema de base de donnees est INCOMPLET ou INACCESSIBLE.\\nLe serveur NE DEMARRE PAS : servir du trafic sur un schema non\\nmigre provoquerait des erreurs 500 et des ecritures corrompues.\\nA verifier : DATABASE_URL, DIRECT_URL, accessibilite du serveur\\nPostgreSQL, puis relire le message Prisma affiche ci-dessus.\\n============================================================\\n'); process.exit(1)\"",
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --forceExit",
     "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
     "prisma:generate": "prisma generate",

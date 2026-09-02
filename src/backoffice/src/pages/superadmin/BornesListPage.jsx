@@ -90,8 +90,14 @@ export default function BornesListPage() {
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, borne: null })
   const [credModal, setCredModal] = useState({ isOpen: false, borne: null, action: null })
 
+  /** Rechargement déclenché par une interaction : arme le spinner. */
   function doFetch(p, f) {
     setLoading(true)
+    runFetch(p, f)
+  }
+
+  // Charge la liste sans armer le spinner : appelable depuis un effet.
+  function runFetch(p, f) {
     const params = { page: p, limit }
     if (f.search) params.search = f.search
     if (f.statut) params.statut = f.statut
@@ -105,7 +111,8 @@ export default function BornesListPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { doFetch(1, filtersRef.current) }, [])
+  // Chargement initial : `loading` est déjà à true à l'initialisation de l'état.
+  useEffect(() => { runFetch(1, filtersRef.current) }, [])
 
   function goToPage(newPage) {
     setPage(newPage)
@@ -152,7 +159,7 @@ export default function BornesListPage() {
     setCredModal({ isOpen: true, borne, action: borne.estConnectee ? 'logout' : 'login' })
   }
 
-  function handleRemoteActionSuccess(result) {
+  function handleRemoteActionSuccess() {
     const { borne, action } = credModal
     const newVal = action === 'login'
     setBornes(prev => prev.map(b => b.id === borne.id ? { ...b, estConnectee: newVal } : b))

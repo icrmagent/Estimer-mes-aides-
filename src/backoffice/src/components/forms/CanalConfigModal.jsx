@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import api from '../../services/api.js'
 
 /**
@@ -13,15 +13,22 @@ import api from '../../services/api.js'
  * - initialCanal?: object — pour modification ; les secrets ne sont JAMAIS pré-remplis
  *   (le backend ne renvoie plus apiKey/token bruts depuis L5).
  */
-export default function CanalConfigModal({ isOpen, onClose, borneId, bornes = [], onSave, initialCanal = null }) {
+export default function CanalConfigModal({ isOpen, ...props }) {
+  if (!isOpen) return null
+  // Le formulaire est monté à l'ouverture et remonté quand on change de canal :
+  // son état initial vient donc des props, sans effet de resynchronisation.
+  return <CanalConfigForm key={props.initialCanal?.id ?? 'new'} {...props} />
+}
+
+function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal = null }) {
   const isEdit = Boolean(initialCanal?.id)
 
   const [selectedBorneId, setSelectedBorneId] = useState(borneId || '')
-  const [label, setLabel]     = useState('')
-  const [apiUrl, setApiUrl]   = useState('')
-  const [apiKey, setApiKey]   = useState('')
-  const [token, setToken]     = useState('')
-  const [actif, setActif]     = useState(true)
+  const [label, setLabel]     = useState(initialCanal?.label || '')
+  const [apiUrl, setApiUrl]   = useState(initialCanal?.apiUrl || '')
+  const [apiKey, setApiKey]   = useState('') // jamais pré-rempli en mode édition (secret)
+  const [token, setToken]     = useState('') // jamais pré-rempli en mode édition (secret)
+  const [actif, setActif]     = useState(initialCanal ? initialCanal.actif !== false : true)
   const [affecterBorne, setAffecterBorne] = useState(true)
   const [showApiKey, setShowApiKey] = useState(false)
   const [showToken, setShowToken] = useState(false)
@@ -29,30 +36,6 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, bornes = []
   const [loading, setLoading] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
-
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedBorneId(borneId || '')
-      setAffecterBorne(true)
-      setError(null)
-      setTestResult(null)
-      setShowApiKey(false)
-      setShowToken(false)
-      if (initialCanal) {
-        setLabel(initialCanal.label || '')
-        setApiUrl(initialCanal.apiUrl || '')
-        setApiKey('') // jamais pré-rempli en mode édition (secret)
-        setToken('')  // jamais pré-rempli en mode édition (secret)
-        setActif(initialCanal.actif !== false)
-      } else {
-        setLabel('')
-        setApiUrl('')
-        setApiKey('')
-        setToken('')
-        setActif(true)
-      }
-    }
-  }, [isOpen, initialCanal, borneId])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -133,8 +116,6 @@ export default function CanalConfigModal({ isOpen, onClose, borneId, bornes = []
       setTesting(false)
     }
   }
-
-  if (!isOpen) return null
 
   const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }

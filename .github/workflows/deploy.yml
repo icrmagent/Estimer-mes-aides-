@@ -1,7 +1,10 @@
 name: Deploy Production
 
-# Railway et Vercel sont liés au repo GitHub : push sur main → auto-deploy
-# par leurs intégrations Git natives (pas besoin de RAILWAY_TOKEN / VERCEL_TOKEN).
+# Render (backend) et Vercel (frontend / back-office) sont liés au repo GitHub :
+# push sur main → auto-deploy par leurs intégrations Git natives (aucun token de
+# déploiement n'est nécessaire, ce workflow ne déploie donc rien lui-même).
+# Backend : service Render « estimer-mes-aides-api », plan free, région frankfurt,
+# rootDir src/backend, healthCheckPath /health, autoDeploy sur main.
 # Ce workflow s'occupe de : tests + migration DB + healthcheck + build APK + tag.
 
 on:
@@ -18,7 +21,7 @@ on:
         type: boolean
         default: false
       skip_healthcheck:
-        description: "Skip healthcheck (n'attend pas Railway)"
+        description: "Skip healthcheck (n'attend pas le redéploiement Render)"
         type: boolean
         default: false
       skip_webview:
@@ -44,7 +47,7 @@ jobs:
       sha: ${{ steps.meta.outputs.sha }}
       short_sha: ${{ steps.meta.outputs.short_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -53,7 +56,7 @@ jobs:
           echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
           echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -64,10 +67,10 @@ jobs:
           done
 
   # ─────────────────────────────────────────────────────────────
-  # 2. TESTS — Backend Jest (491 tests)
+  # 2. TESTS — Backend Jest (510 tests)
   # ─────────────────────────────────────────────────────────────
   tests:
-    name: Tests backend
+    name: Tests backend — 510 tests Jest
     needs: sync
     runs-on: ubuntu-latest
     if: ${{ inputs.skip_tests != true }}
@@ -75,8 +78,8 @@ jobs:
       run:
         working-directory: src/backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -103,8 +106,8 @@ jobs:
       run:
         working-directory: src/backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -118,36 +121,66 @@ jobs:
           DIRECT_URL: ${{ secrets.DIRECT_URL }}
 
   # ─────────────────────────────────────────────────────────────
-  # 4. HEALTHCHECK — Attend que Railway ait redéployé le backend
+  # 4. HEALTHCHECK — Attend que Render ait redéployé le backend
   # ─────────────────────────────────────────────────────────────
   healthcheck:
-    name: Healthcheck backend (Railway auto-deploy)
+    name: Healthcheck backend (Render auto-deploy)
     needs: [tests, migrate]
     if: ${{ always()
         && (needs.tests.result == 'success' || (needs.tests.result == 'skipped' && inputs.skip_tests == true))
         && (needs.migrate.result == 'success' || (needs.migrate.result == 'skipped' && inputs.skip_migration == true))
         && inputs.skip_healthcheck != true }}
     runs-on: ubuntu-latest
+    # 15 min d'attente max (MAX_WAIT) + la dernière requête (75 s) + l'overhead
+    # du runner : 18 min laissent la boucle rendre son propre message d'erreur
+    # plutôt que d'être tuée par le timeout du job.
+    timeout-minutes: 18
     steps:
-      - name: Wait for Railway redeploy + /health
+      - name: Wait for Render redeploy + /health
         env:
           BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
+          # Un secret absent ne doit JAMAIS produire un healthcheck vert :
+          # le déploiement serait tagué "sain" sans qu'aucune requête n'ait été faite.
           if [ -z "$BACKEND_URL" ]; then
-            echo "BACKEND_URL non configuré — skip healthcheck"
-            exit 0
+            echo "::error title=Secret BACKEND_URL manquant::Le healthcheck n'a rien pu vérifier."
+            echo "Renseignez le secret BACKEND_URL (Settings > Secrets and variables > Actions),"
+            echo "ou relancez le workflow avec skip_healthcheck=true pour assumer explicitement l'absence de vérification."
+            exit 1
           fi
-          # Railway peut prendre 1–3 min pour redéployer après push
-          for i in $(seq 1 20); do
-            if curl -fsS --max-time 10 "$BACKEND_URL/health"; then
+
+          # Budget d'attente — plan Render free :
+          #   build + redeploy après push .......... 2 à 5 min
+          #   réveil à froid (service endormi
+          #   après 15 min d'inactivité) ........... ~50 s SUR LA REQUÊTE ELLE-MÊME
+          # D'où --max-time 75 : la requête de réveil doit pouvoir aboutir. Avec
+          # l'ancien --max-time 10, curl coupait systématiquement le réveil et le
+          # job échouait sur un backend pourtant sain.
+          # --connect-timeout 10 garde les tentatives « service pas encore là »
+          # rapides (connexion refusée) pour ne pas gaspiller le budget.
+          # MAX_WAIT 900 s = 15 min : couvre redeploy (5 min) + réveil (1 min)
+          # avec une marge x2, soit ~40 tentatives en échec rapide et au moins
+          # 10 tentatives dans le pire cas (chaque requête bloquée 75 s).
+          # DELAY 20 s : au-delà d'une dizaine de tentatives, un intervalle plus
+          # court n'accélère rien (c'est Render qui build) et ne fait que
+          # multiplier les requêtes sur une instance en cours de réveil.
+          # -f : tout code HTTP non-2xx (dont le 503 « base KO » de /health)
+          # fait échouer curl, donc la tentative — jamais un faux vert.
+          MAX_WAIT=900
+          DELAY=20
+          started=$SECONDS
+          attempt=0
+          while [ $(( SECONDS - started )) -lt "$MAX_WAIT" ]; do
+            attempt=$(( attempt + 1 ))
+            if curl -fsS --connect-timeout 10 --max-time 75 "$BACKEND_URL/health"; then
               echo ""
-              echo "✓ Backend healthy after $((i * 15))s"
+              echo "✓ Backend healthy après $(( SECONDS - started ))s ($attempt tentative(s))"
               exit 0
             fi
-            echo "Try $i KO — wait 15s..."
-            sleep 15
+            echo "Tentative $attempt KO à $(( SECONDS - started ))s — nouvelle tentative dans ${DELAY}s..."
+            sleep "$DELAY"
           done
-          echo "✗ Backend ne répond pas après 5 min"
+          echo "::error title=Backend injoignable::/health n'a pas répondu 2xx en ${MAX_WAIT}s ($attempt tentatives)"
           exit 1
 
   # ─────────────────────────────────────────────────────────────
@@ -162,25 +195,26 @@ jobs:
         && inputs.skip_webview != true }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Récupérer l'historique complet pour `git rev-list --count HEAD` → versionCode monotone
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: src/frontend/package-lock.json
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      # Le repo n'a que gradlew.bat — installer gradle directement
+      # Le repo n'a que gradlew.bat — installer gradle directement.
+      # Cache Gradle actif (comportement par défaut de setup-gradle@v6).
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.6'
 
@@ -242,13 +276,15 @@ jobs:
           fi
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: webview-apk-${{ needs.sync.outputs.short_sha }}
           path: |
             android-webview/app/build/outputs/apk/release/*.apk
             android-webview/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: warn
+          # `error` et pas `warn` : un build sans APK produit doit faire échouer
+          # le job, sinon `finalize` taguerait un déploiement sans livrable.
+          if-no-files-found: error
           retention-days: 30
 
   # ─────────────────────────────────────────────────────────────
@@ -261,12 +297,14 @@ jobs:
         && needs.sync.result == 'success'
         && (needs.tests.result == 'success' || needs.tests.result == 'skipped')
         && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped')
-        && (needs.healthcheck.result == 'success' || needs.healthcheck.result == 'skipped') }}
+        && (needs.healthcheck.result == 'success' || needs.healthcheck.result == 'skipped')
+        && (needs.build-webview.result == 'success'
+            || (needs.build-webview.result == 'skipped' && inputs.skip_webview == true)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -290,11 +328,11 @@ jobs:
           |-------|--------|
           | Tests backend | ${{ needs.tests.result }} |
           | Migration DB | ${{ needs.migrate.result }} |
-          | Healthcheck Railway | ${{ needs.healthcheck.result }} |
+          | Healthcheck Render | ${{ needs.healthcheck.result }} |
           | WebView APK | ${{ needs.build-webview.result }} |
 
           - **Commit** : \`${{ needs.sync.outputs.short_sha }}\`
           - **Tag** : \`$TAG\`
-          - **Backend** : $BACKEND_URL
+          - **Backend (Render)** : $BACKEND_URL — auto-déployé via intégration Git
           - **Vercel** : auto-déployé via intégration Git (frontend / backoffice)
           EOF

@@ -59,7 +59,7 @@ async function getValidToken(canal) {
   }
 }
 
-// Mapping CRM field ID → nom de champ I-CRM API
+// Mapping CRM field ID → nom de champ I-CRM API (endpoint POST /api/customContacts)
 const FIELD_ID_MAP = {
   2087: 'last_name',
   2088: 'first_name',
@@ -69,6 +69,46 @@ const FIELD_ID_MAP = {
   2015: 'phone_number',
   2016: 'email_adress',
   2217: 'adresse',
+}
+
+/**
+ * Libellés métier des field IDs du formulaire V1 — source : docs/CONTEXT.md.
+ * Sert UNIQUEMENT à rendre les logs lisibles par un opérateur.
+ *
+ * ⚠️ Les 15 field IDs ci-dessous n'ont AUCUNE correspondance connue dans l'API
+ * I-CRM `customContacts` : son schéma de destination n'est documenté nulle part
+ * dans le dépôt (ni docs/, ni .kiro/specs/, ni l'historique git du module V1
+ * supprimé, qui ciblait un autre endpoint `POST /api/projects` au format
+ * `field_values: [{ field_id, value }]`).
+ * Tant que la correspondance n'est pas fournie, ces champs ne sont PAS transmis
+ * — mais chaque envoi les journalise en warn (voir mapReponsesToICRM) au lieu
+ * de les perdre en silence. Ne PAS inventer de noms de champs cibles ici.
+ */
+const LIBELLES_CHAMPS_CRM = {
+  2015: 'Num. de Téléphone',
+  2016: 'Adresse Email',
+  2087: 'Nom',
+  2088: 'Prénom',
+  2089: 'Code postal',
+  2090: 'Ville',
+  2217: 'Adresse',
+  2262: 'Civilité',
+  // Non mappés (15) :
+  2292: 'Votre projet concerne (type de logement)',
+  2293: 'Dans ce logement vous êtes (statut propriétaire)',
+  2294: 'Revenu total du foyer fiscal',
+  2296: 'Quel type de combles avez-vous',
+  2297: 'Combles habitables : que souhaitez-vous isoler',
+  2298: 'Combles non habitables : type de plancher',
+  2299: "Type d'isolation souhaité",
+  2300: "Accès aux combles : trappe d'accès",
+  2301: 'Type de chauffage principal',
+  2302: 'Autre type de chauffage principal',
+  2303: 'Travaux souhaités dans le logement',
+  2304: 'Disponibilité pour être contacté',
+  2305: 'Commentaires ou informations complémentaires',
+  2306: 'Date de construction du logement',
+  2307: 'Surface habitable du logement',
 }
 
 // Transformation de valeur par champ I-CRM (valeurs radio/select encodées → texte brut)
@@ -99,40 +139,84 @@ const LABEL_MAP = {
   'civilite': 'civility',
 }
 
-function mapReponsesToICRM(reponses) {
-  const payload = {
+function buildPayloadBase() {
+  return {
     dtypes: 1,
     user_id: parseInt(process.env.CRM_USER_ID || '1', 10),
     type_contact_id: 1,
     user_type: 'societe',
   }
+}
+
+const NB_CHAMPS_TECHNIQUES = Object.keys(buildPayloadBase()).length
+
+function normaliseCrmFieldIds(crmFieldIds) {
+  if (crmFieldIds === null || crmFieldIds === undefined) return []
+  return (Array.isArray(crmFieldIds) ? crmFieldIds : [crmFieldIds])
+    .filter(id => id !== null && id !== undefined && id !== '')
+}
+
+function extraireLibelleFr(libelleQuestion) {
+  if (typeof libelleQuestion === 'object' && libelleQuestion !== null) {
+    return (libelleQuestion.fr || libelleQuestion.FR || Object.values(libelleQuestion)[0] || '').toString()
+  }
+  return (libelleQuestion ?? '').toString()
+}
+
+/**
+ * Construit le payload I-CRM à partir des réponses d'un enregistrement.
+ *
+ * Tout champ dont ni le field ID (FIELD_ID_MAP) ni le libellé (LABEL_MAP) n'a de
+ * correspondance connue est ABANDONNÉ côté I-CRM (la donnée reste en base et dans
+ * l'export XLSX). Cette perte est journalisée en warn à chaque envoi, avec le
+ * contexte fourni (job, enregistrement, canal), pour qu'un opérateur la constate.
+ *
+ * @param {Array} reponses  Réponses avec `question.crmFieldIds` et `question.libelleQuestion`
+ * @param {Object} contexte Champs de contexte ajoutés au log (jobId, enregistrementId, canalId…)
+ * @returns {{ payload: Object, champsNonTransmis: Array }}
+ */
+function mapReponsesToICRM(reponses, contexte = {}) {
+  const payload = buildPayloadBase()
+  const champsNonTransmis = []
 
   for (const r of reponses) {
-    let icrmField = null
+    const ids = normaliseCrmFieldIds(r.question?.crmFieldIds)
+    const libelle = extraireLibelleFr(r.question?.libelleQuestion)
 
-    const crmFieldIds = r.question.crmFieldIds
-    if (crmFieldIds !== null && crmFieldIds !== undefined) {
-      const ids = Array.isArray(crmFieldIds) ? crmFieldIds : [crmFieldIds]
-      for (const id of ids) {
-        if (FIELD_ID_MAP[id]) {
-          icrmField = FIELD_ID_MAP[id]
-          break
-        }
+    let icrmField = null
+    for (const id of ids) {
+      if (FIELD_ID_MAP[id]) {
+        icrmField = FIELD_ID_MAP[id]
+        break
       }
     }
 
     if (!icrmField) {
-      const labelJson = r.question.libelleQuestion
-      const raw = typeof labelJson === 'object' && labelJson !== null
-        ? (labelJson.fr || labelJson.FR || Object.values(labelJson)[0] || '')
-        : (labelJson || '')
-      icrmField = LABEL_MAP[raw.toString().toLowerCase().trim()]
+      icrmField = LABEL_MAP[libelle.toLowerCase().trim()] || null
     }
 
     if (icrmField) {
       const transform = VALUE_TRANSFORMS[icrmField]
       payload[icrmField] = transform ? transform(r.valeur) : r.valeur
+    } else {
+      champsNonTransmis.push({
+        crmFieldIds: ids,
+        libelle: libelle
+          || ids.map(id => LIBELLES_CHAMPS_CRM[id]).filter(Boolean).join(' / ')
+          || null,
+      })
     }
+  }
+
+  if (champsNonTransmis.length > 0) {
+    // Seuls les field IDs et libellés sont journalisés — jamais les valeurs saisies (RGPD).
+    logger.warn({
+      message: '[QUEUE] Champs de la soumission NON transmis à I-CRM (absents de FIELD_ID_MAP et de LABEL_MAP)',
+      ...contexte,
+      nbChampsNonTransmis: champsNonTransmis.length,
+      nbChampsTransmis: Object.keys(payload).length - NB_CHAMPS_TECHNIQUES,
+      champsNonTransmis,
+    })
   }
 
   // Vérifier que les champs obligatoires I-CRM sont présents
@@ -140,7 +224,7 @@ function mapReponsesToICRM(reponses) {
     throw new Error('Données insuffisantes : Nom et Prénom requis pour créer un contact I-CRM')
   }
 
-  return payload
+  return { payload, champsNonTransmis }
 }
 
 let workerInterval = null
@@ -234,7 +318,14 @@ async function processJob(job) {
       throw new Error('Canal I-CRM non configuré pour cette borne — configurer via le back-office')
     }
 
-    const icrmPayload = mapReponsesToICRM(enregistrement.reponses)
+    const { payload: icrmPayload } = mapReponsesToICRM(enregistrement.reponses, {
+      jobId: job.id,
+      enregistrementId: job.enregistrementId,
+      borneId: enregistrement.borne?.id ?? null,
+      canalId: canal?.id ?? null,
+      canalLabel: canal?.label ?? null,
+      canalSource: canal ? 'borne' : 'env',
+    })
 
     // Task 30.1 — 30-second timeout via AbortController
     const controller = new AbortController()
@@ -443,4 +534,11 @@ export function stopQueueWorker() {
 }
 
 // Exporter pour les tests
-export { processJob, processPendingJobs, MAX_TENTATIVES, computeNextRetry }
+export {
+  processJob,
+  processPendingJobs,
+  MAX_TENTATIVES,
+  computeNextRetry,
+  mapReponsesToICRM,
+  FIELD_ID_MAP,
+}

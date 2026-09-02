@@ -95,9 +95,25 @@ function FormulaireRowActions({ f, handleChangeStatut, handleDuplicate, handleDe
   )
 }
 
+/**
+ * Récupère les formulaires visibles pour un filtre de statut donné.
+ * Ne touche à aucun état React : renvoie simplement la liste à afficher.
+ */
+async function loadFormulaires(currentStatut) {
+  const res = await api.get('/api/formulaires')
+  const data = res.data.formulaires || res.data.data || res.data || []
+
+  if (currentStatut === 'archive') {
+    const resDeleted = await api.get('/api/formulaires/deleted')
+    const deletedData = resDeleted.data.formulaires || resDeleted.data.data || resDeleted.data || []
+    return [...data.filter(f => f.statut === 'archive'), ...deletedData]
+  }
+  if (!currentStatut) return data.filter(f => f.statut !== 'archive')
+  return data.filter(f => f.statut === currentStatut)
+}
+
 export default function FormulairesListPage() {
   const [formulaires, setFormulaires] = useState([])
-  const [allFormulaires, setAllFormulaires] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
@@ -107,33 +123,28 @@ export default function FormulairesListPage() {
   const [statutFilter, setStatutFilter] = useState('')
   const [deleteModal, setDeleteModal] = useState({ isOpen: false, formulaire: null })
 
-  const fetchFormulaires = async (currentStatut) => {
-    setLoading(true)
-    try {
-      const res = await api.get('/api/formulaires')
-      const data = res.data.formulaires || res.data.data || res.data || []
-      setAllFormulaires(data)
-      if (currentStatut === 'archive') {
-        const resDeleted = await api.get('/api/formulaires/deleted')
-        const deletedData = resDeleted.data.formulaires || resDeleted.data.data || resDeleted.data || []
-        setFormulaires([...data.filter(f => f.statut === 'archive'), ...deletedData])
-      } else if (!currentStatut) {
-        setFormulaires(data.filter(f => f.statut !== 'archive'))
-      } else {
-        setFormulaires(data.filter(f => f.statut === currentStatut))
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || 'Erreur de chargement')
-    } finally {
-      setLoading(false)
-    }
+  // Publie le résultat de loadFormulaires : les setState vivent dans des
+  // callbacks de promesse, donc appelable depuis un effet sans cascade de
+  // rendus. N'arme pas le spinner (voir reloadFormulaires).
+  const fetchFormulaires = (currentStatut) => {
+    loadFormulaires(currentStatut)
+      .then(setFormulaires)
+      .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
+      .finally(() => setLoading(false))
   }
 
+  // Chargement initial : `loading` est déjà à true à l'initialisation de l'état.
   useEffect(() => { fetchFormulaires('') }, [])
+
+  /** Rechargement déclenché par une interaction : arme le spinner. */
+  function reloadFormulaires(statut) {
+    setLoading(true)
+    fetchFormulaires(statut)
+  }
 
   function handleStatutFilter(statut) {
     setStatutFilter(statut)
-    fetchFormulaires(statut)
+    reloadFormulaires(statut)
   }
 
   async function handleDuplicate(formulaire) {
@@ -141,7 +152,6 @@ export default function FormulairesListPage() {
     try {
       const res = await api.post(`/api/formulaires/${formulaire.id}/dupliquer`)
       const newForm = res.data.formulaire || res.data.data || res.data
-      setAllFormulaires(prev => [newForm, ...prev])
       setFormulaires(prev => [newForm, ...prev])
       setToast({ message: 'Formulaire dupliqué' })
     } catch (err) {
@@ -170,7 +180,6 @@ export default function FormulairesListPage() {
     try {
       await api.patch(`/api/formulaires/${formulaire.id}/statut`, { statut: newStatut })
       const updater = prev => prev.map(f => f.id === formulaire.id ? { ...f, statut: newStatut } : f)
-      setAllFormulaires(updater)
       setFormulaires(updater)
       setToast({ message: `Formulaire ${newStatut === 'publie' ? 'publié' : 'archivé'}` })
     } catch (err) {
@@ -184,7 +193,7 @@ export default function FormulairesListPage() {
     if (!formulaire) return
     try {
       await api.delete(`/api/formulaires/${formulaire.id}`)
-      fetchFormulaires(statutFilter)
+      reloadFormulaires(statutFilter)
       setToast({ message: 'Formulaire supprimé' })
     } catch (err) {
       const e = err.response?.data?.error
@@ -195,7 +204,7 @@ export default function FormulairesListPage() {
   async function handleRestore(formulaire) {
     try {
       await api.post(`/api/formulaires/${formulaire.id}/restore`)
-      fetchFormulaires(statutFilter)
+      reloadFormulaires(statutFilter)
       setToast({ message: 'Formulaire restauré' })
     } catch (err) {
       setError(err.response?.data?.error || 'Erreur lors de la restauration')

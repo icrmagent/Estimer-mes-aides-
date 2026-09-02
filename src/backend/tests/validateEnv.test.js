@@ -12,7 +12,7 @@
 import { jest } from '@jest/globals'
 
 // We import the real module — no mocking needed for the module itself
-const { validateEnv } = await import('../src/lib/validateEnv.js')
+const { validateEnv, assertDatabaseUrlReachable } = await import('../src/lib/validateEnv.js')
 
 /** Minimal valid env that satisfies all required vars */
 const VALID_ENV = {
@@ -80,7 +80,7 @@ describe('validateEnv', () => {
   test('exits with code 1 and lists ALL missing required variables at once', () => {
     const env = { ...VALID_ENV }
     delete env.DATABASE_URL
-    delete env.PUSHER_SECRET
+    delete env.API_KEY_CRM
     delete env.SUPERADMIN_EMAIL
 
     validateEnv(env)
@@ -88,7 +88,7 @@ describe('validateEnv', () => {
     expect(exitSpy).toHaveBeenCalledWith(1)
     const errorMessage = errorSpy.mock.calls[0][0]
     expect(errorMessage).toContain('DATABASE_URL')
-    expect(errorMessage).toContain('PUSHER_SECRET')
+    expect(errorMessage).toContain('API_KEY_CRM')
     expect(errorMessage).toContain('SUPERADMIN_EMAIL')
   })
 
@@ -99,9 +99,35 @@ describe('validateEnv', () => {
   })
 
   test('treats whitespace-only required variable as missing', () => {
-    validateEnv({ ...VALID_ENV, PUSHER_SECRET: '   ' })
+    validateEnv({ ...VALID_ENV, API_KEY_MOBILE: '   ' })
     expect(exitSpy).toHaveBeenCalledWith(1)
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('PUSHER_SECRET'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('API_KEY_MOBILE'))
+  })
+
+  // ─── Pusher — optional by design (F5) ────────────────────────────────────────
+
+  test('does NOT exit when every Pusher variable is missing — only warns', () => {
+    const env = { ...VALID_ENV }
+    for (const name of ['PUSHER_APP_ID', 'PUSHER_KEY', 'PUSHER_SECRET', 'PUSHER_CLUSTER']) {
+      delete env[name]
+    }
+
+    validateEnv(env)
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect(errorSpy).not.toHaveBeenCalled()
+    const warnMessages = warnSpy.mock.calls.map((c) => c[0])
+    expect(
+      warnMessages.some((m) => m.includes('notifications temps réel désactivées'))
+    ).toBe(true)
+  })
+
+  test('does NOT exit when a single Pusher variable is blank — only warns', () => {
+    validateEnv({ ...VALID_ENV, PUSHER_SECRET: '   ' })
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('PUSHER_SECRET'))
   })
 
   // ─── Optional variables ──────────────────────────────────────────────────────
@@ -173,4 +199,47 @@ describe('validateEnv', () => {
     validateEnv({ ...VALID_ENV, NODE_ENV: 'staging', JWT_SECRET: 'short' })
     expect(exitSpy).not.toHaveBeenCalled()
   })
+})
+
+// ─── assertDatabaseUrlReachable (F1) ─────────────────────────────────────────
+//
+// `prisma migrate deploy` ne valide que DIRECT_URL (directUrl du schema.prisma).
+// DATABASE_URL — l'URL du pooler utilisée par le PrismaClient d'exécution — doit
+// être sondée séparément, sinon le serveur démarre sur une base inutilisable.
+
+describe('assertDatabaseUrlReachable', () => {
+  let errorSpy
+
+  beforeEach(() => {
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+    jest.spyOn(console, 'log').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  test('fails loudly when DATABASE_URL is missing', async () => {
+    const exit = jest.fn()
+
+    const ok = await assertDatabaseUrlReachable({ env: {}, exit })
+
+    expect(ok).toBe(false)
+    expect(exit).toHaveBeenCalledWith(1)
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('DATABASE_URL'))
+  })
+
+  test('fails loudly when DATABASE_URL points to a dead server', async () => {
+    const exit = jest.fn()
+
+    const ok = await assertDatabaseUrlReachable({
+      env: { DATABASE_URL: 'postgresql://nobody:nobody@127.0.0.1:1/nodb?connect_timeout=1' },
+      timeoutMs: 5000,
+      exit,
+    })
+
+    expect(ok).toBe(false)
+    expect(exit).toHaveBeenCalledWith(1)
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('INJOIGNABLE'))
+  }, 20000)
 })

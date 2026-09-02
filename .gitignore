@@ -55,3 +55,10 @@ Thumbs.db
 !android-webview/.idea/
 android-webview/.idea/*
 !android-webview/.idea/runConfigurations/
+
+# Rapports de couverture de tests
+coverage/
+**/coverage/
+
+# Secrets locaux fournis a la main (tokens Supabase/Railway/Vercel/Pusher)
+.secrets.local

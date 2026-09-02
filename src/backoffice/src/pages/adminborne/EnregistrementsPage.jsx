@@ -31,9 +31,14 @@ function getContactName(enregistrement) {
   return '—'
 }
 
+/** Identifiant stable de la requête courante (page + pagination + filtres). */
+function queryKey(page, limit, filters) {
+  return [page, limit, filters.borneId, filters.dateDebut, filters.dateFin].join('|')
+}
+
 export default function ABEnregistrementsPage() {
   const [enregistrements, setEnregistrements] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loadedQuery, setLoadedQuery] = useState(null)
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
@@ -49,7 +54,7 @@ export default function ABEnregistrementsPage() {
   })
 
   const fetchData = useCallback((p = 1, f = filters) => {
-    setLoading(true)
+    const requested = queryKey(p, limit, f)
     const params = { page: p, limit }
     if (f.borneId) params.borneId = f.borneId
     if (f.dateDebut) params.dateDebut = new Date(`${f.dateDebut}T00:00:00Z`).toISOString()
@@ -61,10 +66,15 @@ export default function ABEnregistrementsPage() {
         setTotal(res.data.meta?.total || res.data.total || 0)
       })
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
-      .finally(() => setLoading(false))
+      .finally(() => setLoadedQuery(requested))
   }, [filters, limit])
 
   useEffect(() => { fetchData(page, filters) }, [page, limit, filters, fetchData])
+
+  // `loading` est dérivé : vrai tant que les données affichées ne correspondent
+  // pas à la requête courante. Aucun setState synchrone dans l'effet, et aucun
+  // spinner bloqué si une requête échoue ou se croise avec une autre.
+  const loading = loadedQuery !== queryKey(page, limit, filters)
 
   useEffect(() => {
     api.get('/api/bornes', { params: { limit: 100 } })

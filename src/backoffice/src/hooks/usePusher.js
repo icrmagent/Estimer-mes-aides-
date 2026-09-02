@@ -4,7 +4,7 @@
  * Initializes the pusherService on mount and cleans up on unmount.
  * Returns connection state and subscribe/unsubscribe helpers.
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import {
   subscribe as pusherSubscribe,
   unsubscribe as pusherUnsubscribe,
@@ -15,35 +15,48 @@ import {
 /**
  * @returns {{ connected: boolean, subscribe: Function, unsubscribe: Function }}
  */
-export function usePusher() {
-  const [connected, setConnected] = useState(() => getConnectionState() === 'connected')
+/**
+ * Abonnement au client Pusher, au sens useSyncExternalStore : ouvrir la
+ * connexion (via le canal admin-notifications), relayer les changements
+ * d'état, puis fermer la connexion au démontage.
+ * @param {() => void} onConnectionChange
+ * @returns {() => void} désabonnement
+ */
+function subscribeToConnection(onConnectionChange) {
+  // Subscribe to admin-notifications to initialize the Pusher client
+  const channel = pusherSubscribe('admin-notifications')
 
-  useEffect(() => {
-    // Subscribe to admin-notifications to initialize the Pusher client
-    const channel = pusherSubscribe('admin-notifications')
+  try {
+    channel.pusher.connection.bind('state_change', onConnectionChange)
+  } catch (err) {
+    // pusher-js may not expose this in all environments (e.g. mocks/tests) —
+    // l'état reste alors celui renvoyé par getConnectionState().
+    console.debug('[usePusher] state_change indisponible :', err?.message ?? err)
+  }
 
-    // Track connection state changes
-    const handleStateChange = (states) => {
-      setConnected(states.current === 'connected')
-    }
-
+  return () => {
     try {
-      channel.pusher.connection.bind('state_change', handleStateChange)
-      // Set initial state
-      setConnected(channel.pusher.connection.state === 'connected')
+      channel.pusher.connection.unbind('state_change', onConnectionChange)
     } catch {
-      // pusher-js may not expose this in all environments (e.g. mocks/tests)
+      // ignore
     }
+    disconnect()
+  }
+}
 
-    return () => {
-      try {
-        channel.pusher.connection.unbind('state_change', handleStateChange)
-      } catch {
-        // ignore
-      }
-      disconnect()
-    }
-  }, [])
+/** Snapshot booléen (primitif : stable entre deux rendus). */
+function getConnectedSnapshot() {
+  return getConnectionState() === 'connected'
+}
+
+export function usePusher() {
+  // Le state Pusher est un store externe : useSyncExternalStore lit le snapshot
+  // au rendu ET juste après l'abonnement, sans setState dans un effet.
+  const connected = useSyncExternalStore(
+    subscribeToConnection,
+    getConnectedSnapshot,
+    getConnectedSnapshot
+  )
 
   const subscribe = useCallback((channelName) => {
     return pusherSubscribe(channelName)

@@ -1,6 +1,6 @@
 # Backend — Estimer Mes Aides
 
-API REST Node.js/Express déployée sur Railway.
+API REST Node.js/Express déployée sur Render — https://estimer-mes-aides-api.onrender.com
 
 ## Démarrage local
 
@@ -23,9 +23,10 @@ npm run dev            # port 3000
 | `npm run prisma:migrate` | Créer une nouvelle migration |
 | `npm run prisma:deploy` | Appliquer les migrations en production |
 
-## Variables d'environnement Railway
+## Variables d'environnement Render
 
-Toutes les variables ci-dessous doivent être configurées dans le tableau de bord Railway (**Settings → Variables**).
+Toutes les variables ci-dessous doivent être configurées dans le tableau de bord Render (**Service → Environment**).
+Elles sont déclarées dans [`render.yaml`](./render.yaml) avec `sync: false` : aucune valeur de secret n'est versionnée dans le dépôt.
 
 ### Base de données
 
@@ -56,7 +57,7 @@ DIRECT_URL=postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
 
 Exemple :
 ```
-CORS_ALLOWED_ORIGINS=https://estimer-mes-aides.vercel.app,https://backoffice.estimer-mes-aides.vercel.app
+CORS_ALLOWED_ORIGINS=https://estimer-mes-aides.vercel.app,https://estimer-mes-aides-wjp3.vercel.app
 ```
 
 > En développement (`NODE_ENV=development`), toutes les origines sont autorisées (`*`).  
@@ -105,12 +106,13 @@ CORS_ALLOWED_ORIGINS=https://estimer-mes-aides.vercel.app,https://backoffice.est
 
 | Variable | Obligatoire | Description |
 |----------|-------------|-------------|
-| `PORT` | ⬜ | Port d'écoute (Railway l'injecte automatiquement) |
-| `NODE_ENV` | ✅ | Environnement (`production` en déploiement Railway) |
+| `PORT` | ⬜ | Port d'écoute (Render l'injecte automatiquement) |
+| `NODE_ENV` | ✅ | Environnement (`production` en déploiement Render) — porté par `render.yaml` |
+| `NODE_VERSION` | ✅ | Version Node (`20`) — portée par `render.yaml` |
 
 ## Health Check
 
-Railway vérifie l'état du service via :
+Render vérifie l'état du service via `healthCheckPath` :
 
 ```
 GET /health
@@ -128,11 +130,32 @@ Réponse attendue (HTTP 200) :
 
 Si la base de données est inaccessible, `status` passe à `"degraded"` et `db` à `"error"`.
 
-## Déploiement Railway
+## Déploiement Render
 
-La configuration de déploiement est dans [`railway.json`](./railway.json) :
+Le service est décrit par le blueprint [`render.yaml`](./render.yaml) :
 
-- **Builder** : Nixpacks
-- **Start command** : `npm run start:prod` (migrate + démarrage)
-- **Health check** : `GET /health` — timeout 30s
-- **Restart policy** : `ON_FAILURE` — max 3 tentatives
+| Paramètre | Valeur |
+|-----------|--------|
+| Service | `estimer-mes-aides-api` (type `web`, runtime `node`) |
+| URL | https://estimer-mes-aides-api.onrender.com |
+| Région | `frankfurt` |
+| Plan | `free` |
+| Branche | `main` — auto-deploy à chaque commit (`autoDeployTrigger: commit`) |
+| Root directory | `src/backend` |
+| Build command | `npm ci` (déclenche le `postinstall` → `prisma generate`) |
+| Start command | `npm run start:prod` (migrate deploy strict + `node server.js`) |
+| Health check | `GET /health` |
+
+### ⚠️ Mise en veille du plan free
+
+Le plan `free` de Render **met le service en veille après 15 minutes sans trafic**.
+La première requête suivante réveille l'instance : elle prend **environ 50 secondes**
+avant d'obtenir une réponse (cold start).
+
+Impact concret : **une borne tablette démarrée après une période creuse
+(matin, retour de week-end) attendra ce délai** avant que l'API ne réponde —
+chargement de la configuration, envoi d'une soumission, connexion au back-office.
+
+C'est un **choix assumé** (coût nul). Aucun correctif n'est appliqué ici : ni changement
+de plan, ni ping périodique. À prévoir côté client : écran d'attente explicite et
+timeouts réseau supérieurs à 60 s.

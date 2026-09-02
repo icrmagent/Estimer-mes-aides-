@@ -19,7 +19,7 @@
  *   useSyncStatus()         — React hook returning current status
  */
 
-import { useState, useEffect } from 'react'
+import { useSyncExternalStore } from 'react'
 import {
   getPendingSubmissions,
   removePendingSubmission,
@@ -204,6 +204,16 @@ export function getSyncStatus() {
 }
 
 /**
+ * Snapshot stable pour useSyncExternalStore.
+ * `_status` est remplacé (jamais muté) à chaque changement : sa référence sert
+ * donc d'identifiant de version, ce qu'exige useSyncExternalStore.
+ * @returns {{ pending: number, syncing: boolean, lastSyncedAt: Date|null }}
+ */
+function _getStatusSnapshot() {
+  return _status
+}
+
+/**
  * Registers a callback that is called whenever the sync status changes.
  * Returns an unsubscribe function.
  *
@@ -225,20 +235,10 @@ export function onStatusChange(callback) {
  * @returns {{ pending: number, syncing: boolean, lastSyncedAt: Date|null }}
  */
 export function useSyncStatus() {
-  const [status, setStatus] = useState(() => getSyncStatus())
-
-  useEffect(() => {
-    // Sync with latest status on mount (may have changed before hook subscribed)
-    setStatus(getSyncStatus())
-
-    const unsubscribe = onStatusChange((newStatus) => {
-      setStatus({ ...newStatus })
-    })
-
-    return unsubscribe
-  }, [])
-
-  return status
+  // useSyncExternalStore lit le snapshot au moment du rendu ET juste après
+  // l'abonnement : aucun statut publié entre les deux ne peut être manqué,
+  // sans setState synchrone dans un effet.
+  return useSyncExternalStore(onStatusChange, _getStatusSnapshot, _getStatusSnapshot)
 }
 
 // ─── Internal helpers (exported for testing) ─────────────────────────────────

@@ -45,7 +45,7 @@ process.on('uncaughtException', (err) => {
 
 const app = express()
 
-// Trust proxy : Railway (et la plupart des PaaS) place un load balancer devant le backend.
+// Trust proxy : Render (et la plupart des PaaS) place un load balancer devant le backend.
 // Sans cela, req.ip = IP du LB (peut varier entre connections) → casse :
 //  - la validation CSRF dont la session identifier dépend de req.ip
 //  - les rate limiters par IP
@@ -112,14 +112,46 @@ if (isSentryEnabled()) {
 }
 
 // Task 29.7 / 31.5 — Health check with DB connectivity verification
-app.get('/health', async (req, res) => {
-  let dbStatus = 'ok'
+//
+// F2 — Sonde DB bornée dans le temps.
+// Sans timeout explicite, `$queryRaw` s'appuie sur les délais internes de Prisma
+// (~2 s mesurées quand la base est injoignable). Le health check de Render et le
+// job `curl -fsS $BACKEND_URL/health` de deploy.yml doivent trancher vite.
+export const HEALTH_DB_TIMEOUT_MS =
+  Number.parseInt(process.env.HEALTH_DB_TIMEOUT_MS ?? '', 10) || 1000
+
+/**
+ * Sonde la base via `SELECT 1`, bornée par un timeout explicite.
+ * @param {number} [timeoutMs]
+ * @returns {Promise<'ok'|'error'>}
+ */
+export async function probeDatabase(timeoutMs = HEALTH_DB_TIMEOUT_MS) {
+  let timer
   try {
-    await prisma.$queryRaw`SELECT 1`
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`health db probe timeout after ${timeoutMs}ms`)),
+          timeoutMs
+        )
+        if (typeof timer?.unref === 'function') timer.unref()
+      }),
+    ])
+    return 'ok'
   } catch (err) {
-    dbStatus = 'error'
+    return 'error'
+  } finally {
+    clearTimeout(timer)
   }
-  res.json({
+}
+
+// F2 — Le corps JSON est inchangé (mêmes clés, mêmes valeurs), seul le code HTTP
+// devient 503 quand la base n'est pas 'ok' : un consommateur qui ne lit que le
+// statut HTTP (Render, curl -fsS) doit voir le service comme indisponible.
+app.get('/health', async (req, res) => {
+  const dbStatus = await probeDatabase()
+  res.status(dbStatus === 'ok' ? 200 : 503).json({
     status: dbStatus === 'ok' ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     db: dbStatus,

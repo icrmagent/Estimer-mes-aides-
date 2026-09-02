@@ -16,6 +16,20 @@ const STATUT_LABELS = {
   echec_definitif: 'Échec définitif',
 }
 
+/**
+ * Horodatage de référence pour les états dérivés du temps (token expiré, job
+ * bloqué). Rafraîchi périodiquement : lire l'horloge pendant le rendu est
+ * impur et rend l'affichage instable d'un rendu à l'autre.
+ */
+function useNow(intervalMs = 60_000) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs)
+    return () => clearInterval(timer)
+  }, [intervalMs])
+  return now
+}
+
 function pluralCanal(n) {
   return n <= 1 ? 'canal' : 'canaux'
 }
@@ -101,15 +115,17 @@ export default function PartageJobsPage() {
   const [statutFilter, setStatutFilter] = useState('')
   const [stats, setStats] = useState(null)
   const [loadingBornes, setLoadingBornes] = useState(true)
-  const [loadingJobs, setLoadingJobs] = useState(false)
-  const [loadingEnregistrements, setLoadingEnregistrements] = useState(false)
+  // `true` au montage : la première borne est sélectionnée automatiquement dès
+  // que la liste arrive, les panneaux affichent alors leur chargement.
+  const [jobsPending, setJobsPending] = useState(true)
+  const [enregistrementsPending, setEnregistrementsPending] = useState(true)
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null) // { message, type }
   const [relancing, setRelancing] = useState(null)
   const [launching, setLaunching] = useState(false)
   const [pusherEvents, setPusherEvents] = useState([])
   const [canaux, setCanaux] = useState([])
-  const [loadingCanaux, setLoadingCanaux] = useState(false)
+  const [canauxPending, setCanauxPending] = useState(true)
   const [showCanalModal, setShowCanalModal] = useState(false)
   const [editingCanal, setEditingCanal] = useState(null)
   const [deletingCanalId, setDeletingCanalId] = useState(null)
@@ -126,7 +142,18 @@ export default function PartageJobsPage() {
     const byLabel = selectedBorne?.canalTransmission
       && canaux.find((c) => c.label === selectedBorne.canalTransmission)
     return byLabel || canaux.find((c) => c.actif) || null
-  }, [canaux, selectedBorne?.canalTransmission])
+  }, [canaux, selectedBorne])
+
+  // Sans borne sélectionnée, aucun chargement n'est en cours : les indicateurs
+  // sont dérivés plutôt que remis à zéro depuis un effet.
+  const loadingJobs = Boolean(selectedBorneId) && jobsPending
+  const loadingEnregistrements = Boolean(selectedBorneId) && enregistrementsPending
+  const loadingCanaux = Boolean(selectedBorneId) && canauxPending
+
+  // Événements temps réel de la borne courante (la liste conserve leur borneId).
+  const visiblePusherEvents = pusherEvents.filter((ev) => ev.borneId === selectedBorneId)
+
+  const now = useNow()
 
   const hasActiveChannel = canaux.some((c) => c.actif)
   const channelLabelMismatch =
@@ -135,7 +162,7 @@ export default function PartageJobsPage() {
     && !canaux.some((c) => c.label === selectedBorne.canalTransmission)
 
   const fetchBornes = useCallback(() => {
-    setLoadingBornes(true)
+    // `loadingBornes` est initialisé à true : ce chargement a lieu au montage.
     api.get('/api/bornes', { params: { limit: 100 } })
       .then((res) => {
         const list = getApiList(res)
@@ -150,13 +177,8 @@ export default function PartageJobsPage() {
   }, [])
 
   const fetchJobs = useCallback(() => {
-    if (!selectedBorneId) {
-      setJobs([])
-      setJobsTotal(0)
-      return
-    }
+    if (!selectedBorneId) return
 
-    setLoadingJobs(true)
     const params = { borneId: selectedBorneId, limit: 100 }
     if (statutFilter) params.statut = statutFilter
     api.get('/api/partage/jobs', { params })
@@ -169,17 +191,12 @@ export default function PartageJobsPage() {
         const e = err.response?.data?.error
         setError(typeof e === 'string' ? e : (e?.message || 'Erreur de chargement des jobs'))
       })
-      .finally(() => setLoadingJobs(false))
+      .finally(() => setJobsPending(false))
   }, [selectedBorneId, statutFilter])
 
   const fetchEnregistrements = useCallback(() => {
-    if (!selectedBorneId) {
-      setEnregistrements([])
-      setEnregistrementsTotal(0)
-      return
-    }
+    if (!selectedBorneId) return
 
-    setLoadingEnregistrements(true)
     api.get('/api/enregistrements', { params: { borneId: selectedBorneId, limit: 100 } })
       .then((res) => {
         const list = getApiList(res)
@@ -190,16 +207,12 @@ export default function PartageJobsPage() {
         const e = err.response?.data?.error
         setError(typeof e === 'string' ? e : (e?.message || 'Erreur de chargement des enregistrements'))
       })
-      .finally(() => setLoadingEnregistrements(false))
+      .finally(() => setEnregistrementsPending(false))
   }, [selectedBorneId])
 
   const fetchCanaux = useCallback(() => {
-    if (!selectedBorneId) {
-      setCanaux([])
-      return
-    }
+    if (!selectedBorneId) return
 
-    setLoadingCanaux(true)
     api.get('/api/canaux', { params: { borneId: selectedBorneId } })
       .then((res) => {
         const list = res.data || []
@@ -210,14 +223,11 @@ export default function PartageJobsPage() {
         setError(typeof e === 'string' ? e : (e?.message || 'Erreur de chargement des canaux'))
         setCanaux([])
       })
-      .finally(() => setLoadingCanaux(false))
+      .finally(() => setCanauxPending(false))
   }, [selectedBorneId])
 
   const fetchStats = useCallback(() => {
-    if (!selectedBorneId) {
-      setStats(null)
-      return
-    }
+    if (!selectedBorneId) return
     api.get('/api/partage/stats', { params: { borneId: selectedBorneId } })
       .then((res) => setStats(res.data?.data || null))
       .catch(() => setStats(null))
@@ -229,6 +239,26 @@ export default function PartageJobsPage() {
     fetchCanaux()
     fetchStats()
   }, [fetchJobs, fetchEnregistrements, fetchCanaux, fetchStats])
+
+  /**
+   * Changement de borne : c'est l'interaction — et non l'effet de chargement —
+   * qui arme les indicateurs de chargement ou remet les panneaux à zéro.
+   */
+  const handleBorneChange = useCallback((borneId) => {
+    if (borneId) {
+      setJobsPending(true)
+      setEnregistrementsPending(true)
+      setCanauxPending(true)
+    } else {
+      setJobs([])
+      setJobsTotal(0)
+      setEnregistrements([])
+      setEnregistrementsTotal(0)
+      setCanaux([])
+      setStats(null)
+    }
+    setSelectedBorneId(borneId)
+  }, [])
 
   // L6 — Refetch canaux+jobs+stats sans re-fetch des bornes (qui re-déclenche la cascade)
   const handleCanalSaved = useCallback(() => {
@@ -289,10 +319,7 @@ export default function PartageJobsPage() {
 
   useEffect(() => { fetchBornes() }, [fetchBornes])
 
-  useEffect(() => {
-    setPusherEvents([])
-    refreshAll()
-  }, [selectedBorneId, refreshAll])
+  useEffect(() => { refreshAll() }, [selectedBorneId, refreshAll])
 
   // Refetch jobs lors d'un changement de filtre statut (sans recharger le reste)
   useEffect(() => { fetchJobs() }, [statutFilter, fetchJobs])
@@ -445,7 +472,7 @@ export default function PartageJobsPage() {
               <select
                 id="borne-select"
                 value={selectedBorneId}
-                onChange={(e) => setSelectedBorneId(e.target.value)}
+                onChange={(e) => handleBorneChange(e.target.value)}
                 className={inputClass + ' w-full'}
                 style={inputStyle}
                 disabled={loadingBornes}
@@ -532,12 +559,12 @@ export default function PartageJobsPage() {
           </div>
         )}
 
-        {pusherEvents.length > 0 && (
+        {visiblePusherEvents.length > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-blue-700 font-semibold text-sm">Événements temps réel</p>
               <button
-                onClick={() => setPusherEvents([])}
+                onClick={() => setPusherEvents((prev) => prev.filter((ev) => ev.borneId !== selectedBorneId))}
                 aria-label="Effacer l'historique des événements"
                 className="text-blue-400 hover:text-blue-600 text-xs"
               >
@@ -545,7 +572,7 @@ export default function PartageJobsPage() {
               </button>
             </div>
             <div className="space-y-1">
-              {pusherEvents.map((ev, i) => (
+              {visiblePusherEvents.map((ev, i) => (
                 <div key={i} className="text-xs text-blue-600 font-mono">
                   [{new Date(ev.ts).toLocaleTimeString('fr-FR')}] {ev.type} · {selectedBorne?.idBorne || ev.borneId}
                 </div>
@@ -595,7 +622,7 @@ export default function PartageJobsPage() {
                   {canaux.map((canal) => {
                     const isAffected = selectedBorne?.canalTransmission === canal.label
                     const tokenExp = canal.tokenExpiresAt ? new Date(canal.tokenExpiresAt) : null
-                    const tokenExpired = tokenExp ? tokenExp.getTime() < Date.now() : null
+                    const tokenExpired = tokenExp ? tokenExp.getTime() < now : null
                     return (
                       <tr key={canal.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 font-medium text-gray-900">
@@ -737,7 +764,10 @@ export default function PartageJobsPage() {
                 <select
                   id="statut-filter"
                   value={statutFilter}
-                  onChange={(e) => setStatutFilter(e.target.value)}
+                  onChange={(e) => {
+                    setJobsPending(true)
+                    setStatutFilter(e.target.value)
+                  }}
                   className={inputClass}
                   style={{ minHeight: '36px', fontSize: '13px' }}
                 >
@@ -778,7 +808,7 @@ export default function PartageJobsPage() {
                       const canalForJob = labelFromJob ? canalLabelByLabel.get(labelFromJob) : null
                       const isStuckEnCours = job.statut === 'en_cours'
                         && job.updatedAt
-                        && (Date.now() - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
+                        && (now - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
 
                       return (
                         <tr key={job.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">

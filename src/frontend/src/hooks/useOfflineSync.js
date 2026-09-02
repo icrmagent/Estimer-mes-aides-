@@ -1,7 +1,17 @@
 import { useCallback } from 'react'
-import { get, set, del } from 'idb-keyval'
+import { get, set } from 'idb-keyval'
 
 const QUEUE_KEY = 'ema_v2_offline_queue'
+
+/** Métadonnées locales ajoutées par saveOffline — jamais envoyées à l'API. */
+const LOCAL_META_KEYS = ['_id', '_savedAt', '_synced']
+
+/** Retire les métadonnées locales d'une entrée de queue avant envoi API. */
+function toApiPayload(entry) {
+  return Object.fromEntries(
+    Object.entries(entry).filter(([key]) => !LOCAL_META_KEYS.includes(key))
+  )
+}
 
 // Verrou en mémoire pour empêcher syncPending() concurrent (StrictMode / event "online" rapides).
 let syncInFlight = false
@@ -81,18 +91,17 @@ export function useOfflineSync() {
 
       for (const entry of pending) {
         try {
-          const { _id, _savedAt, _synced, ...enregistrement } = entry
           const res = await fetch(`${apiUrl}/api/enregistrements`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify(enregistrement),
+            body: JSON.stringify(toApiPayload(entry)),
           })
 
           if (res.ok) {
-            await markSynced(_id)
+            await markSynced(entry._id)
           }
         } catch {
           // Garder en queue pour la prochaine tentative

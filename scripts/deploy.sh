@@ -3,7 +3,7 @@
 # Usage : ./scripts/deploy.sh [--skip-tests] [--skip-migration] [--skip-backend] [--skip-vercel] [--skip-webview]
 #
 # Variables requises (.env.deploy à la racine) :
-#   DATABASE_URL, DIRECT_URL, RAILWAY_TOKEN, VERCEL_TOKEN, BACKEND_URL
+#   DATABASE_URL, DIRECT_URL, RENDER_API_KEY, RENDER_SERVICE_ID, VERCEL_TOKEN, BACKEND_URL
 
 set -euo pipefail
 
@@ -48,19 +48,42 @@ if [ "$SKIP_MIGRATION" -eq 0 ]; then
   (cd src/backend && DATABASE_URL="$DIRECT_URL" npx prisma migrate deploy) || die "Migration"
 else echo "⊘ Migration sautée"; fi
 
-# 4. BACKEND RAILWAY
+# 4. BACKEND RENDER
+# Render redeploie automatiquement a chaque push sur main (autoDeployTrigger: commit).
+# On declenche malgre tout un deploiement explicite pour pouvoir en suivre l'etat.
 if [ "$SKIP_BACKEND" -eq 0 ]; then
-  step "4/7 — Deploy Backend → Railway"
-  [ -n "${RAILWAY_TOKEN:-}" ] || die "RAILWAY_TOKEN manquant"
-  (cd src/backend && RAILWAY_TOKEN="$RAILWAY_TOKEN" npx -y @railway/cli@latest up --detach) || die "Railway"
+  step "4/7 — Deploy Backend → Render"
+  [ -n "${RENDER_API_KEY:-}" ]    || die "RENDER_API_KEY manquant"
+  RENDER_SERVICE_ID="${RENDER_SERVICE_ID:-srv-dac30kbm8hqs73eb1d20}"
+
+  DEPLOY_ID=$(curl -fsS -X POST     -H "Authorization: Bearer ${RENDER_API_KEY}"     -H "Content-Type: application/json"     -d '{"clearCache":"do_not_clear"}'     "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys"     | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -1)
+  [ -n "$DEPLOY_ID" ] || die "Render : deploiement non declenche"
+  echo "  deploy=$DEPLOY_ID"
+
+  # Attente de l'etat terminal (build ~2-4 min sur le plan free)
+  ok=0
+  for i in $(seq 1 40); do
+    sleep 20
+    ST=$(curl -fsS -H "Authorization: Bearer ${RENDER_API_KEY}"       "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys/${DEPLOY_ID}"       | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*//p' | head -1)
+    case "$ST" in
+      live) ok=1; break ;;
+      build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+        die "Render : deploiement $ST (logs : https://dashboard.render.com)" ;;
+      *) echo "  [$i] $ST" ;;
+    esac
+  done
+  [ "$ok" -eq 1 ] || die "Render : deploiement non live apres ~13 min"
+
   if [ -n "${BACKEND_URL:-}" ]; then
     step "4b — Healthcheck"
+    # /health renvoie 503 si la base est injoignable : curl -f echoue alors, c'est voulu.
+    # Le plan free met le service en veille ; le premier appel peut prendre ~50 s.
     ok=0
-    for i in 1 2 3 4 5 6 7 8 9 10; do
+    for i in $(seq 1 12); do
       sleep 15
-      curl -fsS "${BACKEND_URL}/health" >/dev/null && { ok=1; break; } || echo "  try $i KO"
+      curl -fsS --max-time 75 "${BACKEND_URL}/health" >/dev/null && { ok=1; break; } || echo "  try $i KO"
     done
-    [ "$ok" -eq 1 ] || die "Backend healthcheck"
+    [ "$ok" -eq 1 ] || die "Backend healthcheck (503 = base injoignable, 000 = service endormi)"
     echo "✓ Backend healthy"
   fi
 else echo "⊘ Backend sauté"; fi

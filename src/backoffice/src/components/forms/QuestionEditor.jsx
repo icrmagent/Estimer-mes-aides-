@@ -2,7 +2,6 @@ import { useState, useRef } from 'react'
 
 export default function QuestionEditor({ questions = [], onReorder, onDelete, onEdit }) {
   const [dragIndex, setDragIndex] = useState(null)
-  const [editingId, setEditingId] = useState(null)
   const dragOverIndex = useRef(null)
 
   function handleDragStart(index) {

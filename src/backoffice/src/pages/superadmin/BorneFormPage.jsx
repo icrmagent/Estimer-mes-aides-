@@ -70,7 +70,9 @@ export default function BorneFormPage() {
     setFieldErrors({})
     setLoading(true)
     try {
-      const { idBorne, ...payload } = form
+      // `idBorne` est généré côté backend : il n'est jamais envoyé.
+      const payload = { ...form }
+      delete payload.idBorne
       if (isEdit) {
         await api.put(`/api/bornes/${id}`, payload)
       } else {

@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './context/AuthContext.jsx'
+import { AuthProvider } from './context/AuthProvider.jsx'
 import { ProtectedRoute } from './components/layout/ProtectedRoute.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import SADashboardPage from './pages/superadmin/DashboardPage.jsx'

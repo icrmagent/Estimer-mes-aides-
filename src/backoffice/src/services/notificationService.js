@@ -23,8 +23,6 @@ const POLLING_INTERVAL_MS = 30_000
 // ---------------------------------------------------------------------------
 
 let _pollingTimer = null
-let _pollingCallbacks = null
-let _pollingAssignedBorneIds = null
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,10 +50,8 @@ function shouldForward(data, assignedBorneIds) {
 // Fallback polling
 // ---------------------------------------------------------------------------
 
-function startPolling(callbacks, assignedBorneIds) {
+function startPolling(callbacks) {
   if (_pollingTimer) return // already running
-  _pollingCallbacks = callbacks
-  _pollingAssignedBorneIds = assignedBorneIds
 
   _pollingTimer = setInterval(async () => {
     try {
@@ -81,8 +77,6 @@ function stopPolling() {
   if (_pollingTimer) {
     clearInterval(_pollingTimer)
     _pollingTimer = null
-    _pollingCallbacks = null
-    _pollingAssignedBorneIds = null
   }
 }
 
@@ -145,7 +139,7 @@ export function subscribeToAdminNotifications(callbacks = {}, assignedBorneIds =
   // Also watch for connection state changes.
   const connectionStateHandler = (states) => {
     if (states.current === 'failed' || states.current === 'unavailable') {
-      startPolling(callbacks, assignedBorneIds)
+      startPolling(callbacks)
     } else if (states.current === 'connected') {
       stopPolling()
     }
@@ -154,7 +148,7 @@ export function subscribeToAdminNotifications(callbacks = {}, assignedBorneIds =
   // Check current state right now
   const currentState = getConnectionState()
   if (currentState === 'failed' || currentState === 'unavailable') {
-    startPolling(callbacks, assignedBorneIds)
+    startPolling(callbacks)
   }
 
   // Bind to connection state changes

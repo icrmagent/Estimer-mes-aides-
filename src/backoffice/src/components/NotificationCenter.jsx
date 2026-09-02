@@ -171,6 +171,12 @@ export default function NotificationCenter({
       ? user?.borneIds ?? null
       : null
 
+  const dismissToast = useCallback((id) => {
+    clearTimeout(timerRefs.current[id])
+    delete timerRefs.current[id]
+    setToasts((prev) => prev.filter((t) => t.id !== id))
+  }, [])
+
   const addToast = useCallback((type, message) => {
     const id = ++toastIdCounter.current
     const toast = { id, type, message, timestamp: Date.now() }
@@ -181,13 +187,7 @@ export default function NotificationCenter({
     timerRefs.current[id] = setTimeout(() => {
       dismissToast(id)
     }, AUTO_DISMISS_MS)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const dismissToast = useCallback((id) => {
-    clearTimeout(timerRefs.current[id])
-    delete timerRefs.current[id]
-    setToasts((prev) => prev.filter((t) => t.id !== id))
-  }, [])
+  }, [dismissToast])
 
   useEffect(() => {
     const cleanup = subscribeToAdminNotifications(

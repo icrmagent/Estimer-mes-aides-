@@ -1,12 +1,14 @@
 import I18nTextInput from './I18nTextInput.jsx'
 
-export default function OptionEditor({ options = [], onChange }) {
-  function generateId() {
-    return typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : Math.random().toString(36).substring(2, 15)
-  }
+/** UUID v4 quand l'API Web Crypto est disponible, repli aléatoire sinon.
+ *  Hors du composant : générer un id est impur et n'a pas sa place dans un rendu. */
+function generateId() {
+  return typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).substring(2, 15)
+}
 
+export default function OptionEditor({ options = [], onChange }) {
   function addOption() {
     onChange([...options, { id: generateId(), label: { fr: '', es: '', en: '' } }])
   }

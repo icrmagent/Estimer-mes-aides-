@@ -1,19 +1,12 @@
-import { test, expect } from '@playwright/test'
-import { MOCK_BORNE_CONFIG } from '../fixtures/mock-config.js'
+import { test, expect } from '../fixtures/borne-session.js'
+
+// La session borne (borne_token + borne_id) et la route de config sont fournies
+// par la fixture partagée ../fixtures/borne-session.js. Les tests ci-dessous
+// surchargent cette route pour simuler la coupure réseau : un handler enregistré
+// plus tard est évalué en premier par Playwright.
 
 const nextBtn = page => page.locator('[aria-label="Suivant"]')
 const sendBtn = page => page.getByText('Terminer')
-
-test.beforeEach(async ({ page }) => {
-  await page.route(/\/api\/bornes\/[^/]+\/config/, route =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_BORNE_CONFIG) })
-  )
-
-  await page.goto('/login')
-  await page.evaluate(() => {
-    localStorage.setItem('borne_token', 'mock-jwt-e2e-token')
-  })
-})
 
 async function fillAndNavigateToLastStep(page) {
   await page.goto('/start')

@@ -1,0 +1,78 @@
+# Blueprint Render — service backend "Estimer Mes Aides" V2
+# Reference : https://render.com/docs/blueprint-spec
+#
+# Ce fichier versionne l'infrastructure du service deja cree sur Render
+# (srv-dac30kbm8hqs73eb1d20 — https://estimer-mes-aides-api.onrender.com).
+#
+# ATTENTION plan free : le service est mis en veille apres 15 minutes sans
+# trafic et son reveil prend ~50 s (cold start). Choix assume — voir README.md.
+
+services:
+  - type: web
+    name: estimer-mes-aides-api
+    runtime: node
+    region: frankfurt
+    plan: free
+    repo: https://github.com/icrmagent/Estimer-mes-aides-
+    branch: main
+    rootDir: src/backend
+    # `npm ci` declenche le postinstall du package.json (prisma generate)
+    buildCommand: npm ci
+    # script `start:prod` du package.json : migrate deploy strict + node server.js
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    # remplace le champ deprecie `autoDeploy: true` : deploiement a chaque commit sur `branch`
+    autoDeployTrigger: commit
+
+    envVars:
+      # --- Serveur (PORT est injecte automatiquement par Render) ---
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "20"
+
+      # --- Base de donnees (Supabase) ---
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+
+      # --- Authentification & securite ---
+      - key: JWT_SECRET
+        sync: false
+      - key: API_KEY_MOBILE
+        sync: false
+      - key: API_KEY_CRM
+        sync: false
+
+      # --- CORS ---
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+      # --- Seed SuperAdmin ---
+      - key: SUPERADMIN_EMAIL
+        sync: false
+      - key: SUPERADMIN_PASSWORD_TEMP
+        sync: false
+
+      # --- CRM externe (canal I-CRM non actif a la livraison) ---
+      - key: CRM_API_URL
+        sync: false
+      - key: CRM_API_KEY
+        sync: false
+      - key: CRM_USER_ID
+        sync: false
+
+      # --- Pusher (optionnel : sans ces valeurs, le temps reel est desactive) ---
+      - key: PUSHER_APP_ID
+        sync: false
+      - key: PUSHER_KEY
+        sync: false
+      - key: PUSHER_SECRET
+        sync: false
+      - key: PUSHER_CLUSTER
+        sync: false
+
+# `sync: false` = valeur saisie dans le dashboard Render, jamais dans le depot.
+# Variables optionnelles non declarees ici (a ajouter dans le dashboard si activees) :
+# REDIS_URL, SENTRY_DSN.

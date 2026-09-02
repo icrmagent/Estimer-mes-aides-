@@ -2,6 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { searchAddress } from '../utils/addressApi.js'
 
+/** Nombre de caractères à partir duquel une recherche d'adresse est lancée. */
+const MIN_QUERY_LENGTH = 3
+
 /**
  * Input texte avec dropdown de suggestions d'adresses.
  * - Debounce 300ms sur la saisie.
@@ -27,15 +30,25 @@ export default function AddressAutocomplete({
   ariaLabel,
   placeholder,
 }) {
-  const [suggestions, setSuggestions] = useState([])
+  // Dernier résultat d'API, étiqueté par la requête à laquelle il correspond.
+  // `suggestions` et `loading` en sont dérivés (voir plus bas) : la saisie d'une
+  // requête trop courte vide donc le dropdown sans setState dans l'effet.
+  const [results, setResults] = useState({ query: '', items: [] })
+  const [pendingQuery, setPendingQuery] = useState(null)
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [activeIdx, setActiveIdx] = useState(-1)
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 })
   const inputRef = useRef(null)
   const abortRef = useRef(null)
   const debounceRef = useRef(null)
   const justSelectedRef = useRef(false)
+
+  // ── Valeurs dérivées de `value` (aucun état à resynchroniser) ──────────────
+  const query = (value || '').trim()
+  const isSearchable = query.length >= MIN_QUERY_LENGTH
+  const suggestions = isSearchable && results.query === query ? results.items : []
+  const loading = isSearchable && pendingQuery === query
+  const isOpen = open && suggestions.length > 0
 
   // Recalcule la position du dropdown (portail) en fonction de l'input.
   function updateDropdownPos() {
@@ -86,25 +99,22 @@ export default function AddressAutocomplete({
     if (abortRef.current) abortRef.current.abort()
 
     const q = (value || '').trim()
-    if (q.length < 3) {
-      setSuggestions([])
-      setOpen(false)
-      setLoading(false)
-      return
-    }
+    if (q.length < MIN_QUERY_LENGTH) return
 
     debounceRef.current = setTimeout(async () => {
       const controller = new AbortController()
       abortRef.current = controller
-      setLoading(true)
-      const results = await searchAddress(q, countryCode, controller.signal)
-      if (!controller.signal.aborted) {
-        setSuggestions(results)
-        setOpen(results.length > 0)
-        setActiveIdx(-1)
-        setLoading(false)
-        if (results.length > 0) updateDropdownPos()
+      setPendingQuery(q)
+      const items = await searchAddress(q, countryCode, controller.signal)
+      if (controller.signal.aborted) {
+        setPendingQuery(prev => (prev === q ? null : prev))
+        return
       }
+      setPendingQuery(null)
+      setResults({ query: q, items })
+      setOpen(items.length > 0)
+      setActiveIdx(-1)
+      if (items.length > 0) updateDropdownPos()
     }, 300)
 
     return () => {
@@ -120,7 +130,6 @@ export default function AddressAutocomplete({
       ville: suggestion.ville || '',
     })
     setOpen(false)
-    setSuggestions([])
     setActiveIdx(-1)
   }
 
@@ -140,7 +149,7 @@ export default function AddressAutocomplete({
     }
   }
 
-  const dropdown = open && suggestions.length > 0 ? (
+  const dropdown = isOpen ? (
     <ul
       data-address-dropdown
       role="listbox"
@@ -194,7 +203,7 @@ export default function AddressAutocomplete({
         type="text"
         aria-label={ariaLabel}
         aria-autocomplete="list"
-        aria-expanded={open}
+        aria-expanded={isOpen}
         autoComplete="off"
         autoCapitalize="characters"
         value={value || ''}

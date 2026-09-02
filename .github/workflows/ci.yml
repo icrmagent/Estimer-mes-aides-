@@ -6,20 +6,55 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # Plancher imposé par Vite 8 (^20.19 || >=22.12), ESLint 10 et Vitest 4.
+  NODE_VERSION: '20'
+
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # LINT — ESLint front-office + back-office
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint ESLint — ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [frontend, backoffice]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/${{ matrix.module }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: src/${{ matrix.module }}
+
+      - name: ESLint
+        run: npm run lint
+        working-directory: src/${{ matrix.module }}
+
+  # ─────────────────────────────────────────────────────────────
+  # TESTS UNITAIRES
+  # ─────────────────────────────────────────────────────────────
   backend-tests:
-    name: Backend — Tests Jest
+    name: Backend — 510 tests Jest
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: src/backend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: src/backend/package-lock.json
 
@@ -36,16 +71,67 @@ jobs:
           API_KEY_MOBILE: ${{ secrets.API_KEY_MOBILE }}
           API_KEY_CRM: ${{ secrets.API_KEY_CRM }}
 
-  e2e-tests:
-    name: E2E — Playwright
+  frontend-tests:
+    name: Frontend — 66 tests Vitest
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  backoffice-tests:
+    name: Back-Office — 36 tests Vitest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backoffice
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/backoffice/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  # 69 tests déclarés par Playwright : 48 « functional » (parcours, offline,
+  # garde-fous responsive sur 7 viewports) qui s'exécutent sur ubuntu-latest,
+  # et 21 « visual » (comparaison pixel à pixel) que playwright.config.js
+  # n'enregistre pas ici, faute de baselines `-linux.png` committées. Choix
+  # documenté : le rendu des polices diffère entre Windows (DirectWrite) et
+  # Linux (FreeType), une baseline Windows ne peut pas être comparée à Linux.
+  e2e-tests:
+    name: E2E — 69 tests Playwright (48 functional sur Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install frontend dependencies
         run: npm ci
@@ -68,13 +154,16 @@ jobs:
           VITE_API_KEY: test-e2e-key
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
           path: tests/e2e/playwright-report/
           retention-days: 7
 
+  # ─────────────────────────────────────────────────────────────
+  # BUILDS
+  # ─────────────────────────────────────────────────────────────
   frontend-build:
     name: Frontend — Build Vite
     runs-on: ubuntu-latest
@@ -83,11 +172,11 @@ jobs:
         working-directory: src/frontend
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: src/frontend/package-lock.json
 
@@ -109,11 +198,11 @@ jobs:
         working-directory: src/backoffice
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: src/backoffice/package-lock.json
 

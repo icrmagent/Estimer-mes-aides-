@@ -1,22 +1,165 @@
 # PLAN.md — Plan de Développement Phasé
 
-## Méthodologie
-Développement en 5 phases séquentielles. Chaque phase doit être validée avant de passer à la suivante.
-Claude Code doit consulter ce fichier au début de chaque session pour savoir où on en est.
+> Dernière mise à jour : **2026-09-02**.
+> Avant cette date, ce fichier datait du 2026-04-26 et ne connaissait que les
+> 5 phases V1 : les 9 phases V2, pourtant terminées et déployées depuis mai 2026,
+> n'y figuraient pas. Il annonçait aussi la Phase 5 comme « déploiement à faire »
+> alors que la production tournait depuis le 2026-05-13.
 
 ---
 
-## 📍 Suivi de progression
+## Méthodologie
+
+Développement en phases séquentielles. Chaque phase est validée avant de passer à
+la suivante. Claude Code consulte ce fichier au début de chaque session pour savoir
+où en est le projet.
+
+Répartition : **V1 = 5 phases** (application mono-borne, formulaire figé à 15 étapes)
+puis **V2 = 9 phases** (plateforme multi-bornes, formulaire configurable).
+
+---
+
+## Suivi de progression
+
+### V1 — Application mono-borne (avr. 2026)
 
 ```
-Phase 1 — Setup & Architecture     [ ] En cours  [x] Terminé ✅
-Phase 2 — Backend API              [ ] En cours  [x] Terminé ✅
-Phase 3 — Frontend WebView         [ ] En cours  [x] Terminé ✅
-Phase 4 — Module CRM Sync          [ ] En cours  [x] Terminé ✅
-Phase 5 — Tests & Déploiement      [ ] En cours  [x] Terminé ✅
+Phase 1 — Setup & Architecture     [x] Terminé
+Phase 2 — Backend API              [x] Terminé
+Phase 3 — Frontend WebView         [x] Terminé
+Phase 4 — Module CRM Sync          [x] Terminé, puis SUPPRIMÉ (commit b7585cc, 2026-05-14)
+Phase 5 — Tests & Déploiement      [x] Terminé
 ```
 
-> ⚠️ Mettre à jour les cases ci-dessus après chaque phase terminée.
+> **Phase 4 : le code n'existe plus.** `src/crm-module/` a été supprimé le 2026-05-14
+> (commit `b7585cc`) et remplacé par le partage I-CRM asynchrone du backend
+> (V2 Phase 8). Seules survivent les routes legacy `GET /api/submissions` et
+> `PUT /api/submissions/:id/sync`, conservées pour la rétrocompatibilité et couvertes
+> par les 41 tests de rétrocompat.
+
+### V2 — Plateforme multi-bornes (mai 2026)
+
+```
+Phase 1 — Migration schéma DB      [x] Terminé — 9 nouveaux modèles Prisma
+Phase 2 — Auth multi-rôles         [x] Terminé — SUPER_ADMIN / ADMIN_BORNE
+Phase 3 — API CRUD V2              [x] Terminé — 67 routes sur 13 fichiers
+Phase 4 — Back-Office SuperAdmin   [x] Terminé — React + Vite, src/backoffice/
+Phase 5 — Back-Office AdminBorne   [x] Terminé — cloisonnement des données
+Phase 6 — Front-Office Borne       [x] Terminé — formulaire dynamique, i18n, offline
+Phase 7 — Internationalisation     [x] Terminé — FR/ES/EN, fallback FR
+Phase 8 — Partage I-CRM async      [x] Terminé — Pusher + queue worker
+Phase 9 — Tests & Déploiement      [x] Terminé — pipeline GitHub Actions, 25 deploys
+```
+
+---
+
+## État réel vérifié le 2026-09-02
+
+### Tests (mesurés, pas estimés)
+
+| Périmètre | Mesure | Commande |
+|-----------|--------|----------|
+| Backend Jest — suite complète | 510 tests / 35 suites | `cd src/backend && npm test` |
+| Backend Jest — rétrocompat V1 | 41 tests / 3 suites | `--testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
+| Frontend Borne — Vitest | 66 tests / 4 fichiers | `cd src/frontend && npm test` |
+| Back-Office — Vitest | 36 tests / 1 fichier | `cd src/backoffice && npm test` |
+| E2E — Playwright | 69 tests / 4 specs | `cd tests/e2e && npx playwright test --list` |
+
+> Les chiffres « 29 tests backend » et « 9 tests E2E » qui figuraient dans les
+> critères de validation V1 sont périmés depuis la V2.
+
+### Production — backend HORS SERVICE, base et frontends sains
+
+| Cible | Mesure `curl` du 2026-09-02 |
+|-------|-----------------------------|
+| `https://estimer-mes-aides.vercel.app` (front borne) | `HTTP 200` |
+| `https://estimer-mes-aides-wjp3.vercel.app` (back-office) | `HTTP 200` |
+| `https://estimer-mes-aides-production.up.railway.app/health` | `HTTP 404` — Railway abandonné |
+| `https://estimer-mes-aides-api.onrender.com/health` | pas encore déployé |
+| Base Supabase `zxkshqviyzjigadruody` | **vivante**, 19 tables, `migrate status` à jour |
+
+> ⚠️ **Correction d'un faux positif.** Un audit antérieur de cette même journée a conclu
+> que le projet Supabase avait été supprimé (NXDOMAIN sur trois résolveurs). C'était une
+> **panne DNS locale sur le poste de développement** — la même qui a interrompu les agents
+> avec `ENOTFOUND`. La base n'a jamais été perdue : son schéma est complet et contient
+> `canaux`, `questions.crmFieldIds` et `submissions.borneId`. Ne pas rejouer de procédure
+> de reconstruction de base sur la foi de cet audit.
+
+Le backend est le seul maillon manquant : Railway est abandonné au profit de **Render**
+(service `estimer-mes-aides-api`, plan free, région Frankfurt). Les frontends servent
+leurs assets et pointent déjà vers l'URL Render.
+
+➡️ **Procédure : [DEPLOIEMENT.md § Reprise après sinistre](DEPLOIEMENT.md#reprise-après-sinistre).**
+
+---
+
+## Prochaine phase — Remise en service (en cours)
+
+Aucun développement de fonctionnalité n'est en cours. La seule tâche ouverte est la
+remise en ligne du backend sur Render.
+
+```
+Étape 1 — Base Supabase + migrations              [x] Sans objet — base vivante et à jour
+Étape 2 — Variables d'environnement Render        [x] Fait — 17 variables renseignées
+Étape 3 — Service Render créé                     [x] Fait — srv-dac30kbm8hqs73eb1d20
+Étape 4 — Connecter GitHub à l'espace Render      [ ] BLOQUANT — voir ci-dessous
+Étape 5 — Appliquer la migration 20260902000000   [ ] À faire après le 1er déploiement
+Étape 6 — Variables Vercel des 2 frontends        [x] Fait — repointées vers Render
+Étape 7 — Secrets GitHub Actions                  [x] Fait — 10 secrets, dont BACKEND_URL
+Étape 8 — Rotation des credentials Pusher         [ ] À faire — dashboard Pusher, app 2151378
+Étape 9 — Rebuild + redistribution de l'APK       [ ] À faire — l'URL d'API a changé
+Étape 10 — Validation E2E de bout en bout         [ ] À faire
+```
+
+### Étape 4 — le point bloquant
+
+Le service Render a été créé par API **avant** que GitHub soit connecté à l'espace de
+travail. Son builder échoue donc au clone avec « It looks like we don't have access to
+your repo », y compris sur un dépôt public.
+
+Diagnostic établi par une expérience à trois dépôts : un dépôt public d'un **autre**
+propriétaire se déploie en 40 s, tandis que **tous** les dépôts de `icrmagent` échouent —
+y compris un dépôt public créé pour le test. Le nom du dépôt et sa visibilité sont hors de
+cause.
+
+Correction : dashboard Render → basculer sur l'espace de travail **« Estimer mes aides »**
+(et non le compte personnel) → Settings → GitHub → Configure → accorder l'accès à
+`Estimer-mes-aides-`. Piège fréquent : l'App est connectée mais en « Only select
+repositories » sans le dépôt coché. Contrôle indépendant :
+https://github.com/settings/installations.
+
+### Dette identifiée (hors remise en service)
+
+- **Back-Office quasi non testé** : 1 fichier de test pour 39 fichiers source (2026-09-02).
+  Ni les pages, ni le cloisonnement AdminBorne ne sont couverts.
+- **Aucun tag semver** : `git tag -l 'v*'` renvoie 0 résultat. Les 25 tags existants
+  sont tous des `deploy-*` automatiques. Le commit `b8562e4` s'annonce pourtant
+  `release(v2.0.0)`.
+- **Rate limiting tier-1 absent** : `express-rate-limit` est en dépendance mais n'est
+  importé nulle part dans `src/backend/src/app.js`. `trackRateLimitViolation()` est
+  exportée et jamais appelée : le tier-2 n'enregistre donc aucune violation, même avec
+  Redis opérationnel.
+- **`seed.js` réécrit le `.env` du frontend** : `prisma/seed.js` fait un `fs.writeFileSync`
+  sur `../../frontend/.env` et y remplace `VITE_BORNE_ID`. Tout `npm run prisma:seed`
+  modifie donc silencieusement la configuration du frontend local.
+- **21 tests visuels Playwright hors CI** : les baselines n'existent qu'en `-win32.png`,
+  elles ne peuvent pas s'exécuter sur le runner `ubuntu-latest`. Les 48 tests
+  fonctionnels, eux, tournent partout.
+
+---
+
+## Historique des phases — Archive
+
+> Les descriptions ci-dessous sont conservées telles qu'écrites pendant le
+> développement. Elles décrivent le **plan d'origine V1**, pas l'état actuel du code.
+> Deux écarts notables :
+>
+> - La Phase 3 mentionne la couleur `#5C2DD3` : c'est la couleur **V1, obsolète**.
+>   La couleur primaire V2 est `#5B2D8E` (règle 8 de `CLAUDE.md`).
+>   - Le critère « railway.toml prêt » de la Phase 5 est **caduc** : Railway est
+>   abandonné. `railway.json` et `railway.toml` ont été supprimés et remplacés par
+>   `src/backend/render.yaml`. `src/frontend/vercel.json` et
+>   `src/backoffice/vercel.json` sont bien présents.
 
 ---
 
@@ -152,7 +295,7 @@ API REST complète et testée avec tous les endpoints du cahier des charges.
 **Critère de validation Phase 2** :
 - [x] Tous les endpoints répondent correctement (curl vérifié) ✅
 - [x] Auth fonctionne (API Key + JWT) ✅
-- [x] Tests passent (`npm test`) — 29/29 ✅
+- [x] Tests passent (`npm test`) — 29/29 à l'époque V1 ; **503/503 aujourd'hui** ✅
 - [x] Seed chargé en base ✅
 
 ---
@@ -294,14 +437,21 @@ Application en production, stable, sécurisée, documentée.
 - Guide d'intégration WebView native
 ```
 
-**Critère de validation Phase 5** :
-- [x] Tests E2E Playwright écrits (form-journey, offline, crm-sync) ✅
-- [x] GitHub Actions CI configuré (backend tests + E2E + frontend build) ✅
-- [x] railway.toml — backend Railway prêt ✅
-- [x] vercel.json — frontend Vercel prêt ✅
-- [ ] URL backend accessible en HTTPS (à déployer sur Railway)
-- [ ] URL frontend accessible en HTTPS (à déployer sur Vercel)
-- [ ] Secrets GitHub Actions configurés
+**Critère de validation Phase 5** (état re-vérifié le 2026-09-02) :
+- [x] Tests E2E Playwright écrits ✅ — 4 specs aujourd'hui : `form-journey`,
+      `offline`, `responsive-guards`, `visual-baseline` (`crm-sync` a disparu avec
+      `src/crm-module/`, supprimé au commit `b7585cc`)
+- [x] GitHub Actions configuré ✅ — `.github/workflows/ci.yml` + `deploy.yml`
+- [x] `vercel.json` présent dans `src/frontend/` **et** `src/backoffice/` ✅
+- [x] Configuration Render versionnée ✅ — `src/backend/render.yaml` (blueprint,
+      `startCommand`, `healthcheckPath: /health`, restart policy). ⚠️ Les **variables
+      d'environnement**, le lien repo et la branche de production ne sont, eux, **pas**
+      versionnés : à ressaisir dans le dashboard après un sinistre.
+- [x] URL backend accessible en HTTPS ✅ déployée le 2026-05-13 — ⚠️ **HS depuis
+      le sinistre 2026-09** (`/health` → `HTTP 404`)
+- [x] URL frontend accessible en HTTPS ✅ `https://estimer-mes-aides.vercel.app`
+      (`HTTP 200` au 2026-09-02)
+- [x] Secrets GitHub Actions configurés ✅ — ⚠️ à régénérer après le sinistre
 
 ---
 

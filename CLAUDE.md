@@ -9,10 +9,10 @@
 
 ```
 Phase 1 — Setup & Architecture    ✅ Terminé
-Phase 2 — Backend API             ✅ Terminé (4 endpoints, 29 tests Jest)
+Phase 2 — Backend API             ✅ Terminé (4 endpoints V1, 41 tests Jest de rétrocompat)
 Phase 3 — Frontend WebView        ✅ Terminé (15 étapes, mobile + tablette)
 Phase 4 — Module CRM Sync         ✅ Terminé (déprécié 2026-05 → supprimé, remplacé par partage I-CRM async V2 Phase 8)
-Phase 5 — Tests E2E & Déploiement ✅ Terminé (9 tests Playwright, CI/CD)
+Phase 5 — Tests E2E & Déploiement ✅ Terminé (69 tests Playwright / 4 specs, CI/CD)
 ```
 
 ## Statut V2 (développement terminé)
@@ -20,7 +20,7 @@ Phase 5 — Tests E2E & Déploiement ✅ Terminé (9 tests Playwright, CI/CD)
 ```
 Phase 1 — Migration schéma DB     ✅ Terminé (9 nouveaux modèles Prisma)
 Phase 2 — Auth multi-rôles        ✅ Terminé (SUPER_ADMIN / ADMIN_BORNE)
-Phase 3 — API CRUD V2             ✅ Terminé (25+ endpoints, 72+ tests)
+Phase 3 — API CRUD V2             ✅ Terminé (67 routes / 13 fichiers, 510 tests)
 Phase 4 — Back-Office SuperAdmin  ✅ Terminé (React + Vite, src/backoffice/)
 Phase 5 — Back-Office AdminBorne  ✅ Terminé (cloisonnement données)
 Phase 6 — Front-Office Borne      ✅ Terminé (formulaire dynamique, i18n, offline)
@@ -28,6 +28,60 @@ Phase 7 — Internationalisation    ✅ Terminé (FR/ES/EN, fallback FR)
 Phase 8 — Partage I-CRM async     ✅ Terminé (Pusher + queue worker)
 Phase 9 — Tests & Déploiement     ✅ Terminé
 ```
+
+---
+
+## Chiffres de référence (mesurés le 2026-09-02)
+
+> Source unique de vérité pour les volumétries de tests. Toute autre valeur citée
+> ailleurs dans la doc est obsolète. Re-mesurer avec les commandes ci-dessous
+> avant de modifier ce tableau.
+
+| Périmètre | Valeur | Commande de mesure |
+|-----------|--------|--------------------|
+| Backend — suite complète | **510 tests / 35 suites** | `cd src/backend && npm test` |
+| Backend — rétrocompat V1 | **41 tests / 3 suites** | `cd src/backend && npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
+| Frontend Borne (Vitest) | **66 tests / 4 fichiers** | `cd src/frontend && npm test` |
+| Back-Office (Vitest) | **36 tests / 1 fichier** ⚠️ | `cd src/backoffice && npm test` |
+| E2E Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
+| Routes API backend | **67 handlers / 13 fichiers** | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
+
+> ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 510 tests, toujours
+> 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
+> est un **plancher qui monte** — en cas de doute, c'est la commande qui fait foi, pas
+> le chiffre écrit ici.
+
+⚠️ **Back-Office sous-testé** : 1 seul fichier de test (`src/services/pusherService.test.js`)
+pour 39 fichiers source (comptés le 2026-09-02). C'est le trou de couverture le plus
+large du dépôt.
+
+---
+
+## Production (2026-09-02)
+
+| Cible | URL / valeur |
+|-------|--------------|
+| Backend API | **https://estimer-mes-aides-api.onrender.com** — **Render**, service `estimer-mes-aides-api` (`srv-dac30kbm8hqs73eb1d20`), plan free, région frankfurt, `rootDir: src/backend`, health check `/health`, autoDeploy sur `main` |
+| Front borne | https://estimer-mes-aides.vercel.app (Vercel) |
+| Back-office | https://estimer-mes-aides-wjp3.vercel.app (Vercel) |
+| Base de données | Supabase `aws-1-eu-north-1.pooler.supabase.com` — **vivante**, 19 tables, schéma complet |
+
+⚠️ **Railway est abandonné.** `src/backend/railway.json` et `railway.toml` ont été
+supprimés, remplacés par **`src/backend/render.yaml`**. L'URL
+`https://estimer-mes-aides-production.up.railway.app` est morte : ne jamais la réutiliser.
+
+⚠️ **Plan free Render — veille et réveil.** Le service s'endort après **15 min** sans
+trafic ; le réveil prend **~50 s**. Une borne démarrée après une période creuse attendra
+donc ce délai sur sa première requête. C'est un **choix assumé**, pas un défaut à
+corriger : documenter et attendre, ne pas conclure à une panne. Interroger `/health`
+avec `--max-time 90`, jamais avec un timeout court.
+
+✅ **La base Supabase n'a jamais été supprimée.** Un ancien audit l'a déclarée
+supprimée sur la foi d'un `NXDOMAIN` causé par une **panne DNS locale**. Le verdict qui
+fait foi est `cd src/backend && npx prisma migrate status`. Ne lancer aucune procédure
+de recréation de base sur la foi d'un échec de résolution DNS.
+
+Détail complet : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md).
 
 ---
 
@@ -39,6 +93,7 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 [Frontend Borne :5173]  ←→  [Back-Office :5175]
         ↕ HTTPS + JWT
 [Backend Node.js :3000]  ←→  [PostgreSQL Supabase]
+   (prod : Render, plan free)      (prod : pooler IPv4, 19 tables)
         ↑ WebSocket
 [Pusher — Notifications temps réel]
         ↓ Queue worker async
@@ -69,7 +124,7 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 8. **Couleur primaire V2** — `#5B2D8E` (PAS #5C2DD3 qui est V1 obsolète)
 9. **Double validation** — côté client ET côté backend (Zod)
 10. **HTTPS obligatoire** sur toutes les routes API en production
-11. **Ne jamais casser les 29 tests V1** — rétrocompatibilité obligatoire
+11. **Ne jamais casser les 41 tests de rétrocompatibilité V1** — obligatoire
 
 ---
 
@@ -78,7 +133,7 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 ```bash
 # Backend V2 (port 3000)
 cd src/backend && npm run dev
-cd src/backend && npm test          # 72+ tests Jest (V1 + V2)
+cd src/backend && npm test          # 510 tests Jest / 35 suites (V1 + V2)
 
 # Frontend Borne (port 5173)
 cd src/frontend && npm run dev
@@ -90,6 +145,7 @@ cd src/backoffice && npm install && npm run dev
 cd src/backend && npx prisma migrate deploy
 
 # Seed V2 (SuperAdmin + formulaire démo + borne démo)
+# ⚠️ réécrit VITE_BORNE_ID dans src/frontend/.env — voir avertissement sous ce bloc
 cd src/backend && npm run prisma:seed
 
 # Créer SuperAdmin en production
@@ -98,6 +154,15 @@ cd src/backend && node scripts/create-superadmin.js
 # Générer un JWT CRM V1 (valable 24h)
 cd src/backend && node scripts/generate-crm-jwt.js
 ```
+
+> ⚠️ **`npm run prisma:seed` modifie `src/frontend/.env` sans prévenir.**
+> `src/backend/prisma/seed.js` résout `../../frontend/.env` (ligne 10) et y réécrit
+> `VITE_BORNE_ID` avec l'id de la borne de démo (`fs.writeFileSync`, ligne 1176).
+> Le fichier étant gitignoré, la modification n'apparaît dans aucun `git status` :
+> après un seed, le front local pointe sur la borne de démo, pas sur celle sur laquelle
+> on travaillait. Sauvegarder `src/frontend/.env` avant, le vérifier après — et ne
+> jamais lancer `prisma:seed` depuis un poste dont `src/backend/.env` pointe sur la
+> base de production.
 
 ---
 
@@ -127,6 +192,15 @@ VITE_API_URL=http://localhost:3000
 VITE_API_KEY=ema_mobile_...
 ```
 
+> **En production**, ces valeurs ne vivent pas dans le dépôt :
+> - backend → dashboard **Render**, service `estimer-mes-aides-api` → *Environment*
+>   (`src/backend/render.yaml` déclare les clés en `sync: false`, jamais les valeurs) ;
+> - frontends → dashboard **Vercel** → *Settings → Environment Variables*, avec
+>   `VITE_API_URL=https://estimer-mes-aides-api.onrender.com`.
+>
+> `PUSHER_SECRET` est une variable **serveur uniquement** : jamais de `VITE_` devant,
+> jamais dans un projet Vercel — un bundle front est public.
+
 ---
 
 ## Fichiers de référence
@@ -138,3 +212,6 @@ VITE_API_KEY=ema_mobile_...
 | `.kiro/steering/` | Règles et standards du projet (backend, frontend, design) |
 | `src/backend/prisma/schema.prisma` | Schéma DB V1 + V2 |
 | `src/backend/src/routes/` | Tous les endpoints API |
+| `src/backend/render.yaml` | Blueprint Render du backend de production (remplace `railway.json`/`railway.toml`, supprimés) |
+| `docs/DEPLOIEMENT.md` | Architecture prod, URLs, variables, pipeline, reprise après sinistre, pièges |
+| `CHANGELOG.md` | Historique des versions et des incidents |
