@@ -21,7 +21,7 @@ function isAdresseField(normalizedLabel) {
   return /(^|\s)(adresse|direccion|address|rue)(\s|$)/.test(normalizedLabel)
 }
 
-export default function FieldRenderer({ question, value, onChange, onAddressSelected, countryCode, langue }) {
+export default function FieldRenderer({ question, value, onChange, onAddressSelected, countryCode, langue, error }) {
   const { typeOption, options } = question
   const translatedOptions = tOptions(options, langue)
   const useCompactTwoColumns = translatedOptions.length > 0 && translatedOptions.length <= 4
@@ -32,12 +32,29 @@ export default function FieldRenderer({ question, value, onChange, onAddressSele
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
 
+  const errorId = error ? `err-${question.id}` : undefined
+
+  // Message de format sous le champ (règle 9 côté client).
+  // Aucun style de .pf-input n'est modifié : la taille de police (17px) et la
+  // hauteur de frappe (54px) restent conformes au mobile-first.
   const renderFrame = (control) => (
-    <div className="grad-border">
-      <div className="grad-border-inner">
-        {control}
+    <>
+      <div className="grad-border" style={error ? { background: '#DC2626' } : undefined}>
+        <div className="grad-border-inner">
+          {control}
+        </div>
       </div>
-    </div>
+      {error && (
+        <p
+          id={errorId}
+          role="alert"
+          className="mt-2 font-semibold"
+          style={{ color: '#DC2626', fontSize: '15px', lineHeight: 1.35 }}
+        >
+          {error}
+        </p>
+      )}
+    </>
   )
 
   switch (typeOption) {
@@ -62,6 +79,8 @@ export default function FieldRenderer({ question, value, onChange, onAddressSele
           onChange={e => onChange(toUpper(e.target.value))}
           className="pf-input"
           autoCapitalize="characters"
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={errorId}
           style={{ textTransform: 'uppercase' }}
         />
       )
@@ -76,13 +95,20 @@ export default function FieldRenderer({ question, value, onChange, onAddressSele
           rows={4}
           className="pf-input pf-textarea"
           autoCapitalize="characters"
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={errorId}
           style={{ textTransform: 'uppercase' }}
         />
       )
 
     case 'telephone':
       return renderFrame(
-        <PhoneInput onChange={onChange} />
+        <PhoneInput
+          onChange={onChange}
+          defaultCountry={countryCode || 'FR'}
+          ariaInvalid={error ? 'true' : undefined}
+          ariaDescribedBy={errorId}
+        />
       )
 
     case 'email':
@@ -96,6 +122,8 @@ export default function FieldRenderer({ question, value, onChange, onAddressSele
           className="pf-input"
           inputMode="email"
           autoCapitalize="none"
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={errorId}
         />
       )
 
@@ -187,6 +215,8 @@ export default function FieldRenderer({ question, value, onChange, onAddressSele
           onChange={e => onChange(toUpper(e.target.value))}
           className="pf-input"
           autoCapitalize="characters"
+          aria-invalid={error ? 'true' : undefined}
+          aria-describedby={errorId}
           style={{ textTransform: 'uppercase' }}
         />
       )

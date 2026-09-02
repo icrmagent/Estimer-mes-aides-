@@ -20,7 +20,7 @@ Phase 5 — Tests E2E & Déploiement ✅ Terminé (69 tests Playwright / 4 specs
 ```
 Phase 1 — Migration schéma DB     ✅ Terminé (9 nouveaux modèles Prisma)
 Phase 2 — Auth multi-rôles        ✅ Terminé (SUPER_ADMIN / ADMIN_BORNE)
-Phase 3 — API CRUD V2             ✅ Terminé (67 routes / 13 fichiers, 510 tests)
+Phase 3 — API CRUD V2             ✅ Terminé (67 routes / 13 fichiers, 596 tests)
 Phase 4 — Back-Office SuperAdmin  ✅ Terminé (React + Vite, src/backoffice/)
 Phase 5 — Back-Office AdminBorne  ✅ Terminé (cloisonnement données)
 Phase 6 — Front-Office Borne      ✅ Terminé (formulaire dynamique, i18n, offline)
@@ -39,14 +39,14 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 
 | Périmètre | Valeur | Commande de mesure |
 |-----------|--------|--------------------|
-| Backend — suite complète | **510 tests / 35 suites** | `cd src/backend && npm test` |
+| Backend — suite complète | **596 tests / 37 suites** | `cd src/backend && npm test` |
 | Backend — rétrocompat V1 | **41 tests / 3 suites** | `cd src/backend && npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
 | Frontend Borne (Vitest) | **66 tests / 4 fichiers** | `cd src/frontend && npm test` |
 | Back-Office (Vitest) | **36 tests / 1 fichier** ⚠️ | `cd src/backoffice && npm test` |
 | E2E Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
 | Routes API backend | **67 handlers / 13 fichiers** | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
 
-> ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 510 tests, toujours
+> ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 596 tests, toujours
 > 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
 > est un **plancher qui monte** — en cas de doute, c'est la commande qui fait foi, pas
 > le chiffre écrit ici.
@@ -133,7 +133,7 @@ Détail complet : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md).
 ```bash
 # Backend V2 (port 3000)
 cd src/backend && npm run dev
-cd src/backend && npm test          # 510 tests Jest / 35 suites (V1 + V2)
+cd src/backend && npm test          # 596 tests Jest / 37 suites (V1 + V2)
 
 # Frontend Borne (port 5173)
 cd src/frontend && npm run dev

@@ -117,6 +117,16 @@ function Field({ label, icon, type, value, onChange, disabled, placeholder, auto
   )
 }
 
+/* ─── Parse JSON tolérant : renvoie null si le corps n'est pas du JSON ──── */
+async function readJsonSafe(res) {
+  try {
+    return await res.json()
+  } catch {
+    // Corps non-JSON (page d'erreur HTML d'un proxy) : ce n'est pas une panne réseau.
+    return null
+  }
+}
+
 /* ─── Vérifie si un JWT stocké est encore valide (non expiré) ─────────── */
 function isTokenValid(token) {
   try {
@@ -184,6 +194,21 @@ export default function LoginPage() {
   const isLocked = lockoutUntil > now
   const remaining = isLocked ? Math.ceil((lockoutUntil - now) / 1000) : 0
 
+  /** Incrémente le compteur local et arme le verrouillage kiosque à MAX_ATTEMPTS. */
+  function registerFailedAttempt() {
+    const n = attempts + 1
+    setAttempts(n)
+    localStorage.setItem(ATTEMPTS_KEY, String(n))
+    if (n >= MAX_ATTEMPTS) {
+      const until = Date.now() + LOCKOUT_MS
+      setLockoutUntil(until)
+      localStorage.setItem(LOCKOUT_KEY, String(until))
+      setError('Trop de tentatives. Réessayez dans 5 minutes.')
+    } else {
+      setError(`Identifiants invalides. ${MAX_ATTEMPTS - n} tentative(s) restante(s).`)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     if (isLocked) return
@@ -195,9 +220,27 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, context: 'borne' }),
       })
-      const data = await res.json()
 
-      if (res.ok && data.token) {
+      // `res.ok` est testé AVANT tout parse : sur 502/503 l'hébergeur renvoie une
+      // page HTML, et un res.json() prématuré transformait une panne serveur en
+      // « erreur réseau » — l'exploitant cherchait le Wi-Fi au lieu du backend.
+      if (!res.ok) {
+        if (res.status === 401) {
+          registerFailedAttempt()
+        } else if (res.status === 429) {
+          setError('Trop de tentatives de connexion — accès temporairement bloqué par le serveur. Réessayez dans quelques minutes.')
+        } else if (res.status >= 500) {
+          setError(`Service indisponible (erreur ${res.status}) — le serveur redémarre peut-être. Réessayez dans une minute.`)
+        } else {
+          const body = await readJsonSafe(res)
+          setError(body?.error || `Connexion refusée par le serveur (erreur ${res.status}).`)
+        }
+        return
+      }
+
+      const data = await readJsonSafe(res)
+
+      if (data?.token) {
         // localStorage choisi intentionnellement : device kiosque dédié, pas de navigation inter-onglets.
         // httpOnly cookie complexifierait le timeout 60s (CLAUDE.md règle 3). Décision validée audit 2026-05-13.
         localStorage.setItem('borne_token', data.token)
@@ -232,20 +275,10 @@ export default function LoginPage() {
 
         navigate('/start', { replace: true })
       } else {
-        const n = attempts + 1
-        setAttempts(n)
-        localStorage.setItem(ATTEMPTS_KEY, String(n))
-        if (n >= MAX_ATTEMPTS) {
-          const until = Date.now() + LOCKOUT_MS
-          setLockoutUntil(until)
-          localStorage.setItem(LOCKOUT_KEY, String(until))
-          setError('Trop de tentatives. Réessayez dans 5 minutes.')
-        } else {
-          setError(`Identifiants invalides. ${MAX_ATTEMPTS - n} tentative(s) restante(s).`)
-        }
+        setError('Réponse inattendue du serveur. Contactez votre administrateur.')
       }
     } catch {
-      setError('Erreur de connexion. Vérifiez votre réseau.')
+      setError('Serveur injoignable. Vérifiez le réseau de la borne, puis réessayez.')
     } finally {
       setLoading(false)
     }

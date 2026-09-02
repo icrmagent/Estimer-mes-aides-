@@ -3,8 +3,12 @@
  *
  * Two-tier rate limiting per ADR-1 / R20.6:
  *
- * Tier 1 (handled by express-rate-limit): 100 req/15 min global, 5 req/15 min login
+ * Tier 1 (express-rate-limit — voir `rateLimit.js` pour les seuils et leur
+ *   justification) : compteurs par IP, 429 au-delà du seuil
  * Tier 2 (this file): IP blocked for 1 hour after 10 rate-limit violations within 1 hour
+ *
+ * Le tier 1 est le SEUL appelant de `trackRateLimitViolation()` : sans lui monté,
+ * `ipBlockCheck` ne peut jamais bloquer quoi que ce soit.
  *
  * Redis is OPTIONAL. When REDIS_URL is absent or unreachable, tier 2 degrades to a
  * no-op: the backend still starts and still serves traffic (tier 1 remains active).
@@ -186,6 +190,26 @@ function getRedisClient() {
 }
 
 /**
+ * Chemins des sondes de disponibilité, exemptés de toute limitation.
+ * Dupliqué (volontairement) depuis rateLimit.js : importer PROBE_PATHS d'ici
+ * créerait un cycle d'import entre les deux middlewares.
+ */
+const PROBE_PATHS = new Set(['/health', '/healthz'])
+
+/**
+ * Client Redis partagé avec le store du rate limiter tier 1.
+ *
+ * Retourne null tant que Redis n'est pas connecté (et déclenche au plus une
+ * tentative de connexion en arrière-plan) : l'appelant doit alors se rabattre
+ * sur son propre store mémoire. Ne bloque jamais, ne lève jamais.
+ *
+ * @returns {import('ioredis').Redis|null}
+ */
+export function getRateLimitRedis() {
+  return getRedisClient()
+}
+
+/**
  * Close the Redis connection cleanly (graceful shutdown).
  * Safe to call when Redis was never connected.
  *
@@ -253,6 +277,10 @@ export async function trackRateLimitViolation(ip) {
  * @type {import('express').RequestHandler}
  */
 export async function ipBlockCheck(req, res, next) {
+  // Les sondes (/health toutes les 5 s côté Render) ne doivent jamais être
+  // bloquées, ni payer un aller-retour Redis.
+  if (PROBE_PATHS.has((req.originalUrl || req.url || '').split('?')[0])) return next()
+
   const redis = getRedisClient()
   if (!redis) return next() // graceful degradation — no Redis, no block
 

@@ -9,6 +9,7 @@ import ExitButton from '../components/ExitButton.jsx'
 import InactivityManager from '../components/InactivityManager.jsx'
 import { useOfflineSync } from '../hooks/useOfflineSync.js'
 import { groupQuestionsByPage } from '../utils/groupQuestionsByPage.js'
+import { validateQuestionValue, normalizeQuestionValue } from '../utils/validation.js'
 import ilaLogo from '../assets/logo.png'
 import homeEnv from '../assets/homeenv.png'
 
@@ -116,13 +117,23 @@ export function FormPage() {
   const titre = t(config.titre, langue) || t(defaultTexts.titre, langue)
   const sousTitre = t(config.sousTitre, langue) || t(defaultTexts.sousTitre, langue)
 
-  const isStepValid = !currentPage || currentQuestions.every((question) => {
+  // Règle 9 — validation de format côté client (miroir du backend).
+  // Le pays vient de la borne (Borne.pays), la langue de la sélection en cours.
+  const pays = borne?.pays || 'FR'
+  const fieldErrors = {}
+  for (const question of currentQuestions) {
+    const message = validateQuestionValue(question, values[question.id], { pays, langue })
+    if (message) fieldErrors[question.id] = message
+  }
+  const hasFormatError = Object.keys(fieldErrors).length > 0
+
+  const isStepValid = !currentPage || (!hasFormatError && currentQuestions.every((question) => {
     if (!question.obligatoire) return true
     const val = values[question.id]
     if (val === undefined || val === null || val === '') return false
     if (Array.isArray(val) && val.length === 0) return false
     return true
-  })
+  }))
 
   const handleNext = () => {
     if (currentStep < totalSteps - 1) {
@@ -132,15 +143,27 @@ export function FormPage() {
     }
   }
 
+  /**
+   * Construit les réponses à envoyer à l'API.
+   * Les valeurs de contact sont normalisées (CP canonique, téléphone E.164,
+   * email en minuscules) ; celles dont le format reste invalide sont écartées
+   * plutôt que de faire rejeter tout l'enregistrement par le backend.
+   */
+  const buildReponses = () =>
+    Object.entries(values)
+      .filter(([, v]) => v !== '' && v !== undefined && !(Array.isArray(v) && v.length === 0))
+      .map(([questionId, valeur]) => {
+        const question = questions.find((q) => q.id === questionId)
+        const brut = Array.isArray(valeur) ? valeur.join(', ') : String(valeur)
+        const { valid, value } = normalizeQuestionValue(question, brut, { pays })
+        return valid ? { questionId, valeur: value } : null
+      })
+      .filter(Boolean)
+
   const handleSubmit = async () => {
     setSubmitting(true)
 
-    const reponses = Object.entries(values)
-      .filter(([, v]) => v !== '' && v !== undefined && !(Array.isArray(v) && v.length === 0))
-      .map(([questionId, valeur]) => ({
-        questionId,
-        valeur: Array.isArray(valeur) ? valeur.join(', ') : String(valeur),
-      }))
+    const reponses = buildReponses()
 
     const enregistrement = {
       borneId: borne?.id,
@@ -263,12 +286,7 @@ export function FormPage() {
 
   const handleManualAbandon = async () => {
     if (currentStep > 0) {
-      const reponses = Object.entries(values)
-        .filter(([, v]) => v !== '' && v !== undefined && !(Array.isArray(v) && v.length === 0))
-        .map(([questionId, valeur]) => ({
-          questionId,
-          valeur: Array.isArray(valeur) ? valeur.join(', ') : String(valeur),
-        }))
+      const reponses = buildReponses()
 
       if (reponses.length > 0) {
         const enregistrement = {
@@ -411,8 +429,9 @@ export function FormPage() {
                       value={values[question.id]}
                       onChange={(val) => setValue(question.id, val)}
                       onAddressSelected={handleAddressSelected}
-                      countryCode={borne?.pays || 'FR'}
+                      countryCode={pays}
                       langue={langue}
+                      error={fieldErrors[question.id]}
                     />
 
                     {paragrapheInfo && (

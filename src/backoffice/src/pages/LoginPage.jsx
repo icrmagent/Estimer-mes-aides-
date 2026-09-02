@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 import api from '../services/api.js'
+import { describeAuthError } from '../utils/apiResponse.js'
 
 function EyeIcon() {
   return (
@@ -54,7 +55,7 @@ export default function LoginPage() {
       localStorage.setItem('ema_user_email', email)
       login(res.data.token, res.data.refreshToken)
     } catch (err) {
-      setError(err.response?.data?.error || 'Identifiants invalides')
+      setError(describeAuthError(err))
     } finally {
       setLoading(false)
     }
@@ -89,7 +90,7 @@ export default function LoginPage() {
                   <line x1="12" y1="8" x2="12" y2="12"/>
                   <line x1="12" y1="16" x2="12.01" y2="16"/>
                 </svg>
-                {typeof error === 'string' ? error : 'Identifiants invalides'}
+                <span role="alert">{error}</span>
               </div>
             )}
 

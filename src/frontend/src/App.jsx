@@ -80,7 +80,7 @@ function RootRedirect() {
 function KioskLayout() {
   // Env var en priorité (dev local), sinon borneId stocké après login (APK bundle)
   const borneId = import.meta.env.VITE_BORNE_ID || localStorage.getItem('borne_id') || null
-  const { loading, loadError } = useBorneConfig(borneId, API_URL)
+  const { loading, loadError, wakingUp } = useBorneConfig(borneId, API_URL)
 
   if (!borneId) {
     return (
@@ -99,8 +99,15 @@ function KioskLayout() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#f5f6fa', fontFamily: 'sans-serif' }}>
-        <p style={{ color: '#5B2D8E', fontSize: '18px', fontWeight: 'bold' }}>Chargement de la configuration de la borne...</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '10px', minHeight: '100vh', background: '#f5f6fa', fontFamily: 'sans-serif' }} role="status" aria-live="polite">
+        <p style={{ color: '#5B2D8E', fontSize: '18px', fontWeight: 'bold', margin: 0 }}>
+          {wakingUp ? 'Réveil du serveur en cours…' : 'Chargement de la configuration de la borne...'}
+        </p>
+        {wakingUp && (
+          <p style={{ color: '#555', fontSize: '15px', margin: 0, textAlign: 'center', maxWidth: '420px' }}>
+            La première connexion après une période d’inactivité peut prendre jusqu’à une minute.
+          </p>
+        )}
       </div>
     )
   }

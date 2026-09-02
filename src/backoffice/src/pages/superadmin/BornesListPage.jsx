@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import ConfirmCredentialsModal from '../../components/ConfirmCredentialsModal.jsx'
+import { getMetaTotal, getTotalPages } from '../../utils/apiResponse.js'
 import {
   PRIMARY,
   IcoMore, IcoPlus,
@@ -105,7 +106,7 @@ export default function BornesListPage() {
     api.get('/api/bornes', { params })
       .then(res => {
         setBornes(res.data.bornes || res.data.data || res.data || [])
-        setTotal(res.data.total || 0)
+        setTotal(getMetaTotal(res))
       })
       .catch(err => setError(err.response?.data?.error || 'Erreur de chargement'))
       .finally(() => setLoading(false))
@@ -184,7 +185,7 @@ export default function BornesListPage() {
 
   const inputClass = 'border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-shadow'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }
-  const totalPages = Math.ceil(total / limit)
+  const totalPages = getTotalPages(total, limit)
 
   return (
     <AppLayout>

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { apiKeyAuth } from '../middleware/apiKeyAuth.js'
 import { jwtAuth } from '../middleware/jwtAuth.js'
 import { createSubmission, getSubmissions, markSynced } from '../services/submissionService.js'
+import { validateSubmissionValues } from '../lib/contactFormats.js'
 
 export const submissionsRouter = Router()
 
@@ -29,8 +30,18 @@ submissionsRouter.post('/', apiKeyAuth, async (req, res) => {
   if (!result.success) {
     return res.status(400).json({ error: result.error.issues[0].message })
   }
+  // Règle 9 — validation de FORMAT des champs de contact V1 (field IDs CRM
+  // 2089 code postal / 2015 téléphone / 2016 email, cf. docs/CONTEXT.md).
+  // V1 n'a pas de champ pays : le formulaire V1 est le formulaire français figé
+  // de docs/CONTEXT.md, la règle appliquée est donc celle de la France.
+  const { values, erreurs } = validateSubmissionValues(result.data.values)
+  if (erreurs.length > 0) {
+    // Forme de réponse V1 conservée telle quelle ({ error: string }).
+    return res.status(400).json({ error: erreurs[0].message })
+  }
+
   try {
-    const submission = await createSubmission(result.data)
+    const submission = await createSubmission({ ...result.data, values })
     res.status(201).json({
       id: submission.id,
       createdAt: submission.createdAt,

@@ -39,6 +39,18 @@ api.interceptors.request.use(async (config) => {
   return config
 })
 
+// ── Routes d'authentification ─────────────────────────────────────────────
+// Un 401 sur ces routes signale de mauvais identifiants (ou un refresh token
+// expiré), pas une session à rafraîchir. Les traiter comme une session expirée
+// déclenchait `window.location.href = '/login'` : la page se rechargeait et le
+// message d'erreur du formulaire disparaissait avant d'être lu.
+const AUTH_ENDPOINTS = ['/api/auth/login', '/api/auth/refresh', '/api/auth/logout']
+
+export function isAuthEndpoint(config) {
+  const url = config?.url || ''
+  return AUTH_ENDPOINTS.some((path) => url.includes(path))
+}
+
 // ── Response interceptor: 401 (refresh) + 403 CSRF_INVALID (refresh CSRF) ─
 let isRefreshing = false
 let failedQueue = []
@@ -59,7 +71,9 @@ api.interceptors.response.use(
     // ── 403 CSRF_INVALID: refresh token + retry once ──────────────────────
     if (
       err.response?.status === 403 &&
-      err.response?.data?.code === 'CSRF_INVALID' &&
+      // Le backend enveloppe le code : { success:false, error:{ code } }.
+      // L'ancienne lecture `data.code` etait toujours undefined -> rejeu jamais declenche.
+      (err.response?.data?.error?.code ?? err.response?.data?.code) === 'CSRF_INVALID' &&
       !originalRequest._csrfRetry
     ) {
       originalRequest._csrfRetry = true
@@ -74,7 +88,11 @@ api.interceptors.response.use(
     }
 
     // ── 401: refresh access token + retry ─────────────────────────────────
-    if (err.response?.status === 401 && !originalRequest._retry) {
+    if (
+      err.response?.status === 401 &&
+      !originalRequest?._retry &&
+      !isAuthEndpoint(originalRequest)
+    ) {
       const refreshToken = localStorage.getItem('ema_refresh_token')
 
       if (!refreshToken) {

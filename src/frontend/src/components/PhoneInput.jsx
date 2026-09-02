@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { validateTelephone } from '../utils/validation.js'
 import s from './PhoneInput.module.css'
 
 const COUNTRIES = [
@@ -224,6 +225,8 @@ export function PhoneInput({
   placeholder = '06 00 00 00 00',
   className = '',
   inputId,
+  ariaInvalid,
+  ariaDescribedBy,
 }) {
   const [country, setCountry] = useState(
     () => COUNTRIES.find(c => c.code === defaultCountry) ?? COUNTRIES[0]
@@ -262,16 +265,30 @@ export function PhoneInput({
 
   const close = () => { setOpen(false); setSearch('') }
 
+  /**
+   * Remonte la valeur au format E.164 (« +33612345678 ») dès qu'elle est
+   * normalisable : le 0 national est retiré, ce que le CRM attend.
+   * Tant que la saisie est incomplète, la valeur brute est remontée telle
+   * quelle pour que FormPage puisse afficher l'erreur de format.
+   */
+  const emit = (dial, val) => {
+    // `dial` porte déjà le « + » : la valeur est internationale, le pays est
+    // donc déduit de l'indicatif et l'argument `pays` n'est pas nécessaire.
+    const brut = `${dial} ${val}`.trim()
+    const result = validateTelephone(brut)
+    onChange?.(result.valid ? result.value : brut)
+  }
+
   const select = c => {
     setCountry(c)
-    onChange?.(`${c.dial} ${number}`.trim())
+    emit(c.dial, number)
     close()
   }
 
   const handleNumber = e => {
     const val = e.target.value
     setNumber(val)
-    onChange?.(`${country.dial} ${val}`.trim())
+    emit(country.dial, val)
   }
 
   useEffect(() => {
@@ -331,6 +348,8 @@ export function PhoneInput({
         placeholder={placeholder}
         onChange={handleNumber}
         autoComplete="tel-national"
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
       />
 
       {/* ── Dropdown (portal) ── */}

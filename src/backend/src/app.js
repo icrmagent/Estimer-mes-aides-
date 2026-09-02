@@ -17,9 +17,14 @@ import { dashboardRouter } from './routes/dashboard.js'
 import { partageRouter } from './routes/partage.js'
 import { categoriesQuestionsRouter } from './routes/categories-questions.js'
 import { canauxRouter } from './routes/canaux.js'
-import { csrfProtectionMiddleware, generateToken } from './middleware/csrfProtection.js'
+import { csrfProtectionMiddleware, issueCsrfToken } from './middleware/csrfProtection.js'
 import { globalErrorHandler } from './lib/errorSanitizer.js'
 import { ipBlockCheck } from './middleware/ipBlockMiddleware.js'
+import {
+  globalLimiter,
+  submissionsLimiter,
+  enregistrementsLimiter,
+} from './middleware/rateLimit.js'
 import logger from './lib/logger.js'
 import { initSentry, isSentryEnabled, Sentry } from './lib/sentry.js'
 import { prisma } from './lib/prisma.js'
@@ -45,13 +50,60 @@ process.on('uncaughtException', (err) => {
 
 const app = express()
 
-// Trust proxy : Render (et la plupart des PaaS) place un load balancer devant le backend.
-// Sans cela, req.ip = IP du LB (peut varier entre connections) → casse :
-//  - la validation CSRF dont la session identifier dépend de req.ip
-//  - les rate limiters par IP
-//  - les logs d'audit
-// Avec '1' : Express fait confiance à 1 hop de proxy et lit X-Forwarded-For.
-app.set('trust proxy', 1)
+// ─── Trust proxy ────────────────────────────────────────────────────────────
+//
+// La chaîne réelle en production comporte DEUX proxies qui ajoutent chacun une
+// entrée à X-Forwarded-For :
+//     client → edge Cloudflare → routeur/LB Render → cette application
+// (les réponses portent bien `Server: cloudflare` ET `x-render-origin-server: Render`).
+//
+// Express interprète une valeur NUMÉRIQUE n comme « faire confiance aux n
+// proxies les plus proches du serveur », et prend comme req.ip la (n+1)-ième
+// adresse en partant de la droite de X-Forwarded-For. Conséquences mesurées :
+//
+//   XFF = "203.0.113.7, 172.68.x.y"   (client, puis edge Cloudflare ajouté par Render)
+//     n=1    → req.ip = 172.68.x.y  → IP d'edge Cloudflare, DIFFÉRENTE d'une
+//              requête à l'autre. C'est ce qui rendait la validation CSRF non
+//              déterministe (~8 échecs 403 CSRF_INVALID sur 10) et ce qui rend
+//              tout rate limiting par IP inopérant (chaque requête = un compteur).
+//     n=2    → req.ip = 203.0.113.7 → vraie IP client, stable.
+//
+// Pourquoi 2 et pas `true` / une valeur plus grande : avec `true` (ou n ≥ 3),
+// Express remonte jusqu'à l'entrée la plus à gauche de X-Forwarded-For, or
+// cette entrée est fournie par le CLIENT. Un client envoyant
+// `X-Forwarded-For: 1.2.3.4` se ferait alors passer pour 1.2.3.4 — contournement
+// direct du blocage d'IP et du rate limiting. Avec le compte de sauts EXACT (2),
+// l'entrée forgée est repoussée vers la gauche et purement ignorée : la valeur
+// lue reste celle écrite par l'edge Cloudflare, que le client ne contrôle pas.
+//
+// Pourquoi un compte de sauts et pas une liste d'adresses de confiance : les
+// plages d'edge Cloudflare (~15 préfixes, révisées régulièrement) et les IP
+// internes du LB Render (non documentées, dynamiques) devraient être maintenues
+// à la main ; une plage périmée casserait silencieusement la résolution d'IP.
+//
+// En dev/test il n'y a aucun proxy devant l'application : la valeur par défaut
+// est 0 (aucune confiance), sinon un appelant local pourrait forger son IP.
+// TRUST_PROXY_HOPS permet de suivre un changement de topologie d'hébergement
+// sans modifier le code.
+export function resolveTrustProxyHops(env = process.env) {
+  const fallback = env.NODE_ENV === 'production' ? 2 : 0
+  const raw = env.TRUST_PROXY_HOPS
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return fallback
+  }
+  const parsed = Number.parseInt(String(raw).trim(), 10)
+  if (!Number.isInteger(parsed) || parsed < 0 || String(parsed) !== String(raw).trim()) {
+    logger.warn({
+      message: '[TRUST PROXY] TRUST_PROXY_HOPS invalide, valeur par défaut appliquée',
+      received: String(raw),
+      applied: fallback,
+    })
+    return fallback
+  }
+  return parsed
+}
+
+app.set('trust proxy', resolveTrustProxyHops())
 
 app.use(helmet())
 app.use(compression())
@@ -161,11 +213,19 @@ app.get('/health', async (req, res) => {
   })
 })
 
+// Rate limiting tier 1 — monté APRÈS ipBlockCheck (ADR-1 / R20.6) et APRÈS la
+// route /health, qui reste ainsi hors de portée du limiteur même si la liste
+// PROBE_PATHS venait à changer.
+app.use(globalLimiter)
+
 // Public endpoint — generates and returns a CSRF token (no auth required)
-// The token is also set in a cookie by csrf-csrf for the double-submit pattern
+// Deux cookies sont posés : `x-csrf-token` (paire token+hash, lisible par le JS
+// client) et `x-csrf-session` (identifiant de session opaque, httpOnly) auquel
+// le hash est lié. Le client doit renvoyer les deux — fetch/axios en
+// `credentials: 'include'` — plus l'en-tête X-CSRF-Token sur les écritures.
 app.get('/api/csrf-token', (req, res) => {
   try {
-    const token = generateToken(req, res)
+    const token = issueCsrfToken(req, res)
     return res.json({ csrfToken: token })
   } catch (err) {
     // Task 28.6 — Use logger.error() in route error handlers
@@ -179,7 +239,7 @@ app.get('/api/csrf-token', (req, res) => {
 
 // V1 routes (conservés) — no CSRF (backward compatibility)
 app.use('/api/configuration', configurationRouter)
-app.use('/api/submissions', submissionsRouter)
+app.use('/api/submissions', submissionsLimiter, submissionsRouter)
 
 // V2 auth routes — no CSRF (login/refresh are public or use Bearer tokens)
 app.use('/api/auth', authRouter)
@@ -187,7 +247,7 @@ app.use('/api/auth', authRouter)
 // V2 Borne routes — no CSRF per ADR-4 (Bearer JWT auth, not browser session)
 // /api/enregistrements POST    : données soumises par la borne
 // /api/bornes/:id/session POST/DELETE : sync estConnectee côté borne (kiosque)
-app.use('/api/enregistrements', enregistrementsRouter)
+app.use('/api/enregistrements', enregistrementsLimiter, enregistrementsRouter)
 app.use('/api/bornes', borneSessionRouter)
 
 // V2 Backoffice routes — CSRF protected per ADR-4

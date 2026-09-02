@@ -67,10 +67,10 @@ jobs:
           done
 
   # ─────────────────────────────────────────────────────────────
-  # 2. TESTS — Backend Jest (510 tests)
+  # 2. TESTS — Backend Jest (596 tests)
   # ─────────────────────────────────────────────────────────────
   tests:
-    name: Tests backend — 510 tests Jest
+    name: Tests backend — 596 tests Jest
     needs: sync
     runs-on: ubuntu-latest
     if: ${{ inputs.skip_tests != true }}

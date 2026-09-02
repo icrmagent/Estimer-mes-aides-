@@ -43,7 +43,7 @@ jobs:
   # TESTS UNITAIRES
   # ─────────────────────────────────────────────────────────────
   backend-tests:
-    name: Backend — 510 tests Jest
+    name: Backend — 596 tests Jest
     runs-on: ubuntu-latest
     defaults:
       run:

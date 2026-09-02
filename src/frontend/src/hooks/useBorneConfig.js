@@ -4,17 +4,26 @@ import { useBorne } from '../context/BorneContext.jsx'
 const CACHE_KEY = 'ema_borne_config'
 const CACHE_TTL = 24 * 60 * 60 * 1000 // 24h en ms
 
+// L'API dort après 15 min d'inactivité (hébergement free) et met ~50 s à répondre
+// au premier appel. Le timeout laisse la marge du réveil sans figer la borne
+// indéfiniment ; `wakingUp` permet d'en informer l'utilisateur au-delà de quelques
+// secondes plutôt que de laisser un écran de chargement muet.
+const REQUEST_TIMEOUT_MS = 60_000
+const WAKE_HINT_MS = 4_000
+
 /**
  * Charge la config borne depuis l'API ou le cache localStorage (TTL 24h).
  * Nécessite un JWT AdminBorne valide dans localStorage ('borne_token').
  *
  * @param {string} borneId - UUID de la borne
  * @param {string} apiUrl - base URL de l'API
+ * @returns {{ loading: boolean, loadError: string|null, wakingUp: boolean }}
  */
 export function useBorneConfig(borneId, apiUrl) {
   const { setConfig, setError } = useBorne()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
+  const [wakingUp, setWakingUp] = useState(false)
 
   // Les actions du contexte borne sont recréées à chaque changement d'état du
   // provider. On les lit via une ref pour que le chargement ne dépende que de
@@ -27,53 +36,88 @@ export function useBorneConfig(borneId, apiUrl) {
   useEffect(() => {
     if (!borneId) return
 
+    let cancelled = false
+    let wakeTimer = null
+    const pending = new Set()
+
+    function startWakeHint() {
+      clearTimeout(wakeTimer)
+      wakeTimer = setTimeout(() => {
+        if (!cancelled) setWakingUp(true)
+      }, WAKE_HINT_MS)
+    }
+
+    function stopWakeHint() {
+      clearTimeout(wakeTimer)
+      wakeTimer = null
+      if (!cancelled) setWakingUp(false)
+    }
+
+    /** fetch borné dans le temps : sans AbortController un réveil bloqué fige l'écran. */
+    async function timedFetch(url, options) {
+      const controller = new AbortController()
+      pending.add(controller)
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+      try {
+        return await fetch(url, { ...options, signal: controller.signal })
+      } finally {
+        clearTimeout(timer)
+        pending.delete(controller)
+      }
+    }
+
+    function applyCache(id) {
+      const cached = localStorage.getItem(`${CACHE_KEY}_${id}`)
+      if (!cached) return false
+      const { data } = JSON.parse(cached)
+      borneActionsRef.current.setConfig(data.borne, data.formulaire)
+      return true
+    }
+
+    function fail(message) {
+      borneActionsRef.current.setError(message)
+      setLoadError(message)
+      setLoading(false)
+    }
+
     async function fetchFromApi(id, base) {
       const token = localStorage.getItem('borne_token')
       if (!token) {
-        const err = 'Non authentifié — veuillez vous connecter'
-        borneActionsRef.current.setError(err)
-        setLoadError(err)
-        setLoading(false)
+        fail('Non authentifié — veuillez vous connecter')
         return
       }
 
+      startWakeHint()
       try {
-        const res = await fetch(`${base || ''}/api/bornes/${id}/config`, {
+        const res = await timedFetch(`${base || ''}/api/bornes/${id}/config`, {
           headers: { Authorization: `Bearer ${token}` },
         })
+        if (cancelled) return
 
         if (res.status === 401) {
           // Règle métier : la borne reste toujours connectée — ne pas supprimer le token.
           // Utiliser le cache existant si disponible.
           try {
-            const cached = localStorage.getItem(`${CACHE_KEY}_${id}`)
-            if (cached) {
-              const { data } = JSON.parse(cached)
-              borneActionsRef.current.setConfig(data.borne, data.formulaire)
+            if (applyCache(id)) {
               setLoading(false)
               return
             }
           } catch (cacheErr) {
             console.warn('[useBorneConfig] Cache illisible après 401 :', cacheErr?.message ?? cacheErr)
           }
-          const err = 'Configuration indisponible — veuillez contacter l\'administrateur'
-          borneActionsRef.current.setError(err)
-          setLoadError(err)
-          setLoading(false)
+          fail('Configuration indisponible — veuillez contacter l\'administrateur')
           return
         }
 
         if (res.status === 403) {
-          const err = 'Borne désactivée ou accès refusé'
-          borneActionsRef.current.setError(err)
-          setLoadError(err)
-          setLoading(false)
+          fail('Borne désactivée ou accès refusé')
           return
         }
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
         const json = await res.json()
+        if (cancelled) return
         const data = json.data || json
 
         // Mettre en cache
@@ -84,14 +128,13 @@ export function useBorneConfig(borneId, apiUrl) {
 
         borneActionsRef.current.setConfig(data.borne, data.formulaire)
       } catch (err) {
+        if (cancelled) return
+        const timedOut = err?.name === 'AbortError'
         console.warn('[useBorneConfig] Chargement API échoué :', err?.message ?? err)
 
         // Fallback sur le cache même expiré
         try {
-          const cached = localStorage.getItem(`${CACHE_KEY}_${id}`)
-          if (cached) {
-            const { data } = JSON.parse(cached)
-            borneActionsRef.current.setConfig(data.borne, data.formulaire)
+          if (applyCache(id)) {
             setLoadError('Mode hors ligne — configuration en cache')
             setLoading(false)
             return
@@ -100,11 +143,12 @@ export function useBorneConfig(borneId, apiUrl) {
           console.warn('[useBorneConfig] Cache de secours illisible :', cacheErr?.message ?? cacheErr)
         }
 
-        const errMsg = 'Impossible de charger la configuration de la borne'
-        borneActionsRef.current.setError(errMsg)
-        setLoadError(errMsg)
+        fail(timedOut
+          ? 'Le serveur ne répond pas (délai dépassé). Vérifiez la connexion de la borne, puis réessayez.'
+          : 'Impossible de charger la configuration de la borne')
       } finally {
-        setLoading(false)
+        stopWakeHint()
+        if (!cancelled) setLoading(false)
       }
     }
 
@@ -112,11 +156,12 @@ export function useBorneConfig(borneId, apiUrl) {
       const token = localStorage.getItem('borne_token')
       if (!token) return
       try {
-        const res = await fetch(`${base || ''}/api/bornes/${id}/config`, {
+        const res = await timedFetch(`${base || ''}/api/bornes/${id}/config`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-        if (!res.ok) return
+        if (!res.ok || cancelled) return
         const json = await res.json()
+        if (cancelled) return
         const data = json.data || json
         localStorage.setItem(`${CACHE_KEY}_${id}`, JSON.stringify({
           data,
@@ -132,6 +177,7 @@ export function useBorneConfig(borneId, apiUrl) {
     async function load() {
       setLoading(true)
       setLoadError(null)
+      setWakingUp(false)
 
       // 1. Vérifier le cache localStorage
       try {
@@ -155,7 +201,14 @@ export function useBorneConfig(borneId, apiUrl) {
     }
 
     load()
+
+    return () => {
+      cancelled = true
+      clearTimeout(wakeTimer)
+      pending.forEach((controller) => controller.abort())
+      pending.clear()
+    }
   }, [borneId, apiUrl])
 
-  return { loading, loadError }
+  return { loading, loadError, wakingUp }
 }

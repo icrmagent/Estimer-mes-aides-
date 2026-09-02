@@ -61,6 +61,11 @@ const mockEnregistrement = {
 const mockPartageJob = {
   create: jest.fn(),
 }
+// POST /api/enregistrements charge les métadonnées des questions (typeOption +
+// crmFieldIds) pour la validation de format côté backend (règle 9).
+const mockQuestion = {
+  findMany: jest.fn().mockResolvedValue([]),
+}
 
 jest.unstable_mockModule('../../src/lib/prisma.js', () => ({
   prisma: {
@@ -73,6 +78,7 @@ jest.unstable_mockModule('../../src/lib/prisma.js', () => ({
     borne: mockBorne,
     enregistrement: mockEnregistrement,
     partageJob: mockPartageJob,
+    question: mockQuestion,
     formulaire: { findUnique: jest.fn().mockResolvedValue({ version: '1.0.0' }) },
     enregistrementReponse: { findMany: jest.fn().mockResolvedValue([]) },
   },

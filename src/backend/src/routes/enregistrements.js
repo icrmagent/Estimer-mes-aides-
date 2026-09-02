@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
 import { publishEvent } from '../services/pusherService.js'
+import { validateReponsesContact } from '../lib/contactFormats.js'
 import logger from '../lib/logger.js'
 
 export const enregistrementsRouter = Router()
@@ -134,6 +135,36 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
   }
 
   try {
+    // Règle 9 — validation de FORMAT côté backend (code postal / téléphone / email).
+    // Le type de champ est déduit des vrais field IDs CRM portés par la question
+    // (2089 / 2015 / 2016, cf. docs/CONTEXT.md) et de son typeOption ; le pays
+    // vient de `Borne.pays`, déjà chargée ci-dessus.
+    const questionIds = [...new Set(reponses.map((r) => r.questionId))]
+    const questionsMeta = questionIds.length
+      ? (await prisma.question.findMany({
+          where: { id: { in: questionIds } },
+          select: { id: true, typeOption: true, crmFieldIds: true },
+        })) || []
+      : []
+    const questionsById = new Map(questionsMeta.map((q) => [q.id, q]))
+
+    const { reponses: reponsesValidees, erreurs } = validateReponsesContact(
+      reponses,
+      questionsById,
+      borne.pays
+    )
+
+    if (erreurs.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Format de champ invalide',
+          details: { formatErrors: erreurs },
+        },
+      })
+    }
+
     // Task 37.8 — Stamp formulaireVersion at submission time (ADR-5)
     const formulaire = await prisma.formulaire.findUnique({
       where: { id: formulaireId },
@@ -147,7 +178,7 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
         langueUtilisee,
         formulaireVersion: formulaire?.version ?? '1.0.0',
         reponses: {
-          create: reponses.map(({ questionId, valeur }) => ({ questionId, valeur })),
+          create: reponsesValidees.map(({ questionId, valeur }) => ({ questionId, valeur })),
         },
       },
       include: { reponses: true },

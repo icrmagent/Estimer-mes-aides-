@@ -59,7 +59,7 @@ Phase 9 — Tests & Déploiement      [x] Terminé — pipeline GitHub Actions, 
 
 | Périmètre | Mesure | Commande |
 |-----------|--------|----------|
-| Backend Jest — suite complète | 510 tests / 35 suites | `cd src/backend && npm test` |
+| Backend Jest — suite complète | 596 tests / 37 suites | `cd src/backend && npm test` |
 | Backend Jest — rétrocompat V1 | 41 tests / 3 suites | `--testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
 | Frontend Borne — Vitest | 66 tests / 4 fichiers | `cd src/frontend && npm test` |
 | Back-Office — Vitest | 36 tests / 1 fichier | `cd src/backoffice && npm test` |

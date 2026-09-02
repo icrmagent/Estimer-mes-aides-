@@ -264,7 +264,7 @@ copié le `dist` du front à l'étape 2, sinon l'APK embarque un front périmé.
 
 | Périmètre | Mesure | Commande |
 |-----------|--------|----------|
-| Backend Jest — suite complète | **510 tests / 35 suites** | `cd src/backend && npm test` |
+| Backend Jest — suite complète | **596 tests / 37 suites** | `cd src/backend && npm test` |
 | Backend Jest — rétrocompat V1 | **41 tests / 3 suites** | `npx jest --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
 | Frontend Borne — Vitest | **66 tests / 4 fichiers** | `cd src/frontend && npm test` |
 | Back-Office — Vitest | **36 tests / 1 fichier** | `cd src/backoffice && npm test` |
@@ -274,7 +274,7 @@ copié le `dist` du front à l'étape 2, sinon l'APK embarque un front périmé.
 | Tags git | **25**, tous `deploy-*`, **0 semver** | `git tag -l \| wc -l` |
 | Commits sur `main` | **59** | `git rev-list --count HEAD` |
 
-> ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 510 tests, toujours
+> ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 596 tests, toujours
 > 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
 > est un **plancher qui monte** — en cas de doute, c'est la commande qui fait foi, pas
 > le chiffre écrit ici.
@@ -499,7 +499,7 @@ import('./src/lib/prisma.js').then(async ({prisma}) => {
 
 ```
 1. sync         → checkout + vérif lockfiles présents dans les 4 modules
-2. tests        → npm test (510 tests Jest, V1 + V2)
+2. tests        → npm test (596 tests Jest, V1 + V2)
 3. migrate      → prisma migrate deploy sur Supabase (DIRECT_URL pooler 5432)
 4. healthcheck  → curl /health (retry 20×15s = 5 min max — attend le redeploy Render,
                   et absorbe le réveil ~50 s du plan free)
@@ -1121,7 +1121,7 @@ Chiffres re-mesurés le 2026-09-02 — voir la section
 [Chiffres de référence](#chiffres-de-référence-mesurés-le-2026-09-02).
 
 ```bash
-# Backend — 510 tests / 35 suites (V1 + V2)
+# Backend — 596 tests / 35 suites (V1 + V2)
 cd src/backend && npm test
 
 # Backend — rétrocompatibilité V1 seule : 41 tests / 3 suites
