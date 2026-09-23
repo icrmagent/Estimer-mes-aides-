@@ -4,6 +4,15 @@ import { useBorne } from '../context/BorneContext.jsx'
 const CACHE_KEY = 'ema_borne_config'
 const CACHE_TTL = 24 * 60 * 60 * 1000 // 24h en ms
 
+// Événement émis quand le back-office signale une mise à jour de l'écran de veille
+// (Pusher `ecran-veille.maj`, cf. App.jsx). Découple le canal temps réel du hook.
+const ECRAN_VEILLE_REFRESH_EVENT = 'ema:ecran-veille-refresh'
+
+/** Demande au hook monté de recharger l'écran de veille depuis l'API. */
+export function requestEcranVeilleRefresh() {
+  window.dispatchEvent(new Event(ECRAN_VEILLE_REFRESH_EVENT))
+}
+
 // L'API dort après 15 min d'inactivité (hébergement free) et met ~50 s à répondre
 // au premier appel. Le timeout laisse la marge du réveil sans figer la borne
 // indéfiniment ; `wakingUp` permet d'en informer l'utilisateur au-delà de quelques
@@ -20,7 +29,7 @@ const WAKE_HINT_MS = 4_000
  * @returns {{ loading: boolean, loadError: string|null, wakingUp: boolean }}
  */
 export function useBorneConfig(borneId, apiUrl) {
-  const { setConfig, setError } = useBorne()
+  const { setConfig, setError, setEcranVeille } = useBorne()
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const [wakingUp, setWakingUp] = useState(false)
@@ -28,9 +37,9 @@ export function useBorneConfig(borneId, apiUrl) {
   // Les actions du contexte borne sont recréées à chaque changement d'état du
   // provider. On les lit via une ref pour que le chargement ne dépende que de
   // (borneId, apiUrl) et ne se relance pas en boucle sur son propre setConfig.
-  const borneActionsRef = useRef({ setConfig, setError })
+  const borneActionsRef = useRef({ setConfig, setError, setEcranVeille })
   useEffect(() => {
-    borneActionsRef.current = { setConfig, setError }
+    borneActionsRef.current = { setConfig, setError, setEcranVeille }
   })
 
   useEffect(() => {
@@ -70,8 +79,14 @@ export function useBorneConfig(borneId, apiUrl) {
       const cached = localStorage.getItem(`${CACHE_KEY}_${id}`)
       if (!cached) return false
       const { data } = JSON.parse(cached)
-      borneActionsRef.current.setConfig(data.borne, data.formulaire)
+      applyData(data)
       return true
+    }
+
+    // Un cache antérieur à l'écran de veille n'a pas la clé : pas de veille, pas d'erreur.
+    function applyData(data) {
+      borneActionsRef.current.setConfig(data.borne, data.formulaire)
+      borneActionsRef.current.setEcranVeille?.(data.ecranVeille ?? null)
     }
 
     function fail(message) {
@@ -126,7 +141,7 @@ export function useBorneConfig(borneId, apiUrl) {
           timestamp: Date.now(),
         }))
 
-        borneActionsRef.current.setConfig(data.borne, data.formulaire)
+        applyData(data)
       } catch (err) {
         if (cancelled) return
         const timedOut = err?.name === 'AbortError'
@@ -152,7 +167,7 @@ export function useBorneConfig(borneId, apiUrl) {
       }
     }
 
-    async function refreshInBackground(id, base) {
+    async function refreshInBackground(id, base, { ecranVeilleOnly = false } = {}) {
       const token = localStorage.getItem('borne_token')
       if (!token) return
       try {
@@ -167,7 +182,8 @@ export function useBorneConfig(borneId, apiUrl) {
           data,
           timestamp: Date.now(),
         }))
-        borneActionsRef.current.setConfig(data.borne, data.formulaire)
+        if (ecranVeilleOnly) borneActionsRef.current.setEcranVeille?.(data.ecranVeille ?? null)
+        else applyData(data)
       } catch (err) {
         // Rafraîchissement opportuniste : la config en cache reste valide.
         console.debug('[useBorneConfig] Rafraîchissement en arrière-plan échoué :', err?.message ?? err)
@@ -185,7 +201,7 @@ export function useBorneConfig(borneId, apiUrl) {
         if (cached) {
           const { data, timestamp } = JSON.parse(cached)
           if (Date.now() - timestamp < CACHE_TTL) {
-            borneActionsRef.current.setConfig(data.borne, data.formulaire)
+            applyData(data)
             setLoading(false)
             // Recharger en arrière-plan pour mettre à jour le cache
             refreshInBackground(borneId, apiUrl)
@@ -202,7 +218,11 @@ export function useBorneConfig(borneId, apiUrl) {
 
     load()
 
+    const onEcranVeilleRefresh = () => refreshInBackground(borneId, apiUrl, { ecranVeilleOnly: true })
+    window.addEventListener(ECRAN_VEILLE_REFRESH_EVENT, onEcranVeilleRefresh)
+
     return () => {
+      window.removeEventListener(ECRAN_VEILLE_REFRESH_EVENT, onEcranVeilleRefresh)
       cancelled = true
       clearTimeout(wakeTimer)
       pending.forEach((controller) => controller.abort())

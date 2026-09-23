@@ -11,6 +11,7 @@ const initial = {
   borne: null,          // données de la borne
   formulaire: null,     // formulaire actif
   questions: [],        // questions triées par orderPage
+  ecranVeille: null,    // diaporama de veille (null = pas de veille)
   langue: 'fr',         // langue active du visiteur (réinitialisée à chaque session)
   configLoaded: false,
   configError: null,
@@ -30,6 +31,11 @@ function reducer(state, action) {
         configLoaded: true,
         configError: null,
       }
+    case 'SET_ECRAN_VEILLE':
+      // Action séparée de SET_CONFIG : une mise à jour de la veille poussée en
+      // temps réel ne doit ni changer de formulaire ni réinitialiser la langue
+      // d'un visiteur en pleine saisie.
+      return { ...state, ecranVeille: action.ecranVeille ?? null }
     case 'SET_LANGUE':
       return { ...state, langue: action.langue }
     case 'SET_ERROR':
@@ -63,6 +69,7 @@ export function BorneProvider({ children }) {
     ...state,
     isOnline,
     setConfig: (borne, formulaire) => dispatch({ type: 'SET_CONFIG', borne, formulaire }),
+    setEcranVeille: (ecranVeille) => dispatch({ type: 'SET_ECRAN_VEILLE', ecranVeille }),
     setLangue: (langue) => dispatch({ type: 'SET_LANGUE', langue }),
     setError: (error) => dispatch({ type: 'SET_ERROR', error }),
     resetLangue: () => dispatch({ type: 'RESET_LANGUE' }),

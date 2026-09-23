@@ -7,6 +7,7 @@
  * Événements écoutés :
  *   - force-login  → payload { token, email } : la borne est /login → stocke le token et entre en kiosque
  *   - force-logout → quitte le kiosque et retourne sur /login
+ *   - ecran-veille.maj → l'écran de veille affecté a changé : recharger sa config
  *
  * Le canal est public (pas d'auth Pusher) et accepte le no-op si VITE_PUSHER_KEY est absent.
  */
@@ -21,10 +22,10 @@ let channelName = null
  * Retourne une fonction de cleanup à appeler au démontage.
  *
  * @param {string} borneId
- * @param {{ onForceLogin: (data: object) => void, onForceLogout: (data: object) => void }} handlers
+ * @param {{ onForceLogin: (data: object) => void, onForceLogout: (data: object) => void, onEcranVeilleMaj?: (data: object) => void }} handlers
  * @returns {() => void} cleanup
  */
-export function connectBorneChannel(borneId, { onForceLogin, onForceLogout }) {
+export function connectBorneChannel(borneId, { onForceLogin, onForceLogout, onEcranVeilleMaj }) {
   const key = import.meta.env.VITE_PUSHER_KEY
   if (!key || !borneId) {
     return () => {}
@@ -41,11 +42,13 @@ export function connectBorneChannel(borneId, { onForceLogin, onForceLogout }) {
   channel = client.subscribe(channelName)
   channel.bind('force-login', onForceLogin)
   channel.bind('force-logout', onForceLogout)
+  if (onEcranVeilleMaj) channel.bind('ecran-veille.maj', onEcranVeilleMaj)
 
   return () => {
     if (channel) {
       channel.unbind('force-login', onForceLogin)
       channel.unbind('force-logout', onForceLogout)
+      if (onEcranVeilleMaj) channel.unbind('ecran-veille.maj', onEcranVeilleMaj)
     }
     if (client && channelName) {
       client.unsubscribe(channelName)

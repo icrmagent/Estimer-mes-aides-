@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage.jsx'
 import StartPage from './pages/StartPage.jsx'
 import { FormPage } from './pages/FormPage.jsx'
 import { ConfirmationPage } from './pages/ConfirmationPage.jsx'
-import { useBorneConfig } from './hooks/useBorneConfig.js'
+import { useBorneConfig, requestEcranVeilleRefresh } from './hooks/useBorneConfig.js'
 import { connectBorneChannel } from './services/borneRemoteControl.js'
 import { exitKiosk } from './services/kioskService'
 
@@ -36,6 +36,7 @@ function BorneRemoteControlBridge() {
         localStorage.removeItem('borne_email')
         navigate('/login', { replace: true })
       },
+      onEcranVeilleMaj: () => requestEcranVeilleRefresh(),
     })
 
     return cleanup

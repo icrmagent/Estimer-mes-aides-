@@ -11,7 +11,8 @@ import { createContext, useContext } from 'react'
  * {
  *   borne: { id, idBorne, langueDefaut, adresse, commercant, regie, installateur },
  *   formulaire: { id, label, version, dureeRetourAccueil, annulationInactivite,
- *                 pageDebutConfig, pageFinConfig, questions: [...] }
+ *                 pageDebutConfig, pageFinConfig, questions: [...] },
+ *   ecranVeille: { id, delaiActivation, transition, ..., diapositives: [...] } | null
  * }
  */
 export const BorneContext = createContext(null)
