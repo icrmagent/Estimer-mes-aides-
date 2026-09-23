@@ -39,9 +39,10 @@ Version **2.1.0** dans les trois `package.json` : l'APK est reconstruit avec
   médias préchargés pour le hors-ligne (Cache API).
 
 #### Corrigé (PR #12)
-- Envoi de fichiers en 503 en production : la clé Supabase, nommée `SUPABASE_KEY`, n'était
-  pas lue. Alias acceptés (`SUPABASE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_KEY`),
-  format `sb_secret_…` pris en charge, `SUPABASE_URL` déduite de `DATABASE_URL`.
+- Envoi de fichiers en 503 en production juste après la saisie de la clé Supabase : résolu
+  au redéploiement. La clé est désormais aussi lue sous `SUPABASE_KEY`, `SUPABASE_SECRET_KEY`
+  ou `SUPABASE_SERVICE_KEY` (format `sb_secret_…` pris en charge), et `SUPABASE_URL` est
+  déduite de `DATABASE_URL` si absente.
 
 #### Modifié
 - `PUT /api/bornes/:id` : `ecranVeilleId` réservé au SuperAdmin.
