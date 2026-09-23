@@ -19,9 +19,11 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
-### 2026-09-23 — Écran de veille des bornes
+### 2026-09-23 — v2.1.0 : écran de veille des bornes
 
-Branche `feat/ecran-veille` (commits `d4e6a0f`, `dfb5823`, `624076f`).
+Branche `feat/ecran-veille` (commits `d4e6a0f`, `dfb5823`, `624076f`), PR #10.
+Version **2.1.0** dans les trois `package.json` : l'APK est reconstruit avec
+`versionName` 2.1.0 et doit être redistribué pour que les tablettes aient la veille.
 
 #### Ajouté
 - **Backend** : modèles `EcranVeille` / `DiapositiveVeille`, `Borne.ecranVeilleId`

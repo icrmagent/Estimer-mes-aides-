@@ -1,6 +1,6 @@
 {
   "name": "estimer-mes-aides-backend",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Backend API pour l'application Estimer Mes Aides",
   "type": "module",
   "main": "server.js",
