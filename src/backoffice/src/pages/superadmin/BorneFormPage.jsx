@@ -21,8 +21,10 @@ export default function BorneFormPage() {
     canalTransmission: '',
     formulaireId: '',
     adminBorneId: '',
+    ecranVeilleId: '',
   })
   const [formulaires, setFormulaires] = useState([])
+  const [ecransVeille, setEcransVeille] = useState([])
   const [adminBornes, setAdminBornes] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -33,9 +35,11 @@ export default function BorneFormPage() {
     Promise.all([
       api.get('/api/formulaires').catch(() => ({ data: [] })),
       api.get('/api/admin-bornes').catch(() => ({ data: [] })),
-    ]).then(([fRes, aRes]) => {
+      api.get('/api/ecrans-veille').catch(() => ({ data: [] })),
+    ]).then(([fRes, aRes, eRes]) => {
       setFormulaires(fRes.data.formulaires || fRes.data.data || fRes.data || [])
       setAdminBornes(aRes.data.adminBornes || aRes.data.data || aRes.data || [])
+      setEcransVeille(eRes.data.data || [])
     })
 
     if (isEdit) {
@@ -53,6 +57,7 @@ export default function BorneFormPage() {
             canalTransmission: b.canalTransmission || '',
             formulaireId: b.formulaireId || '',
             adminBorneId: b.adminBorneId || '',
+            ecranVeilleId: b.ecranVeilleId || '',
           })
         })
         .catch(() => setError('Borne introuvable'))
@@ -71,7 +76,7 @@ export default function BorneFormPage() {
     setLoading(true)
     try {
       // `idBorne` est généré côté backend : il n'est jamais envoyé.
-      const payload = { ...form }
+      const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
       delete payload.idBorne
       if (isEdit) {
         await api.put(`/api/bornes/${id}`, payload)
@@ -269,6 +274,26 @@ export default function BorneFormPage() {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Écran de veille</label>
+            <select
+              value={form.ecranVeilleId}
+              onChange={e => handleChange('ecranVeilleId', e.target.value)}
+              className={inputClass}
+              style={inputStyle}
+            >
+              <option value="">— Aucun (la borne reste sur l'écran d'accueil) —</option>
+              {ecransVeille.map(ev => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.nom}{ev.actif ? '' : ' (inactif)'} — {ev.nbDiapositivesActives} diapo{ev.nbDiapositivesActives > 1 ? 's' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Diaporama affiché après une période d'inactivité. Se gère dans « Écrans de veille ».
+            </p>
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-2">

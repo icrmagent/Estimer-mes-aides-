@@ -1,6 +1,6 @@
 # PLAN.md — Plan de Développement Phasé
 
-> Dernière mise à jour : **2026-09-02**.
+> Dernière mise à jour : **2026-09-23** (écran de veille, voir la section dédiée plus bas).
 > Avant cette date, ce fichier datait du 2026-04-26 et ne connaissait que les
 > 5 phases V1 : les 9 phases V2, pourtant terminées et déployées depuis mai 2026,
 > n'y figuraient pas. Il annonçait aussi la Phase 5 comme « déploiement à faire »
@@ -95,8 +95,8 @@ leurs assets et pointent déjà vers l'URL Render.
 
 ## Prochaine phase — Remise en service (en cours)
 
-Aucun développement de fonctionnalité n'est en cours. La seule tâche ouverte est la
-remise en ligne du backend sur Render.
+Tâche d'exploitation ouverte : la remise en ligne du backend sur Render. Côté
+fonctionnalités, l'écran de veille est développé et attend son merge (section dédiée).
 
 ```
 Étape 1 — Base Supabase + migrations              [x] Sans objet — base vivante et à jour
@@ -145,6 +145,45 @@ https://github.com/settings/installations.
 - **21 tests visuels Playwright hors CI** : les baselines n'existent qu'en `-win32.png`,
   elles ne peuvent pas s'exécuter sur le runner `ubuntu-latest`. Les 48 tests
   fonctionnels, eux, tournent partout.
+
+---
+
+## Fonctionnalité — Écran de veille des bornes (2026-09-23, branche `feat/ecran-veille`)
+
+Après `delaiActivation` secondes d'inactivité sur l'écran d'accueil (`/start`), la borne
+affiche un diaporama (texte, photo, galerie, vidéo) édité dans le back-office.
+
+Décisions validées par l'utilisateur :
+- **Médias** : envoi de fichiers vers Supabase Storage via URL signée (le fichier ne passe
+  pas par Render), saisie d'URL HTTPS toujours possible.
+- **Portée** : plusieurs diaporamas nommés (`EcranVeille`), chacun affecté à N bornes.
+- **Droits** : SuperAdmin seul en écriture ; AdminBorne en lecture de ce qui est affecté à ses bornes.
+
+```
+Étape 1 — Base + backend           [x] Terminé — migration 20260923000000_ecran_veille,
+                                       7 routes /api/ecrans-veille, config borne étendue,
+                                       38 tests (suite complète : 634 tests / 38 suites)
+Étape 2 — Back-office SuperAdmin   [x] Terminé — liste, éditeur (séquence / réglages /
+                                       bornes), aperçu tablette, lecture plein écran,
+                                       envoi Supabase ; 26 tests (82 / 5 fichiers)
+Étape 3 — Borne                    [x] Terminé — ScreenSaver sur /start, plage horaire,
+                                       cache hors ligne, Pusher ecran-veille.maj ;
+                                       20 tests (139 / 11 fichiers)
+Étape 4 — Mise en production       [ ] En attente de validation utilisateur (migration DB)
+```
+
+Reste à faire pour la mise en production :
+1. Renseigner `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` dans Render (dashboard Supabase
+   → *Settings → API*). Sans elles, seules les URLs de médias fonctionnent.
+2. Merger `feat/ecran-veille` dans `main` : la migration s'applique au démarrage
+   (`start:prod`), l'APK est reconstruit par `deploy.yml` (le frontend y est embarqué).
+3. Redistribuer l'APK aux tablettes — sans nouvel APK, la borne n'a pas l'écran de veille.
+4. Vérifier un envoi réel de fichier : le flux URL signée n'a été testé qu'avec des
+   réponses Supabase simulées.
+
+Avant la mise en production : renseigner `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`
+dans Render (sans elles, l'envoi de fichiers répond 503 et seules les URLs sont acceptées).
+La migration est appliquée automatiquement au démarrage (`start:prod`).
 
 ---
 

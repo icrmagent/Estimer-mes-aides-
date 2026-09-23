@@ -40,11 +40,17 @@ jest.unstable_mockModule('../../src/services/bruteForceService.js', () => ({
   getRetryAfter: jest.fn().mockResolvedValue(0),
 }))
 
-// Mock Pusher to avoid real network calls
+// Mock Pusher to avoid real network calls.
+// Les jest.fn() sont créés hors de la fabrique : sous ESM, Jest peut l'appeler
+// plusieurs fois quand plusieurs modules importent pusherService en parallèle,
+// et chaque appel produirait sinon une instance distincte de publishEvent.
+const mockPublishEvent = jest.fn().mockResolvedValue(undefined)
+const mockNotifyPartageSucces = jest.fn().mockResolvedValue(undefined)
+const mockNotifyPartageEchec = jest.fn().mockResolvedValue(undefined)
 jest.unstable_mockModule('../../src/services/pusherService.js', () => ({
-  publishEvent: jest.fn().mockResolvedValue(undefined),
-  notifyPartageSucces: jest.fn().mockResolvedValue(undefined),
-  notifyPartageEchec: jest.fn().mockResolvedValue(undefined),
+  publishEvent: mockPublishEvent,
+  notifyPartageSucces: mockNotifyPartageSucces,
+  notifyPartageEchec: mockNotifyPartageEchec,
 }))
 
 // Prisma mock — all methods are jest.fn() so we can control return values per test

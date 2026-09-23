@@ -91,6 +91,8 @@ model Borne {
   formulaire      Formulaire?      @relation(fields: [formulaireId], references: [id])
   adminBorneId    String?
   adminBorne      AdminBorne?      @relation(fields: [adminBorneId], references: [id])
+  ecranVeilleId   String?
+  ecranVeille     EcranVeille?     @relation(fields: [ecranVeilleId], references: [id], onDelete: SetNull)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   deletedAt       DateTime?
@@ -100,8 +102,58 @@ model Borne {
 
   @@index([statut])
   @@index([adminBorneId])
+  @@index([ecranVeilleId])
   @@index([deletedAt])
   @@map("bornes")
+}
+
+// Diaporama affiché par la borne après `delaiActivation` secondes d'inactivité
+// sur l'écran d'accueil. Plage horaire optionnelle au format "HH:MM" (heure locale borne).
+model EcranVeille {
+  id               String              @id @default(uuid())
+  nom              String
+  description      String?
+  actif            Boolean             @default(true)
+  delaiActivation  Int                 @default(60)
+  transition       String              @default("fondu")
+  ordreAleatoire   Boolean             @default(false)
+  afficherCta      Boolean             @default(true)
+  texteCta         Json?
+  afficherLogo     Boolean             @default(true)
+  afficherHorloge  Boolean             @default(false)
+  heureDebut       String?
+  heureFin         String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  deletedAt        DateTime?
+  diapositives     DiapositiveVeille[]
+  bornes           Borne[]
+
+  @@index([deletedAt])
+  @@map("ecrans_veille")
+}
+
+// type : texte | image | galerie | video — `contenu` porte les médias propres au type,
+// `style` la mise en forme du texte incrusté. Titres en JSON i18n { fr, es, en }.
+model DiapositiveVeille {
+  id             String      @id @default(uuid())
+  ecranVeilleId  String
+  ecranVeille    EcranVeille @relation(fields: [ecranVeilleId], references: [id], onDelete: Cascade)
+  ordre          Int
+  type           String
+  duree          Int         @default(8)
+  actif          Boolean     @default(true)
+  titre          Json?
+  sousTitre      Json?
+  contenu        Json
+  style          Json?
+  dateDebut      DateTime?
+  dateFin        DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([ecranVeilleId, ordre])
+  @@map("diapositives_veille")
 }
 
 model Formulaire {

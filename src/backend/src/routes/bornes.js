@@ -31,6 +31,7 @@ const createBorneSchema = z.object({
   canalTransmission: z.string().trim().max(120).optional().nullable(),
   formulaireId: z.string().uuid().optional(),
   adminBorneId: z.string().uuid().optional(),
+  ecranVeilleId: z.string().uuid().nullable().optional(),
 })
 
 const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial()
@@ -123,6 +124,7 @@ bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), asyn
         include: {
           adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
           formulaire: { select: { id: true, label: true, version: true, statut: true } },
+          ecranVeille: { select: { id: true, nom: true, actif: true } },
         },
       }),
       prisma.borne.count({ where }),
@@ -149,6 +151,19 @@ bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =
     })
   }
 
+  if (parsed.data.ecranVeilleId) {
+    const ecran = await prisma.ecranVeille.findFirst({
+      where: { id: parsed.data.ecranVeilleId, deletedAt: null },
+      select: { id: true },
+    })
+    if (!ecran) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'ECRAN_VEILLE_NOT_FOUND', message: 'Écran de veille introuvable' },
+      })
+    }
+  }
+
   try {
     const data = {
       ...parsed.data,
@@ -172,6 +187,7 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       include: {
         adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
         formulaire: { select: { id: true, label: true, version: true, statut: true } },
+        ecranVeille: { select: { id: true, nom: true, actif: true } },
       },
     })
 
@@ -192,6 +208,28 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       success: false,
       error: { code: 'VALIDATION_ERROR', message: 'Données invalides', details: parsed.error.flatten() },
     })
+  }
+
+  // Écran de veille : affectation réservée au SuperAdmin, l'AdminBorne le consulte seulement.
+  if (parsed.data.ecranVeilleId !== undefined) {
+    if (req.user.role !== 'SUPER_ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: "Seul le SuperAdmin peut affecter un écran de veille" },
+      })
+    }
+    if (parsed.data.ecranVeilleId) {
+      const ecran = await prisma.ecranVeille.findFirst({
+        where: { id: parsed.data.ecranVeilleId, deletedAt: null },
+        select: { id: true },
+      })
+      if (!ecran) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'ECRAN_VEILLE_NOT_FOUND', message: 'Écran de veille introuvable' },
+        })
+      }
+    }
   }
 
   // Task 36.9 — If formulaireId is being set, verify the formulaire is published
@@ -219,6 +257,10 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
 
     // Invalidate borne config cache (task 26.7)
     await cacheService.delete(`borne-config:${req.params.id}`)
+
+    if (parsed.data.ecranVeilleId !== undefined) {
+      await publishEvent(`borne-${req.params.id}`, 'ecran-veille.maj', { ecranVeilleId: parsed.data.ecranVeilleId })
+    }
 
     return res.json({ success: true, data: borne })
   } catch (err) {

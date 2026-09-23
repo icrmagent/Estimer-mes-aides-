@@ -29,9 +29,21 @@ Phase 8 — Partage I-CRM async     ✅ Terminé (Pusher + queue worker)
 Phase 9 — Tests & Déploiement     ✅ Terminé
 ```
 
+## Évolutions post-V2
+
+```
+Écran de veille des bornes        ✅ Développé 2026-09-23 — branche feat/ecran-veille
+                                     (backend + back-office + borne), merge en attente
+```
+
+Diaporama (texte, photo, galerie, vidéo) affiché par la borne après une période
+d'inactivité sur l'écran d'accueil, édité dans le back-office (menu « Écrans de veille »)
+et affecté borne par borne. Médias : URL HTTPS ou envoi direct vers **Supabase Storage**
+par URL signée (le fichier ne transite pas par Render). Détail : `docs/PLAN.md`.
+
 ---
 
-## Chiffres de référence (mesurés le 2026-09-02)
+## Chiffres de référence (mesurés le 2026-09-23)
 
 > Source unique de vérité pour les volumétries de tests. Toute autre valeur citée
 > ailleurs dans la doc est obsolète. Re-mesurer avec les commandes ci-dessous
@@ -39,21 +51,22 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 
 | Périmètre | Valeur | Commande de mesure |
 |-----------|--------|--------------------|
-| Backend — suite complète | **596 tests / 37 suites** | `cd src/backend && npm test` |
+| Backend — suite complète | **634 tests / 38 suites** | `cd src/backend && npm test` |
 | Backend — rétrocompat V1 | **41 tests / 3 suites** | `cd src/backend && npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
-| Frontend Borne (Vitest) | **66 tests / 4 fichiers** | `cd src/frontend && npm test` |
-| Back-Office (Vitest) | **36 tests / 1 fichier** ⚠️ | `cd src/backoffice && npm test` |
+| Frontend Borne (Vitest) | **139 tests / 11 fichiers** | `cd src/frontend && npm test` |
+| Back-Office (Vitest) | **82 tests / 5 fichiers** ⚠️ | `cd src/backoffice && npm test` |
 | E2E Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
-| Routes API backend | **67 handlers / 13 fichiers** | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
+| Routes API backend | **74 handlers / 14 fichiers** | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
 
 > ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 596 tests, toujours
 > 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
 > est un **plancher qui monte** — en cas de doute, c'est la commande qui fait foi, pas
 > le chiffre écrit ici.
 
-⚠️ **Back-Office sous-testé** : 1 seul fichier de test (`src/services/pusherService.test.js`)
-pour 39 fichiers source (comptés le 2026-09-02). C'est le trou de couverture le plus
-large du dépôt.
+⚠️ **Back-Office sous-testé** : 5 fichiers de test, dont 2 pour l'écran de veille
+(`components/ecranVeille/model.test.js`, `services/ecransVeilleService.test.js`). Les
+pages et le cloisonnement AdminBorne restent non couverts : c'est le trou de couverture
+le plus large du dépôt.
 
 ---
 
@@ -133,7 +146,7 @@ Détail complet : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md).
 ```bash
 # Backend V2 (port 3000)
 cd src/backend && npm run dev
-cd src/backend && npm test          # 596 tests Jest / 37 suites (V1 + V2)
+cd src/backend && npm test          # 634 tests Jest / 38 suites (V1 + V2)
 
 # Frontend Borne (port 5173)
 cd src/frontend && npm run dev
@@ -181,6 +194,9 @@ PUSHER_SECRET=...
 PUSHER_CLUSTER=eu
 SUPERADMIN_EMAIL=admin@estimer-mes-aides.fr
 SUPERADMIN_PASSWORD_TEMP=...
+# Optionnel — médias de l'écran de veille (sans elles : envoi de fichier = 503, URLs acceptées)
+SUPABASE_URL=https://<projet>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...        # serveur uniquement, contourne les RLS
 
 # src/backoffice/.env
 VITE_API_URL=http://localhost:3000
@@ -198,8 +214,9 @@ VITE_API_KEY=ema_mobile_...
 > - frontends → dashboard **Vercel** → *Settings → Environment Variables*, avec
 >   `VITE_API_URL=https://estimer-mes-aides-api.onrender.com`.
 >
-> `PUSHER_SECRET` est une variable **serveur uniquement** : jamais de `VITE_` devant,
-> jamais dans un projet Vercel — un bundle front est public.
+> `PUSHER_SECRET` et `SUPABASE_SERVICE_ROLE_KEY` sont des variables **serveur
+> uniquement** : jamais de `VITE_` devant, jamais dans un projet Vercel — un bundle
+> front est public.
 
 ---
 

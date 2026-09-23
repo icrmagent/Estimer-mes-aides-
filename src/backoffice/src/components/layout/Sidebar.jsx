@@ -39,6 +39,13 @@ const Icons = {
       <line x1="12" y1="17" x2="12" y2="21"/>
     </svg>
   ),
+  screensaver: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+      <path d="M8 21h8M12 17v4"/>
+      <path d="M6 13l3.5-3.5 2.5 2.5 3-3 3 3"/>
+    </svg>
+  ),
   inbox: (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/>
@@ -155,6 +162,7 @@ export default function Sidebar({ isOpen, onClose }) {
             <NavItem to="/superadmin/categories-questions" label="Catégories" icon={Icons.tag} onClick={onClose} />
             <NavItem to="/superadmin/formulaires" label="Formulaires" icon={Icons.forms} onClick={onClose} />
             <NavItem to="/superadmin/bornes" label="Bornes" icon={Icons.monitor} onClick={onClose} />
+            <NavItem to="/superadmin/ecrans-veille" label="Écrans de veille" icon={Icons.screensaver} onClick={onClose} />
             <NavItem to="/superadmin/enregistrements" label="Enregistrements" icon={Icons.inbox} onClick={onClose} />
 
             <SectionLabel label="Intégration" />

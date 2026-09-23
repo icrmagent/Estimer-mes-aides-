@@ -73,6 +73,13 @@ services:
       - key: PUSHER_CLUSTER
         sync: false
 
+      # --- Supabase Storage (optionnel : medias de l'ecran de veille) ---
+      # Sans ces valeurs, l'envoi de fichiers repond 503 ; les URLs restent acceptees.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+
 # `sync: false` = valeur saisie dans le dashboard Render, jamais dans le depot.
 # Variables optionnelles non declarees ici (a ajouter dans le dashboard si activees) :
 # REDIS_URL, SENTRY_DSN.

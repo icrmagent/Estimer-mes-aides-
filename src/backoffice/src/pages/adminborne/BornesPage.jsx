@@ -3,6 +3,9 @@ import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import ConfirmCredentialsModal from '../../components/ConfirmCredentialsModal.jsx'
 import { ErrorBanner, Toast, SkeletonTableRows, EmptyState, BadgeBorneStatut } from '../../components/ui.jsx'
+import { ecransVeilleService } from '../../services/ecransVeilleService.js'
+import { PlaybackModal } from '../../components/ecranVeille/SlideView.jsx'
+import { fromApi } from '../../components/ecranVeille/model.js'
 
 export default function ABBornesPage() {
   const [bornes, setBornes] = useState([])
@@ -10,6 +13,16 @@ export default function ABBornesPage() {
   const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
   const [credModal, setCredModal] = useState({ isOpen: false, borne: null, action: null })
+  const [playback, setPlayback] = useState(null)
+
+  async function openEcranVeille(ecranId) {
+    try {
+      setPlayback(fromApi(await ecransVeilleService.get(ecranId)))
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || "Aperçu de l'écran de veille indisponible"))
+    }
+  }
 
   useEffect(() => {
     api.get('/api/bornes')
@@ -33,6 +46,7 @@ export default function ABBornesPage() {
   return (
     <AppLayout>
       {toast && <Toast message={toast.message} onClose={() => setToast(null)} />}
+      {playback && <PlaybackModal ecran={playback} onClose={() => setPlayback(null)} />}
 
       <div className="space-y-6">
         <div>
@@ -44,7 +58,7 @@ export default function ABBornesPage() {
 
         <ErrorBanner message={error} onClose={() => setError(null)} />
 
-        <div className="bg-white rounded-2xl shadow-sm">
+        <div className="bg-white rounded-2xl shadow-sm overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
@@ -53,15 +67,16 @@ export default function ABBornesPage() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Adresse</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire actif</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">Écran de veille</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonTableRows cols={6} rows={3} />
+                <SkeletonTableRows cols={7} rows={3} />
               ) : bornes.length === 0 ? (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <EmptyState
                       icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
                       title="Aucune borne assignée"
@@ -84,6 +99,19 @@ export default function ABBornesPage() {
                     <td className="px-4 py-3 text-gray-700 max-w-xs truncate">{borne.adresse}</td>
                     <td className="px-4 py-3"><BadgeBorneStatut statut={borne.statut} /></td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{borne.formulaire?.label || '—'}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {borne.ecranVeille ? (
+                        <button
+                          type="button"
+                          onClick={() => openEcranVeille(borne.ecranVeille.id)}
+                          className="font-semibold text-purple-800 hover:underline text-left"
+                          style={{ minHeight: '32px' }}
+                          title="Voir le diaporama"
+                        >
+                          {borne.ecranVeille.nom}{borne.ecranVeille.actif ? '' : ' (inactif)'} ▸
+                        </button>
+                      ) : <span className="text-gray-400">—</span>}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => openCredentialsForToggle(borne)}

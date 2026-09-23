@@ -261,16 +261,19 @@ copié le `dist` du front à l'étape 2, sinon l'APK embarque un front périmé.
 > Ces valeurs sont **mesurées**, pas estimées. Les chiffres qui circulaient
 > auparavant dans la doc (29 tests backend, 72+ tests V2, 9 tests E2E) étaient faux
 > ou périmés. Re-lancer les commandes ci-dessous avant de modifier ce tableau.
+>
+> **Re-mesuré le 2026-09-23** (écran de veille) : tests, routes et migrations.
+> Tags et commits sont restés à la mesure du 2026-09-02.
 
 | Périmètre | Mesure | Commande |
 |-----------|--------|----------|
-| Backend Jest — suite complète | **596 tests / 37 suites** | `cd src/backend && npm test` |
+| Backend Jest — suite complète | **634 tests / 38 suites** | `cd src/backend && npm test` |
 | Backend Jest — rétrocompat V1 | **41 tests / 3 suites** | `npx jest --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
-| Frontend Borne — Vitest | **66 tests / 4 fichiers** | `cd src/frontend && npm test` |
-| Back-Office — Vitest | **36 tests / 1 fichier** | `cd src/backoffice && npm test` |
+| Frontend Borne — Vitest | **139 tests / 11 fichiers** | `cd src/frontend && npm test` |
+| Back-Office — Vitest | **82 tests / 5 fichiers** | `cd src/backoffice && npm test` |
 | E2E — Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
-| Routes API backend | **67 handlers / 13 fichiers** | voir bloc ci-dessous |
-| Migrations Prisma | **15** | `ls -d src/backend/prisma/migrations/*/ \| wc -l` |
+| Routes API backend | **74 handlers / 14 fichiers** | voir bloc ci-dessous |
+| Migrations Prisma | **16** | `ls -d src/backend/prisma/migrations/*/ \| wc -l` |
 | Tags git | **25**, tous `deploy-*`, **0 semver** | `git tag -l \| wc -l` |
 | Commits sur `main` | **59** | `git rev-list --count HEAD` |
 
@@ -283,7 +286,7 @@ Comptage des routes — le motif doit exiger un **littéral de chemin** après l
 parenthèse, sinon il ramasse aussi des appels comme `cacheService.delete(...)` :
 
 ```bash
-grep -rhoE "\.(get|post|put|patch|delete)\(['\"]" src/backend/src/routes | wc -l   # 67
+grep -rhoE "\.(get|post|put|patch|delete)\(['\"]" src/backend/src/routes | wc -l   # 74
 grep -rcE  "\.(get|post|put|patch|delete)\(['\"]" src/backend/src/routes          # détail par fichier
 ```
 
@@ -387,6 +390,8 @@ PUSHER_CLUSTER=eu
 SUPERADMIN_EMAIL=
 SUPERADMIN_PASSWORD_TEMP=
 CORS_ALLOWED_ORIGINS=https://estimer-mes-aides.vercel.app,...
+SUPABASE_URL=https://<projet>.supabase.co     # optionnel — médias écran de veille
+SUPABASE_SERVICE_ROLE_KEY=                    # optionnel — serveur uniquement
 REDIS_URL=<si Redis activé>
 NODE_ENV=production
 ```
@@ -430,9 +435,9 @@ VITE_PUSHER_CLUSTER=eu
 ## Endpoints API
 
 > Le tableau ci-dessous ne couvre que les **5 routes V1** (rétrocompatibilité).
-> Le backend en expose **67 au total sur 13 fichiers** de `src/backend/src/routes/`
+> Le backend en expose **74 au total sur 14 fichiers** de `src/backend/src/routes/`
 > (bornes, formulaires, questions, canaux, enregistrements, partage, dashboard,
-> admin-bornes, auth…). Référence exhaustive : `src/backend/src/routes/`.
+> admin-bornes, ecrans-veille, auth…). Référence exhaustive : `src/backend/src/routes/`.
 
 | Méthode | Route | Auth | Description |
 |---------|-------|------|-------------|
@@ -814,6 +819,12 @@ CORS_ALLOWED_ORIGINS  NODE_ENV  SUPERADMIN_EMAIL
 Optionnelles (warning seulement) : `REDIS_URL`, `SENTRY_DSN`, `PRIMARY_COLOR`
 (défaut `#5B2D8E`).
 
+Optionnelles, non vérifiées au démarrage : `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+(et `SUPABASE_STORAGE_BUCKET`, défaut `ecrans-veille`). Sans elles,
+`POST /api/ecrans-veille/medias/signature` répond **503 `STORAGE_NOT_CONFIGURED`** et le
+back-office n'accepte que des URLs HTTPS pour les médias de l'écran de veille. Le bucket
+public est créé automatiquement au premier envoi.
+
 Liste complète des noms attendus : [src/backend/.env.example](../src/backend/.env.example).
 
 ---
@@ -1121,7 +1132,7 @@ Chiffres re-mesurés le 2026-09-02 — voir la section
 [Chiffres de référence](#chiffres-de-référence-mesurés-le-2026-09-02).
 
 ```bash
-# Backend — 596 tests / 35 suites (V1 + V2)
+# Backend — 634 tests / 38 suites (V1 + V2)
 cd src/backend && npm test
 
 # Backend — rétrocompatibilité V1 seule : 41 tests / 3 suites

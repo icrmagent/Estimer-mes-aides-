@@ -3,6 +3,7 @@ import { useState, useRef } from 'react'
 import { useBorne } from '../context/BorneContext.jsx'
 import { t } from '../utils/i18n.js'
 import LanguageSelector from '../components/LanguageSelector.jsx'
+import ScreenSaver from '../components/ScreenSaver.jsx'
 import ilaLogo from '../assets/logo.png'
 import houseIcon from '../assets/homeenv.png'
 
@@ -68,7 +69,7 @@ const SolarPanelBg = () => (
 
 export default function StartPage() {
   const navigate = useNavigate()
-  const { formulaire, langue, setLangue } = useBorne()
+  const { formulaire, langue, setLangue, ecranVeille } = useBorne()
   const [isExiting, setIsExiting] = useState(false)
   const [iconOverlayStyle, setIconOverlayStyle] = useState(null)
   const iconRef = useRef(null)
@@ -450,6 +451,9 @@ export default function StartPage() {
           }
         `}</style>
       </div>
+
+      {/* Remonté à chaque nouvelle version de l'écran : la veille en cours s'arrête et reprend le nouveau contenu. */}
+      <ScreenSaver key={`${ecranVeille?.id ?? 'aucun'}:${ecranVeille?.updatedAt ?? ''}`} />
     </>
   )
 }
