@@ -179,10 +179,15 @@ avec le même certificat que la 2.0.0 (`a043ba89…63a1`). Les écritures Prisma
 DbNull, remplacement de séquence, affectation) ont été rejouées sur la base de production
 dans une transaction annulée : toutes passent, aucune trace laissée.
 
-Envoi de fichiers : **actif en production depuis le 2026-09-23** (PR #12). La clé posée
-par l'utilisateur s'appelle `SUPABASE_KEY` (format `sb_secret_…`) : le backend ne lisait
-que `SUPABASE_SERVICE_ROLE_KEY` et répondait 503. Il accepte désormais les deux noms et
-déduit `SUPABASE_URL` de `DATABASE_URL`. Parcours réel validé en production (login → CSRF →
+Envoi de fichiers : **actif en production depuis le 2026-09-23**. `SUPABASE_SERVICE_ROLE_KEY`
+(JWT `service_role`) est renseignée ; le 503 constaté juste après sa saisie a disparu au
+redéploiement de la PR #12 — cause la plus probable : service Render non redémarré après
+l'ajout de la variable (le nom exact côté Render n'a pas pu être vérifié, faute de clé API
+Render). La PR #12 accepte en plus les alias `SUPABASE_KEY` / `SUPABASE_SECRET_KEY` /
+`SUPABASE_SERVICE_KEY` et déduit `SUPABASE_URL` de `DATABASE_URL`.
+
+> Après toute modification de variable dans le dashboard Render, choisir « Save, rebuild,
+> and deploy » : une variable enregistrée sans redéploiement n'est pas vue par le service. Parcours réel validé en production (login → CSRF →
 signature → PUT multipart → lecture publique identique → suppression) ; bucket
 `ecrans-veille` créé, public, 50 Mo, 6 types MIME.
 

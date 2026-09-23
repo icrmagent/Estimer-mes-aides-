@@ -202,7 +202,7 @@ PUSHER_CLUSTER=eu
 SUPERADMIN_EMAIL=admin@estimer-mes-aides.fr
 SUPERADMIN_PASSWORD_TEMP=...
 # Médias de l'écran de veille (sans clé : envoi de fichier = 503, URLs acceptées)
-SUPABASE_KEY=sb_secret_...           # ou SUPABASE_SERVICE_ROLE_KEY — serveur uniquement, contourne les RLS
+SUPABASE_SERVICE_ROLE_KEY=eyJ...     # JWT service_role (ou alias SUPABASE_KEY=sb_secret_...) — serveur uniquement
 SUPABASE_URL=https://<projet>.supabase.co   # facultative : déduite de DATABASE_URL
 
 # src/backoffice/.env
