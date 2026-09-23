@@ -819,8 +819,10 @@ CORS_ALLOWED_ORIGINS  NODE_ENV  SUPERADMIN_EMAIL
 Optionnelles (warning seulement) : `REDIS_URL`, `SENTRY_DSN`, `PRIMARY_COLOR`
 (défaut `#5B2D8E`).
 
-Optionnelles, non vérifiées au démarrage : `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
-(et `SUPABASE_STORAGE_BUCKET`, défaut `ecrans-veille`). Sans elles,
+Optionnelles, non vérifiées au démarrage : la clé Supabase — lue sous
+`SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_KEY` ou
+`SUPABASE_KEY`, format JWT ou `sb_secret_…` —, `SUPABASE_URL` (déduite de `DATABASE_URL`
+si absente) et `SUPABASE_STORAGE_BUCKET` (défaut `ecrans-veille`). Sans elles,
 `POST /api/ecrans-veille/medias/signature` répond **503 `STORAGE_NOT_CONFIGURED`** et le
 back-office n'accepte que des URLs HTTPS pour les médias de l'écran de veille. Le bucket
 public est créé automatiquement au premier envoi.
