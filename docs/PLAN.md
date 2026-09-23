@@ -148,6 +148,31 @@ https://github.com/settings/installations.
 
 ---
 
+## Fonctionnalité en cours — Écran de veille des bornes (démarrée le 2026-09-23)
+
+Après `delaiActivation` secondes d'inactivité sur l'écran d'accueil (`/start`), la borne
+affiche un diaporama (texte, photo, galerie, vidéo) édité dans le back-office.
+
+Décisions validées par l'utilisateur :
+- **Médias** : envoi de fichiers vers Supabase Storage via URL signée (le fichier ne passe
+  pas par Render), saisie d'URL HTTPS toujours possible.
+- **Portée** : plusieurs diaporamas nommés (`EcranVeille`), chacun affecté à N bornes.
+- **Droits** : SuperAdmin seul en écriture ; AdminBorne en lecture de ce qui est affecté à ses bornes.
+
+```
+Étape 1 — Base + backend           [x] Terminé — migration 20260923000000_ecran_veille,
+                                       7 routes /api/ecrans-veille, config borne étendue,
+                                       38 tests (suite complète : 634 tests / 38 suites)
+Étape 2 — Back-office SuperAdmin   [ ] À faire — liste, éditeur 3 zones, aperçu tablette
+Étape 3 — Borne                    [ ] À faire — ScreenSaver, déclenchement /start, cache médias
+```
+
+Avant la mise en production : renseigner `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`
+dans Render (sans elles, l'envoi de fichiers répond 503 et seules les URLs sont acceptées).
+La migration est appliquée automatiquement au démarrage (`start:prod`).
+
+---
+
 ## Historique des phases — Archive
 
 > Les descriptions ci-dessous sont conservées telles qu'écrites pendant le

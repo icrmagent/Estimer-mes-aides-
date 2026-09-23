@@ -8,6 +8,15 @@ export const bornesConfigRouter = Router()
 
 const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
 
+// Un écran désactivé, supprimé ou sans diapositive n'est pas envoyé : la borne
+// n'a alors aucune veille. Le filtrage par dates de diffusion reste côté borne,
+// car la config vit jusqu'à 24 h dans son cache local.
+function toKioskEcranVeille(ecran) {
+  if (!ecran || !ecran.actif || ecran.deletedAt || ecran.diapositives.length === 0) return null
+  const { actif: _a, deletedAt: _d, ...rest } = ecran
+  return rest
+}
+
 // ─── GET /api/bornes/:id/config ───────────────────────────────────────────────
 // Auth: SuperAdmin (full access) or AdminBorne (ownership check)
 // Returns full borne config + formulaire + questions sorted by orderPage
@@ -53,6 +62,39 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
         statut: true,
         adminBorneId: true,
         formulaireId: true,
+        ecranVeille: {
+          select: {
+            id: true,
+            nom: true,
+            actif: true,
+            deletedAt: true,
+            updatedAt: true,
+            delaiActivation: true,
+            transition: true,
+            ordreAleatoire: true,
+            afficherCta: true,
+            texteCta: true,
+            afficherLogo: true,
+            afficherHorloge: true,
+            heureDebut: true,
+            heureFin: true,
+            diapositives: {
+              where: { actif: true },
+              orderBy: { ordre: 'asc' },
+              select: {
+                id: true,
+                type: true,
+                duree: true,
+                titre: true,
+                sousTitre: true,
+                contenu: true,
+                style: true,
+                dateDebut: true,
+                dateFin: true,
+              },
+            },
+          },
+        },
         formulaire: {
           select: {
             id: true,
@@ -118,11 +160,12 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
       })
     }
 
-    const { formulaire, statut, adminBorneId, formulaireId, ...borneData } = borne
+    const { formulaire, statut, adminBorneId, formulaireId, ecranVeille, ...borneData } = borne
 
     const responseData = {
       borne: { ...borneData, adminBorneId }, // keep adminBorneId for cache ownership check
       formulaire,
+      ecranVeille: toKioskEcranVeille(ecranVeille),
     }
 
     // ── Store in cache (task 26.6) ───────────────────────────────────────
@@ -133,7 +176,7 @@ bornesConfigRouter.get('/:id/config', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADM
 
     return res.json({
       success: true,
-      data: { borne: publicBorne, formulaire },
+      data: { borne: publicBorne, formulaire, ecranVeille: responseData.ecranVeille },
     })
   } catch (err) {
     console.error('[BORNES-CONFIG ERROR]', err)
