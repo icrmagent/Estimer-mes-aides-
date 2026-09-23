@@ -180,10 +180,9 @@ DbNull, remplacement de séquence, affectation) ont été rejouées sur la base 
 dans une transaction annulée : toutes passent, aucune trace laissée.
 
 Envoi de fichiers : **actif en production depuis le 2026-09-23**. `SUPABASE_SERVICE_ROLE_KEY`
-(JWT `service_role`) est renseignée ; le 503 constaté juste après sa saisie a disparu au
-redéploiement de la PR #12 — cause la plus probable : service Render non redémarré après
-l'ajout de la variable (le nom exact côté Render n'a pas pu être vérifié, faute de clé API
-Render). La PR #12 accepte en plus les alias `SUPABASE_KEY` / `SUPABASE_SECRET_KEY` /
+(JWT `service_role`) est renseignée dans Render (confirmé par l'utilisateur) ; le 503 constaté
+juste après sa saisie a disparu au redéploiement de la PR #12 : le service n'avait pas été
+redémarré après l'ajout de la variable. Parcours réel revalidé ensuite en production. La PR #12 accepte en plus les alias `SUPABASE_KEY` / `SUPABASE_SECRET_KEY` /
 `SUPABASE_SERVICE_KEY` et déduit `SUPABASE_URL` de `DATABASE_URL`.
 
 > Après toute modification de variable dans le dashboard Render, choisir « Save, rebuild,
