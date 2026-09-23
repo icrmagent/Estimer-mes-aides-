@@ -32,14 +32,19 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 ## Évolutions post-V2
 
 ```
-Écran de veille des bornes        ✅ Développé 2026-09-23 — branche feat/ecran-veille
-                                     (backend + back-office + borne), merge en attente
+Écran de veille des bornes        ✅ En production 2026-09-23 — v2.1.0 (PR #10, 2f36a76)
+                                     APK 2.1.0 / build 63 publié en release GitHub v2.1.0
 ```
 
 Diaporama (texte, photo, galerie, vidéo) affiché par la borne après une période
 d'inactivité sur l'écran d'accueil, édité dans le back-office (menu « Écrans de veille »)
 et affecté borne par borne. Médias : URL HTTPS ou envoi direct vers **Supabase Storage**
 par URL signée (le fichier ne transite pas par Render). Détail : `docs/PLAN.md`.
+
+⚠️ **Envoi de fichiers inactif en production** tant que `SUPABASE_URL` et
+`SUPABASE_SERVICE_ROLE_KEY` ne sont pas renseignées dans Render (réponse 503, le
+back-office n'accepte alors que des URLs HTTPS). Les tablettes n'ont la veille qu'après
+installation de l'APK 2.1.0.
 
 ---
 

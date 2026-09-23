@@ -169,17 +169,25 @@ Décisions validées par l'utilisateur :
 Étape 3 — Borne                    [x] Terminé — ScreenSaver sur /start, plage horaire,
                                        cache hors ligne, Pusher ecran-veille.maj ;
                                        20 tests (139 / 11 fichiers)
-Étape 4 — Mise en production       [ ] En attente de validation utilisateur (migration DB)
+Étape 4 — Mise en production       [x] Fait — PR #10 mergée (2f36a76), deploy.yml vert,
+                                       migration appliquée (16/16), release v2.1.0 (APK 63)
 ```
 
-Reste à faire pour la mise en production :
-1. Renseigner `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` dans Render (dashboard Supabase
-   → *Settings → API*). Sans elles, seules les URLs de médias fonctionnent.
-2. Merger `feat/ecran-veille` dans `main` : la migration s'applique au démarrage
-   (`start:prod`), l'APK est reconstruit par `deploy.yml` (le frontend y est embarqué).
-3. Redistribuer l'APK aux tablettes — sans nouvel APK, la borne n'a pas l'écran de veille.
-4. Vérifier un envoi réel de fichier : le flux URL signée n'a été testé qu'avec des
-   réponses Supabase simulées.
+Vérifié en production le 2026-09-23 : `/api/ecrans-veille` répond (401 sans jeton,
+200 en SuperAdmin), config borne avec `ecranVeille`, bundle back-office à jour, APK signé
+avec le même certificat que la 2.0.0 (`a043ba89…63a1`). Les écritures Prisma (création,
+DbNull, remplacement de séquence, affectation) ont été rejouées sur la base de production
+dans une transaction annulée : toutes passent, aucune trace laissée.
+
+Reste à faire (hors de portée de Claude — accès dashboard / matériel) :
+1. **Renseigner `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` dans Render** (dashboard
+   Supabase → *Settings → API* ; puis Render → `estimer-mes-aides-api` → *Environment*).
+   Sans elles, l'envoi de fichiers répond 503 : seules les URLs de médias fonctionnent.
+   Aucune clé API Render ni clé Supabase n'est disponible sur le poste de développement.
+2. **Installer l'APK 2.1.0** (release GitHub v2.1.0) sur chaque tablette — mise à jour
+   par-dessus, sans désinstallation.
+3. **Premier envoi réel de fichier** une fois les clés posées : le flux URL signée n'a été
+   testé qu'avec des réponses Supabase simulées.
 
 Avant la mise en production : renseigner `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`
 dans Render (sans elles, l'envoi de fichiers répond 503 et seules les URLs sont acceptées).
