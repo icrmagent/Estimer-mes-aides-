@@ -75,6 +75,7 @@ services:
 
       # --- Supabase Storage (optionnel : medias de l'ecran de veille) ---
       # Sans ces valeurs, l'envoi de fichiers repond 503 ; les URLs restent acceptees.
+      # SUPABASE_URL facultative (deduite de DATABASE_URL) ; cle acceptee aussi sous SUPABASE_KEY.
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

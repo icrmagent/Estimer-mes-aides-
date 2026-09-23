@@ -278,7 +278,7 @@ ecransVeilleRouter.post('/medias/signature', jwtAuthV2, requireRole('SUPER_ADMIN
       success: false,
       error: {
         code: 'STORAGE_NOT_CONFIGURED',
-        message: 'Stockage des médias non configuré (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY). Utilisez une URL.',
+        message: 'Stockage des médias non configuré (clé SUPABASE_SERVICE_ROLE_KEY ou SUPABASE_KEY absente). Utilisez une URL.',
       },
     })
   }

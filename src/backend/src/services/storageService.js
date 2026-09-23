@@ -9,8 +9,11 @@ import { randomUUID } from 'node:crypto'
  * bufferiser une vidéo de 50 Mo ni la conserver.
  *
  * Variables d'environnement (serveur uniquement, jamais VITE_) :
- *   SUPABASE_URL               ex. https://<projet>.supabase.co
- *   SUPABASE_SERVICE_ROLE_KEY  clé service_role — contourne les RLS, ne jamais l'exposer
+ *   SUPABASE_SERVICE_ROLE_KEY  clé service_role (JWT) ou clé secrète sb_secret_… — contourne
+ *                              les RLS, ne jamais l'exposer. Alias acceptés : SUPABASE_SECRET_KEY,
+ *                              SUPABASE_SERVICE_KEY, SUPABASE_KEY (nom du .env local du projet).
+ *   SUPABASE_URL               ex. https://<projet>.supabase.co — facultative : déduite sinon
+ *                              du projet présent dans DATABASE_URL (utilisateur postgres.<ref>).
  *   SUPABASE_STORAGE_BUCKET    optionnel, défaut "ecrans-veille"
  */
 
@@ -27,10 +30,32 @@ export const MEDIA_RULES = {
 
 const BUCKET_MAX_BYTES = 50 * MO
 
+const KEY_VARS = ['SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_KEY']
+
+/**
+ * URL du projet Supabase déduite de la chaîne Postgres : l'utilisateur du pooler vaut
+ * `postgres.<ref>`, l'hôte direct `db.<ref>.supabase.co`. Une référence de projet fait
+ * 20 caractères [a-z0-9].
+ */
+export function projectUrlFromDatabaseUrl(databaseUrl) {
+  if (!databaseUrl) return ''
+  try {
+    const u = new URL(databaseUrl)
+    const ref = /^postgres\.([a-z0-9]{20})$/.exec(decodeURIComponent(u.username))?.[1]
+      ?? /^db\.([a-z0-9]{20})\.supabase\.co$/.exec(u.hostname)?.[1]
+    return ref ? `https://${ref}.supabase.co` : ''
+  } catch {
+    return ''
+  }
+}
+
 function config() {
+  const explicitUrl = (process.env.SUPABASE_URL || '').trim()
+  const url = explicitUrl || projectUrlFromDatabaseUrl(process.env.DATABASE_URL) || projectUrlFromDatabaseUrl(process.env.DIRECT_URL)
+  const keyVar = KEY_VARS.find((name) => (process.env[name] || '').trim())
   return {
-    url: (process.env.SUPABASE_URL || '').replace(/\/+$/, ''),
-    key: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    url: url.replace(/\/+$/, ''),
+    key: keyVar ? process.env[keyVar].trim() : '',
     bucket: process.env.SUPABASE_STORAGE_BUCKET || 'ecrans-veille',
   }
 }

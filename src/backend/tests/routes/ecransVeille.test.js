@@ -72,7 +72,7 @@ jest.unstable_mockModule('../../src/services/tokenBlacklistService.js', () => ({
 const { default: request } = await import('supertest')
 const { default: app } = await import('../../src/app.js')
 const { Prisma } = await import('@prisma/client')
-const { __resetStorageForTests } = await import('../../src/services/storageService.js')
+const { __resetStorageForTests, projectUrlFromDatabaseUrl } = await import('../../src/services/storageService.js')
 
 process.env.JWT_SECRET = 'test_jwt_secret_ecrans_veille'
 
@@ -409,9 +409,13 @@ describe('POST /api/ecrans-veille/medias/signature', () => {
     process.env = { ...ENV }
   })
 
+  // Le .env local peut définir SUPABASE_KEY (chargé par dotenv) : on neutralise tous les alias.
+  function clearStorageEnv() {
+    for (const name of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_KEY']) delete process.env[name]
+  }
+
   it('503 quand le stockage n\'est pas configuré', async () => {
-    delete process.env.SUPABASE_URL
-    delete process.env.SUPABASE_SERVICE_ROLE_KEY
+    clearStorageEnv()
     const res = await request(app).post('/api/ecrans-veille/medias/signature').set(authSA)
       .send({ typeMime: 'image/png', taille: 1000 })
     expect(res.status).toBe(503)
@@ -447,6 +451,23 @@ describe('POST /api/ecrans-veille/medias/signature', () => {
     expect(bucketUrl).toBe('https://proj.supabase.co/storage/v1/bucket')
     expect(JSON.parse(bucketInit.body)).toMatchObject({ id: 'ecrans-veille', public: true })
     expect(bucketInit.headers.Authorization).toBe('Bearer service-key')
+  })
+
+  it('accepte SUPABASE_KEY et déduit l\'URL du projet depuis DATABASE_URL', async () => {
+    clearStorageEnv()
+    process.env.SUPABASE_KEY = 'sb_secret_test'
+    process.env.DATABASE_URL = 'postgresql://postgres.zxkshqviyzjigadruody:pwd@aws-1-eu-north-1.pooler.supabase.com:6543/postgres'
+    fetchSpy
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ url: '/object/upload/sign/ecrans-veille/p.png?token=t' }), { status: 200 }))
+
+    const res = await request(app).post('/api/ecrans-veille/medias/signature').set(authSA)
+      .send({ typeMime: 'image/png', taille: 1000 })
+
+    expect(res.status).toBe(200)
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://zxkshqviyzjigadruody.supabase.co/storage/v1/bucket')
+    expect(fetchSpy.mock.calls[0][1].headers.apikey).toBe('sb_secret_test')
+    expect(res.body.data.publicUrl).toMatch(/^https:\/\/zxkshqviyzjigadruody\.supabase\.co\/storage\/v1\/object\/public\/ecrans-veille\//)
   })
 
   it('502 quand Supabase refuse la signature', async () => {
@@ -546,5 +567,20 @@ describe('PUT /api/bornes/:id — ecranVeilleId', () => {
     const res = await request(app).put(`/api/bornes/${BORNE_A}`).set(authSA).send({ ecranVeilleId: null })
     expect(res.status).toBe(200)
     expect(mockPrisma.ecranVeille.findFirst).not.toHaveBeenCalled()
+  })
+})
+
+describe('projectUrlFromDatabaseUrl', () => {
+  it('lit la référence du projet dans l\'utilisateur du pooler ou l\'hôte direct', () => {
+    expect(projectUrlFromDatabaseUrl('postgresql://postgres.zxkshqviyzjigadruody:p%40ss@aws-1-eu-north-1.pooler.supabase.com:5432/postgres'))
+      .toBe('https://zxkshqviyzjigadruody.supabase.co')
+    expect(projectUrlFromDatabaseUrl('postgresql://postgres:pwd@db.zxkshqviyzjigadruody.supabase.co:5432/postgres'))
+      .toBe('https://zxkshqviyzjigadruody.supabase.co')
+  })
+
+  it('renvoie une chaîne vide hors Supabase ou si l\'URL est illisible', () => {
+    expect(projectUrlFromDatabaseUrl('postgresql://user:pwd@localhost:5432/ema')).toBe('')
+    expect(projectUrlFromDatabaseUrl('pas une url')).toBe('')
+    expect(projectUrlFromDatabaseUrl(undefined)).toBe('')
   })
 })
