@@ -38,6 +38,11 @@ Version **2.1.0** dans les trois `package.json` : l'APK est reconstruit avec
 - **Borne** : diaporama plein écran après inactivité sur l'accueil, fermé au toucher ;
   médias préchargés pour le hors-ligne (Cache API).
 
+#### Corrigé (PR #12)
+- Envoi de fichiers en 503 en production : la clé Supabase, nommée `SUPABASE_KEY`, n'était
+  pas lue. Alias acceptés (`SUPABASE_KEY`, `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_KEY`),
+  format `sb_secret_…` pris en charge, `SUPABASE_URL` déduite de `DATABASE_URL`.
+
 #### Modifié
 - `PUT /api/bornes/:id` : `ecranVeilleId` réservé au SuperAdmin.
 - CSP Vercel du back-office : `media-src` et `blob:` pour la lecture des vidéos.

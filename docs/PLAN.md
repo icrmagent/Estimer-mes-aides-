@@ -179,15 +179,16 @@ avec le même certificat que la 2.0.0 (`a043ba89…63a1`). Les écritures Prisma
 DbNull, remplacement de séquence, affectation) ont été rejouées sur la base de production
 dans une transaction annulée : toutes passent, aucune trace laissée.
 
-Reste à faire (hors de portée de Claude — accès dashboard / matériel) :
-1. **Renseigner `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` dans Render** (dashboard
-   Supabase → *Settings → API* ; puis Render → `estimer-mes-aides-api` → *Environment*).
-   Sans elles, l'envoi de fichiers répond 503 : seules les URLs de médias fonctionnent.
-   Aucune clé API Render ni clé Supabase n'est disponible sur le poste de développement.
-2. **Installer l'APK 2.1.0** (release GitHub v2.1.0) sur chaque tablette — mise à jour
+Envoi de fichiers : **actif en production depuis le 2026-09-23** (PR #12). La clé posée
+par l'utilisateur s'appelle `SUPABASE_KEY` (format `sb_secret_…`) : le backend ne lisait
+que `SUPABASE_SERVICE_ROLE_KEY` et répondait 503. Il accepte désormais les deux noms et
+déduit `SUPABASE_URL` de `DATABASE_URL`. Parcours réel validé en production (login → CSRF →
+signature → PUT multipart → lecture publique identique → suppression) ; bucket
+`ecrans-veille` créé, public, 50 Mo, 6 types MIME.
+
+Reste à faire (matériel, hors de portée de Claude) :
+1. **Installer l'APK 2.1.0** (release GitHub v2.1.0) sur chaque tablette — mise à jour
    par-dessus, sans désinstallation.
-3. **Premier envoi réel de fichier** une fois les clés posées : le flux URL signée n'a été
-   testé qu'avec des réponses Supabase simulées.
 
 Avant la mise en production : renseigner `SUPABASE_URL` et `SUPABASE_SERVICE_ROLE_KEY`
 dans Render (sans elles, l'envoi de fichiers répond 503 et seules les URLs sont acceptées).

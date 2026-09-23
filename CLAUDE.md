@@ -41,9 +41,11 @@ d'inactivité sur l'écran d'accueil, édité dans le back-office (menu « Écra
 et affecté borne par borne. Médias : URL HTTPS ou envoi direct vers **Supabase Storage**
 par URL signée (le fichier ne transite pas par Render). Détail : `docs/PLAN.md`.
 
-⚠️ **Envoi de fichiers inactif en production** tant que `SUPABASE_URL` et
-`SUPABASE_SERVICE_ROLE_KEY` ne sont pas renseignées dans Render (réponse 503, le
-back-office n'accepte alors que des URLs HTTPS). Les tablettes n'ont la veille qu'après
+✅ **Envoi de fichiers actif en production** depuis le 2026-09-23 (PR #12) : bucket public
+`ecrans-veille` (50 Mo, JPEG/PNG/WebP/GIF/MP4/WebM), parcours réel validé de bout en bout.
+La clé Supabase est lue sous `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY`,
+`SUPABASE_SERVICE_KEY` ou `SUPABASE_KEY` (format `sb_secret_…` accepté) ; `SUPABASE_URL`
+est déduite de `DATABASE_URL` si absente. Les tablettes n'ont la veille qu'après
 installation de l'APK 2.1.0.
 
 ---
@@ -199,9 +201,9 @@ PUSHER_SECRET=...
 PUSHER_CLUSTER=eu
 SUPERADMIN_EMAIL=admin@estimer-mes-aides.fr
 SUPERADMIN_PASSWORD_TEMP=...
-# Optionnel — médias de l'écran de veille (sans elles : envoi de fichier = 503, URLs acceptées)
-SUPABASE_URL=https://<projet>.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=...        # serveur uniquement, contourne les RLS
+# Médias de l'écran de veille (sans clé : envoi de fichier = 503, URLs acceptées)
+SUPABASE_KEY=sb_secret_...           # ou SUPABASE_SERVICE_ROLE_KEY — serveur uniquement, contourne les RLS
+SUPABASE_URL=https://<projet>.supabase.co   # facultative : déduite de DATABASE_URL
 
 # src/backoffice/.env
 VITE_API_URL=http://localhost:3000
