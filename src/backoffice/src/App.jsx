@@ -12,6 +12,8 @@ import FormulaireEditorPage from './pages/superadmin/FormulaireEditorPage.jsx'
 import CategoriesQuestionsPage from './pages/superadmin/CategoriesQuestionsPage.jsx'
 import EnregistrementsListPage from './pages/superadmin/EnregistrementsListPage.jsx'
 import PartageJobsPage from './pages/superadmin/PartageJobsPage.jsx'
+import EcransVeilleListPage from './pages/superadmin/EcransVeilleListPage.jsx'
+import EcranVeilleEditorPage from './pages/superadmin/EcranVeilleEditorPage.jsx'
 import ABDashboardPage from './pages/adminborne/DashboardPage.jsx'
 import ABBornesPage from './pages/adminborne/BornesPage.jsx'
 import ABEnregistrementsPage from './pages/adminborne/EnregistrementsPage.jsx'
@@ -37,6 +39,9 @@ export default function App() {
                 <Route path="categories-questions" element={<CategoriesQuestionsPage />} />
                 <Route path="enregistrements" element={<EnregistrementsListPage />} />
                 <Route path="partage" element={<PartageJobsPage />} />
+                <Route path="ecrans-veille" element={<EcransVeilleListPage />} />
+                <Route path="ecrans-veille/new" element={<EcranVeilleEditorPage />} />
+                <Route path="ecrans-veille/:id" element={<EcranVeilleEditorPage />} />
               </Routes>
             </ProtectedRoute>
           } />

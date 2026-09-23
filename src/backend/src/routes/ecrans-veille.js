@@ -187,6 +187,7 @@ function toSummary(ecran) {
     nbDiapositives: diapositives.length,
     nbDiapositivesActives: actives.length,
     dureeTotale: actives.reduce((s, d) => s + d.duree, 0),
+    apercu: actives[0] ?? diapositives[0] ?? null,
     bornes: bornes.map(({ adminBorneId: _omit, ...b }) => b),
   }
 }
@@ -310,7 +311,10 @@ ecransVeilleRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE')
         ...(isAdminBorne ? { bornes: { some: borneScope } } : {}),
       },
       include: {
-        diapositives: { select: { duree: true, actif: true, type: true } },
+        diapositives: {
+          orderBy: { ordre: 'asc' },
+          select: { duree: true, actif: true, type: true, titre: true, sousTitre: true, contenu: true, style: true },
+        },
         bornes: { where: borneScope, select: BORNE_SELECT, orderBy: { idBorne: 'asc' } },
       },
       orderBy: { updatedAt: 'desc' },

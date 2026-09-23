@@ -152,8 +152,8 @@ describe('GET /api/ecrans-veille', () => {
     mockPrisma.ecranVeille.findMany.mockResolvedValue([
       ecranDetail({
         diapositives: [
-          { duree: 6, actif: true, type: 'texte' },
           { duree: 15, actif: false, type: 'video' },
+          { duree: 6, actif: true, type: 'texte' },
           { duree: 10, actif: true, type: 'image' },
         ],
       }),
@@ -164,6 +164,7 @@ describe('GET /api/ecrans-veille', () => {
     expect(res.status).toBe(200)
     expect(res.body.data[0]).toMatchObject({ nbDiapositives: 3, nbDiapositivesActives: 2, dureeTotale: 16 })
     expect(res.body.data[0].diapositives).toBeUndefined()
+    expect(res.body.data[0].apercu).toEqual({ duree: 6, actif: true, type: 'texte' })
     expect(res.body.data[0].bornes[0].adminBorneId).toBeUndefined()
     expect(mockPrisma.ecranVeille.findMany.mock.calls[0][0].where).toEqual({ deletedAt: null })
   })
