@@ -19,6 +19,28 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### 2026-09-23 — Écran de veille des bornes
+
+Branche `feat/ecran-veille` (commits `d4e6a0f`, `dfb5823`, `624076f`).
+
+#### Ajouté
+- **Backend** : modèles `EcranVeille` / `DiapositiveVeille`, `Borne.ecranVeilleId`
+  (migration additive `20260923000000_ecran_veille`) ; 7 routes `/api/ecrans-veille`
+  (CRUD, duplication, signature d'envoi Supabase Storage) ; `ecranVeille` dans
+  `GET /api/bornes/:id/config` ; événement Pusher `ecran-veille.maj`.
+- **Back-office** : menu « Écrans de veille » — liste avec miniatures, éditeur
+  (séquence glisser-déposer, diapos texte / photo / galerie / vidéo en FR/ES/EN,
+  période de diffusion, délai, transition, plage horaire, affectation des bornes),
+  aperçu tablette en direct et lecture plein écran. Choix de l'écran sur la fiche borne.
+- **Borne** : diaporama plein écran après inactivité sur l'accueil, fermé au toucher ;
+  médias préchargés pour le hors-ligne (Cache API).
+
+#### Modifié
+- `PUT /api/bornes/:id` : `ecranVeilleId` réservé au SuperAdmin.
+- CSP Vercel du back-office : `media-src` et `blob:` pour la lecture des vidéos.
+- `tests/integration/offline-sync.integration.test.js` : mocks Pusher sortis de la
+  fabrique `unstable_mockModule` (instances multiples sous Jest ESM).
+
 ### 2026-09-02 — Fiabilisation de la livraison + bascule Railway → Render
 
 Travaux de la session de livraison, **non encore commités** au moment de la rédaction.
