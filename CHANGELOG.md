@@ -19,6 +19,57 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### 2026-09-25 — canal I-CRM par clé API (opportunités BORNE TACTILE)
+
+Branche `feat/canal-icrm-cle-api`, **non mergée** (merger `main` = mise en production :
+Render, Vercel et `prisma migrate deploy`). Contrat EMA → I-CRM **v1** ; côté I-CRM, l'API
+entrante `/api/external/estimer-mes-aides/v1` doit être déployée avant d'activer un canal.
+Guide : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md).
+
+#### Ajouté
+- **Canal de type `icrm_api_key`** (« Clé API I-CRM ») : `apiKey` = identifiant de clé
+  `emak_…` (public), `token` = secret de 48 caractères (écriture seule). Le worker envoie
+  chaque enregistrement à `POST {apiUrl}/api/external/estimer-mes-aides/v1/enregistrements`
+  (`X-Api-Key`, `X-Api-Secret`, `Idempotency-Key` = id de l'enregistrement, délai 30 s),
+  sans aucun appel Azure AD. I-CRM crée le contact et une **opportunité** du sous-type lié à la clé.
+- **Payload complet** (`buildIcrmEnregistrementPayload`, exporté) : bloc `contact` (même
+  correspondance field ID / libellé que le canal historique), **toutes** les réponses avec
+  libellé FR, type, `crm_field_ids`, valeur brute et `valeur_libelles` (option →
+  `crmValue` ?? `label.fr` ?? libellé de la langue ?? id ; choix multiples découpés sur `", "`),
+  métadonnées borne / formulaire, langue, date de soumission.
+- **Migration `20260925000000_canal_type_icrm_api_key`** (additive, idempotente) :
+  `canaux.type` (défaut `azure_ad`), `enregistrements.crmProjetId` / `crmProjetRef`
+  (opportunité créée, renseignés au succès).
+- **Test de connexion** d'un canal par clé API : `GET …/v1/ping`, succès uniquement sur 2xx,
+  renvoie l'entreprise, le sous-type et le client I-CRM ; 401/403 → échec avec message clair.
+- **Back-office** : sélecteur « Type d'authentification » (« Clé API I-CRM (recommandé) » /
+  « Azure AD (ancien) ») dans la fenêtre du canal, champs « Clé API (X-Api-Key) » et
+  « Secret (X-Api-Secret) » (masqué, afficher/masquer, « laisser vide pour ne pas changer »),
+  URL d'exemple `https://icrm.api.ila26.fr` ; tableau des canaux avec colonnes Type et
+  Identifiants (identifiant de clé au lieu de l'expiration du token) ; le test affiche
+  « Connecté à <entreprise> · sous-type <nom> ».
+- **Tests** : backend `tests/lib/icrmApiKey.test.js`, `tests/services/queueWorker.icrmApiKey.test.js`,
+  `tests/routes/canaux.test.js` (+109 tests) ; back-office `canalConfig.test.js` et
+  `CanalConfigModal.test.jsx` (+32 tests, premier test de composant monté dans jsdom).
+- **Docs** : `docs/INTEGRATION-ICRM.md`, section « Partage I-CRM — canal par clé API » de
+  `docs/DEPLOIEMENT.md`.
+
+#### Modifié
+- **Worker** : une erreur marquée définitive (canal clé API : 401/403/404/413/422, redirection,
+  canal incomplet) passe en `echec_definitif` **dès la première tentative**, sans épuiser les
+  5 réessais ; 408/409/429/5xx/réseau/timeout gardent le backoff existant. Le chemin
+  `azure_ad` (Bearer, `customContacts`, refresh Azure) est inchangé.
+- **Worker** : la requête Prisma charge aussi `typeOption` / `options` des questions, les
+  métadonnées de la borne et le formulaire (utilisés par le seul canal clé API).
+- **`/api/canaux`** : `type` accepté en création (défaut `azure_ad`) et en modification ;
+  un changement de type exige la clé **et** le secret. Projection publique enrichie de
+  `type` et `apiKeyId` (identifiant de clé seulement ; `tokenExpiresAt` vaut `null` pour ce type).
+
+#### Sécurité
+- Canal clé API : URL `https` obligatoire (hors `localhost`), redirections HTTP non suivies
+  (le secret ne part jamais vers un autre hôte), secret jamais renvoyé ni journalisé ;
+  erreurs I-CRM journalisées avec code, noms de champs et `request_id`, jamais les valeurs saisies.
+
 ### 2026-09-23 — v2.1.0 : écran de veille des bornes
 
 Branche `feat/ecran-veille` (commits `d4e6a0f`, `dfb5823`, `624076f`), PR #10,
