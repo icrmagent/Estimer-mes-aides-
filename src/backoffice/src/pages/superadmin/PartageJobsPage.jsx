@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import CanalConfigModal from '../../components/forms/CanalConfigModal.jsx'
+import {
+  CANAL_TYPE_ICRM_API_KEY,
+  typeDuCanal,
+  libelleTypeCanal,
+  resumeTestCanal,
+} from '../../components/forms/canalConfig.js'
 import { ConfirmModal, Toast, ErrorBanner, PRIMARY, SECONDARY } from '../../components/ui.jsx'
 import api from '../../services/api.js'
 import { subscribeToBorne } from '../../services/pusher.js'
@@ -297,15 +303,8 @@ export default function PartageJobsPage() {
     setTestingCanalId(canalId)
     try {
       const res = await api.post(`/api/canaux/${canalId}/test`)
-      const r = res.data || {}
-      if (r.success) {
-        setToast({
-          message: `Connexion OK (${r.httpStatus}, ${r.latencyMs}ms)${r.tokenExpired ? ' — token expiré !' : ''}`,
-          type: r.tokenExpired ? 'error' : 'success',
-        })
-      } else {
-        setToast({ message: `Connexion impossible : ${r.error || 'erreur inconnue'}`, type: 'error' })
-      }
+      // Clé API I-CRM : le toast nomme l'entreprise et le sous-type renvoyés par le ping
+      setToast(resumeTestCanal(res.data || {}))
     } catch (err) {
       const r = err.response?.data
       setToast({
@@ -613,7 +612,8 @@ export default function PartageJobsPage() {
                   <tr className="border-b border-gray-100 bg-gray-50">
                     <th className="text-left px-4 py-3 font-semibold text-gray-600">Label</th>
                     <th className="text-left px-4 py-3 font-semibold text-gray-600">URL API</th>
-                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Token</th>
+                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Type</th>
+                    <th className="text-left px-4 py-3 font-semibold text-gray-600">Identifiants</th>
                     <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                     <th className="text-right px-4 py-3 font-semibold text-gray-600">Actions</th>
                   </tr>
@@ -621,6 +621,7 @@ export default function PartageJobsPage() {
                 <tbody>
                   {canaux.map((canal) => {
                     const isAffected = selectedBorne?.canalTransmission === canal.label
+                    const estCleApi = typeDuCanal(canal) === CANAL_TYPE_ICRM_API_KEY
                     const tokenExp = canal.tokenExpiresAt ? new Date(canal.tokenExpiresAt) : null
                     const tokenExpired = tokenExp ? tokenExp.getTime() < now : null
                     return (
@@ -637,13 +638,27 @@ export default function PartageJobsPage() {
                           {canal.apiUrl}
                         </td>
                         <td className="px-4 py-3 text-xs">
-                          {canal.hasToken
-                            ? tokenExp
-                              ? <span className={tokenExpired ? 'text-red-600 font-medium' : 'text-gray-600'}>
-                                  {tokenExpired ? 'Expiré ' : 'Expire '} {tokenExp.toLocaleDateString('fr-FR')}
-                                </span>
-                              : <span className="text-gray-500">configuré</span>
-                            : <span className="text-orange-600">manquant</span>}
+                          <span className={`px-2 py-0.5 rounded-full font-semibold whitespace-nowrap ${estCleApi ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                            {libelleTypeCanal(typeDuCanal(canal))}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          {estCleApi
+                            ? (
+                              <>
+                                {canal.apiKeyId
+                                  ? <span className="font-mono text-gray-700" title="Identifiant de la clé API (non secret)">{canal.apiKeyId}</span>
+                                  : <span className="text-orange-600">clé manquante</span>}
+                                {!canal.hasToken && <span className="ml-1 text-orange-600">· secret manquant</span>}
+                              </>
+                            )
+                            : canal.hasToken
+                              ? tokenExp
+                                ? <span className={tokenExpired ? 'text-red-600 font-medium' : 'text-gray-600'}>
+                                    {tokenExpired ? 'Expiré ' : 'Expire '} {tokenExp.toLocaleDateString('fr-FR')}
+                                  </span>
+                                : <span className="text-gray-500">configuré</span>
+                              : <span className="text-orange-600">manquant</span>}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${canal.actif ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
