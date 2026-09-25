@@ -10,6 +10,7 @@ import {
   typeDuCanal,
   libelleTypeCanal,
   typeInitialFormulaire,
+  estNouvelleCleApi,
   validerSaisieCanal,
   construireRequeteCanal,
   resumeTestCanal,
@@ -81,6 +82,32 @@ describe('validerSaisieCanal — clé API I-CRM', () => {
     expect(validerSaisieCanal(saisie({
       isEdit: true, typeInitial: CANAL_TYPE_AZURE_AD, apiKey: CLE, token: '',
     }))).toMatch(/secret API I-CRM est requis/)
+  })
+
+  it('en édition, une NOUVELLE clé exige le secret émis avec elle (I-CRM ne réutilise jamais un secret)', () => {
+    const autreCle = 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ'
+    const edition = { isEdit: true, typeInitial: CANAL_TYPE_ICRM_API_KEY, apiKeyInitiale: CLE }
+
+    expect(validerSaisieCanal(saisie({ ...edition, apiKey: autreCle, token: '' })))
+      .toBe('Nouvelle clé API : saisissez aussi le secret émis avec cette clé par I-CRM')
+    expect(validerSaisieCanal(saisie({ ...edition, apiKey: autreCle, token: SECRET }))).toBeNull()
+    // Clé inchangée (pré-remplie) ou vidée : secret toujours facultatif
+    expect(validerSaisieCanal(saisie({ ...edition, apiKey: ` ${CLE} `, token: '' }))).toBeNull()
+    expect(validerSaisieCanal(saisie({ ...edition, apiKey: '', token: '' }))).toBeNull()
+  })
+
+  it('estNouvelleCleApi : uniquement en édition d’un canal déjà en clé API dont la clé change', () => {
+    const autreCle = 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ'
+    const base = { isEdit: true, type: CANAL_TYPE_ICRM_API_KEY, typeInitial: CANAL_TYPE_ICRM_API_KEY, apiKeyInitiale: CLE }
+    expect(estNouvelleCleApi({ ...base, apiKey: autreCle })).toBe(true)
+    expect(estNouvelleCleApi({ ...base, apiKey: CLE })).toBe(false)
+    expect(estNouvelleCleApi({ ...base, apiKey: '  ' })).toBe(false)
+    expect(estNouvelleCleApi({ ...base, isEdit: false, apiKey: autreCle })).toBe(false)
+    // Changement de type : déjà couvert par « clé et secret obligatoires »
+    expect(estNouvelleCleApi({ ...base, typeInitial: CANAL_TYPE_AZURE_AD, apiKey: autreCle })).toBe(false)
+    expect(estNouvelleCleApi({ ...base, type: CANAL_TYPE_AZURE_AD, apiKey: 'rt' })).toBe(false)
+    // Identifiant initial non exposé (apiKeyId null) : toute clé saisie est nouvelle
+    expect(estNouvelleCleApi({ ...base, apiKeyInitiale: '', apiKey: CLE })).toBe(true)
   })
 })
 

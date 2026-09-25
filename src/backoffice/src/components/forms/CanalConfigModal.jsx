@@ -7,6 +7,7 @@ import {
   URL_API_ICRM_ES,
   typeDuCanal,
   typeInitialFormulaire,
+  estNouvelleCleApi,
   validerSaisieCanal,
   construireRequeteCanal,
 } from './canalConfig.js'
@@ -58,8 +59,11 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
 
   const estCleApi = type === CANAL_TYPE_ICRM_API_KEY
   const changementDeType = isEdit && type !== typeInitial
-  // En édition sans changement de type, un secret vide = inchangé
-  const secretFacultatif = isEdit && !changementDeType
+  // En édition sans changement de type, un champ vide = inchangé…
+  const cleFacultative = isEdit && !changementDeType
+  // … sauf le secret d'une NOUVELLE clé API : I-CRM l'émet avec la clé.
+  const nouvelleCle = estNouvelleCleApi({ isEdit, type, typeInitial, apiKey, apiKeyInitiale })
+  const secretFacultatif = cleFacultative && !nouvelleCle
 
   const handleTypeChange = (nouveauType) => {
     setType(nouveauType)
@@ -79,7 +83,7 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
 
     try {
       const erreurSaisie = validerSaisieCanal({
-        isEdit, type, typeInitial, borneId: selectedBorneId, label, apiUrl, apiKey, token,
+        isEdit, type, typeInitial, borneId: selectedBorneId, label, apiUrl, apiKey, token, apiKeyInitiale,
       })
       if (erreurSaisie) { setError(erreurSaisie); setLoading(false); return }
 
@@ -137,9 +141,9 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
   const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent w-full'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }
   const labelClass = 'block text-xs font-semibold text-gray-600 mb-1'
-  const mentionInchange = secretFacultatif
-    ? <span className="ml-2 text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>
-    : null
+  const mentionVide = <span className="ml-2 text-gray-400 font-normal">(laisser vide pour ne pas changer)</span>
+  const mentionInchange = cleFacultative ? mentionVide : null
+  const mentionSecretInchange = secretFacultatif ? mentionVide : null
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true">
@@ -274,7 +278,7 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
               <div>
                 <label htmlFor="canal-secret" className={labelClass}>
                   Secret (X-Api-Secret)
-                  {mentionInchange}
+                  {mentionSecretInchange}
                 </label>
                 <div className="relative">
                   <input
@@ -298,6 +302,11 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
                     {showToken ? '🙈' : '👁'}
                   </button>
                 </div>
+                {nouvelleCle && (
+                  <p className="text-xs text-orange-600 mt-1" data-testid="canal-secret-nouvelle-cle">
+                    Nouvelle clé : saisissez le secret émis avec elle par I-CRM (l'ancien secret ne fonctionne pas avec une autre clé).
+                  </p>
+                )}
                 <p className="text-xs text-gray-400 mt-1">
                   Affiché une seule fois par I-CRM à la création de la clé. Il n'est jamais réaffiché ici.
                 </p>

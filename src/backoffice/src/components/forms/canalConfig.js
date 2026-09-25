@@ -36,6 +36,20 @@ export function typeInitialFormulaire(initialCanal) {
 }
 
 /**
+ * true si l'édition d'un canal clé API remplace l'identifiant de clé : I-CRM émet
+ * toujours une nouvelle clé avec un nouveau secret (la rotation ne change que le
+ * secret), le secret doit donc être ressaisi avec elle.
+ */
+export function estNouvelleCleApi({ isEdit, type, typeInitial = null, apiKey, apiKeyInitiale = '' }) {
+  const cle = (apiKey || '').trim()
+  return Boolean(isEdit)
+    && type === CANAL_TYPE_ICRM_API_KEY
+    && typeInitial === CANAL_TYPE_ICRM_API_KEY
+    && cle !== ''
+    && cle !== (apiKeyInitiale || '')
+}
+
+/**
  * Valide la saisie. Retourne un message d'erreur en français, ou null si valide.
  *
  * @param {Object} saisie
@@ -47,8 +61,9 @@ export function typeInitialFormulaire(initialCanal) {
  * @param {string} saisie.apiUrl
  * @param {string} saisie.apiKey      clé (icrm_api_key) ou refresh token (azure_ad)
  * @param {string} saisie.token       secret (icrm_api_key) ou access token (azure_ad)
+ * @param {string} [saisie.apiKeyInitiale] identifiant de clé du canal édité (icrm_api_key)
  */
-export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, label, apiUrl, apiKey, token }) {
+export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, label, apiUrl, apiKey, token, apiKeyInitiale = '' }) {
   const cle = (apiKey || '').trim()
   const secret = (token || '').trim()
   const url = (apiUrl || '').trim()
@@ -67,6 +82,9 @@ export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, 
     }
     if (secretsObligatoires && !cle) return 'La clé API I-CRM est requise'
     if (secretsObligatoires && !secret) return 'Le secret API I-CRM est requis'
+    if (estNouvelleCleApi({ isEdit, type, typeInitial, apiKey: cle, apiKeyInitiale }) && !secret) {
+      return 'Nouvelle clé API : saisissez aussi le secret émis avec cette clé par I-CRM'
+    }
     if (cle && !CLE_API_REGEX.test(cle)) {
       return 'Clé API invalide : « emak_ » suivi de 24 caractères alphanumériques'
     }

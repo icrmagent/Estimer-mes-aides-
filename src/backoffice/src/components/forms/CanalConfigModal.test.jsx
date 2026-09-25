@@ -186,6 +186,26 @@ describe('CanalConfigModal — édition', () => {
     })
   })
 
+  it('nouvelle clé : le secret devient obligatoire (plus de « laisser vide »), puis clé + secret envoyés', async () => {
+    const autreCle = 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ'
+    api.put.mockResolvedValue({ data: canalCleApi })
+    await monter({ initialCanal: canalCleApi })
+    expect($('[data-testid="canal-secret-nouvelle-cle"]')).toBeNull()
+
+    await changer('#canal-cle-api', autreCle)
+    expect($('[data-testid="canal-secret-nouvelle-cle"]').textContent).toMatch(/saisissez le secret émis avec elle/)
+    expect($('label[for="canal-secret"]').textContent).not.toContain('laisser vide pour ne pas changer')
+    expect($('#canal-secret').getAttribute('placeholder')).toBe('Secret de 48 caractères…')
+
+    await soumettre()
+    expect(container.querySelector('[role="alert"]').textContent).toMatch(/Nouvelle clé API : saisissez aussi le secret/)
+    expect(api.put).not.toHaveBeenCalled()
+
+    await changer('#canal-secret', SECRET)
+    await soumettre()
+    expect(api.put).toHaveBeenCalledWith('/api/canaux/c1', expect.objectContaining({ apiKey: autreCle, token: SECRET }))
+  })
+
   it('passage d’un canal Azure en clé API : clé et secret exigés', async () => {
     await monter({ initialCanal: { id: 'c2', label: 'ancien', apiUrl: 'https://icrm.api.ila26.fr', actif: true } })
     expect($('#canal-type').value).toBe('azure_ad')
