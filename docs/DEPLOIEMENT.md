@@ -465,8 +465,9 @@ Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
   `canaux.type` (défaut `azure_ad` → canaux existants inchangés), `enregistrements.crmProjetId`
   et `crmProjetRef`. Appliquée par `prisma migrate deploy` comme les autres.
 - **Aucune variable d'environnement nouvelle** : l'URL, la clé et le secret vivent dans la ligne du canal.
-- **Réessais** : 2xx = succès ; 401/403/404/413/422 = échec définitif immédiat (pas de réessai) ;
-  408/409/429/5xx/réseau/timeout = backoff existant (5 tentatives).
+- **Réessais** : 2xx au corps du contrat (`status` + `projet_id`) = succès ; 401/403/404/413/422 et
+  2xx non conforme (page HTML d'un front, mauvaise URL) = échec définitif immédiat (pas de réessai) ;
+  408/409/429/5xx/réseau/timeout et 2xx au corps illisible = backoff existant (5 tentatives).
 - ⚠️ Le premier « Mettre en file d'attente » d'une borne envoie tout son historique non partagé.
 
 ---

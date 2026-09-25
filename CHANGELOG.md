@@ -40,8 +40,8 @@ Guide : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md).
 - **Migration `20260925000000_canal_type_icrm_api_key`** (additive, idempotente) :
   `canaux.type` (défaut `azure_ad`), `enregistrements.crmProjetId` / `crmProjetRef`
   (opportunité créée, renseignés au succès).
-- **Test de connexion** d'un canal par clé API : `GET …/v1/ping`, succès uniquement sur 2xx,
-  renvoie l'entreprise, le sous-type et le client I-CRM ; 401/403 → échec avec message clair.
+- **Test de connexion** d'un canal par clé API : `GET …/v1/ping`, succès uniquement sur un 2xx
+  conforme (`ok: true` + `api_version`), renvoie l'entreprise, le sous-type et le client I-CRM ; 401/403 → échec avec message clair.
 - **Back-office** : sélecteur « Type d'authentification » (« Clé API I-CRM (recommandé) » /
   « Azure AD (ancien) ») dans la fenêtre du canal, champs « Clé API (X-Api-Key) » et
   « Secret (X-Api-Secret) » (masqué, afficher/masquer, « laisser vide pour ne pas changer »),
@@ -49,8 +49,8 @@ Guide : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md).
   Identifiants (identifiant de clé au lieu de l'expiration du token) ; le test affiche
   « Connecté à <entreprise> · sous-type <nom> ».
 - **Tests** : backend `tests/lib/icrmApiKey.test.js`, `tests/services/queueWorker.icrmApiKey.test.js`,
-  `tests/routes/canaux.test.js` (+109 tests) ; back-office `canalConfig.test.js` et
-  `CanalConfigModal.test.jsx` (+32 tests, premier test de composant monté dans jsdom).
+  `tests/routes/canaux.test.js` (+145 tests) ; back-office `canalConfig.test.js` et
+  `CanalConfigModal.test.jsx` (+35 tests, premier test de composant monté dans jsdom).
 - **Docs** : `docs/INTEGRATION-ICRM.md`, section « Partage I-CRM — canal par clé API » de
   `docs/DEPLOIEMENT.md`.
 
@@ -69,6 +69,20 @@ Guide : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md).
 - Canal clé API : URL `https` obligatoire (hors `localhost`), redirections HTTP non suivies
   (le secret ne part jamais vers un autre hôte), secret jamais renvoyé ni journalisé ;
   erreurs I-CRM journalisées avec code, noms de champs et `request_id`, jamais les valeurs saisies.
+
+#### Corrigé (revue)
+- **2xx non conforme au contrat ≠ succès** : un 2xx sans `status` + `projet_id` (page HTML
+  d'un front en repli SPA — ex. URL `https://icrm.ila26.fr/projects` —, page de proxy, autre API)
+  marquait l'enregistrement `partage` sans opportunité. Il passe désormais en échec définitif
+  « vérifier l'URL API » ; un 2xx au corps illisible (flux coupé, délai) est réessayé. Le **test
+  de connexion** exige `ok: true` + `api_version` et ne dit plus « Connecté » sur une page HTML.
+- **Bloc contact aux contraintes d'I-CRM** : un e-mail invalide ou une valeur trop longue saisis
+  dans une question reconnue par libellé (ou groupée) faisaient rejeter tout le lead
+  (`422 validation_failed`, définitif). Ces valeurs sont retirées du contact, restent dans
+  `reponses[]` et sont journalisées (champ + motif, sans valeur) ; e-mail en minuscules,
+  téléphone / code postal normalisés quand ils sont valides.
+- **Nouvelle clé API sans secret refusée** (back-office et `PUT /api/canaux/:id`) : I-CRM émet
+  chaque clé avec un nouveau secret, l'ancien secret donnait `401` sur chaque envoi.
 
 ### 2026-09-23 — v2.1.0 : écran de veille des bornes
 

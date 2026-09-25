@@ -53,6 +53,9 @@ Le secret n'est affiché **qu'une fois** par I-CRM : le transmettre par un canal
 9. Dans le tableau « Canaux I-CRM », cliquer **Tester** : le message doit afficher
    **`Connecté à LENA · sous-type BORNE TACTILE (#…)`** (ou `CAE España`). Vérifier que le tenant
    correspond bien au pays de la borne **avant** de mettre des enregistrements en file.
+   « Réponse inattendue (HTTP 200) : l'URL ne pointe pas vers l'API I-CRM » = l'URL saisie est
+   celle de l'**application** (ex. `https://icrm.ila26.fr/projects`, qui répond une page HTML à
+   tout chemin) et non celle de l'API : corriger l'URL (§2).
 
 Un canal appartient à **une** borne : pour N bornes du même tenant, créer N canaux avec la même
 clé et le même secret.
@@ -64,6 +67,13 @@ clé** (non secret). Le secret n'est **jamais** renvoyé par l'API ni réaffich�
 
 **Modifier** le canal → saisir le nouveau secret (laisser la clé telle quelle) → **Enregistrer** →
 **Tester**. Un champ laissé vide n'est pas modifié.
+
+### Nouvelle clé
+
+I-CRM émet toujours une nouvelle clé **avec un nouveau secret** (la rotation, elle, ne change que
+le secret). Remplacer la clé d'un canal impose donc de saisir aussi le secret émis avec elle :
+le back-office et l'API (`PUT /api/canaux/:id`, 400) refusent une nouvelle clé sans secret, qui
+donnerait `401 invalid_credentials` sur chaque envoi.
 
 ### Passer un canal Azure AD existant en clé API
 
@@ -89,11 +99,27 @@ Corps de `POST /enregistrements` (voir `buildIcrmEnregistrementPayload` dans
 l'identifiant de l'option (choix multiples séparés par `", "`). Pour une question texte : `[valeur]`.
 Les réponses vides et les champs facultatifs non renseignés ne sont pas envoyés.
 
+Bloc `contact` — contraintes d'I-CRM appliquées avant l'envoi (un refus `422 validation_failed`
+serait définitif et ferait perdre tout le lead) :
+
+- e-mail : format vérifié et mis en minuscules ; un e-mail invalide est **retiré du contact** ;
+- téléphone et code postal : normalisés (E.164, format du pays de la borne) quand ils sont
+  valides, sinon envoyés tels quels (I-CRM n'en contrôle que la longueur) ;
+- longueurs maximales : civilité 32, code postal 20, téléphone 64, autres champs 255 ; une valeur
+  plus longue (ex. question « groupée » saisie en un seul bloc) est retirée du contact.
+
+Une valeur retirée du contact **reste transmise dans `reponses[]`** (I-CRM la mappe ou la recopie
+en commentaire de l'opportunité) ; le worker journalise le nom du champ et le motif, jamais la valeur.
+Seules les questions reconnues par libellé ou groupées sont concernées : celles qui portent un
+field ID unique (2089/2015/2016) ou un type `email`/`telephone` sont déjà validées à la soumission.
+
 ## 5. Réponses I-CRM et réessais
 
 | Réponse I-CRM | Effet dans EMA |
 |---------------|----------------|
-| **2xx** (`201 created`, `200 already_processed`) | succès : enregistrement `partage`, `crmProjetId` / `crmProjetRef` enregistrés |
+| **2xx** (`201 created`, `200 already_processed`) avec `status` et `projet_id` | succès : enregistrement `partage`, `crmProjetId` / `crmProjetRef` enregistrés |
+| **2xx sans le corps du contrat** (page HTML d'un front, page de proxy, autre API) | **échec définitif** « réponse non conforme au contrat — vérifier l'URL API » : l'enregistrement n'est **jamais** marqué `partage` sans preuve de l'opportunité ; corriger l'URL puis relancer (idempotent) |
+| **2xx dont le corps n'a pas pu être lu** (flux coupé, délai de 30 s) | **échec temporaire** : nouvel essai automatique (I-CRM répondra `200 already_processed` si l'opportunité a été créée) |
 | **401, 403, 404, 413, 422**, redirection 3xx | **échec définitif immédiat** (`echec_definitif`, aucun réessai) ; l'erreur contient le code I-CRM (`invalid_credentials`, `client_disabled`, `insufficient_identity`…) et le `request_id` |
 | **408, 409, 429, 5xx**, erreur réseau, délai de 30 s dépassé | **échec temporaire** : réessai avec le backoff existant (2, 4, 8, 16 min + aléa), échec définitif à la 5ᵉ tentative |
 
