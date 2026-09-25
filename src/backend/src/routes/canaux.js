@@ -16,7 +16,9 @@ import {
   urlPointAccesIcrm,
   enTetesCleApiIcrm,
   lireCorpsJsonIcrm,
+  estPingIcrmConforme,
   codeErreurIcrm,
+  CODE_REPONSE_NON_CONFORME,
 } from '../lib/icrmApiKey.js'
 
 export const canauxRouter = express.Router()
@@ -80,11 +82,18 @@ const canalUpdateSchema = z.object({
  * Cohérence d'une modification avec le type EFFECTIF du canal (type du patch,
  * sinon type en base). Un changement de type impose de fournir la clé ET le
  * secret : les anciennes valeurs appartiennent à l'autre mode d'authentification.
+ * Canal icrm_api_key : une NOUVELLE clé impose aussi son secret — I-CRM émet
+ * toujours un identifiant de clé avec un nouveau secret (la rotation, elle, ne
+ * change que le secret) ; garder l'ancien secret donnerait 401 sur chaque envoi.
  * @returns {Array} issues au format ZodError.errors (vide si valide)
  */
 function verifierModificationCanal(patch, canalExistant) {
   const typeEffectif = patch.type ?? typeDeCanal(canalExistant)
   const changementDeType = patch.type !== undefined && patch.type !== typeDeCanal(canalExistant)
+  const nouvelleCleApi = typeEffectif === CANAL_TYPE_ICRM_API_KEY
+    && !changementDeType
+    && patch.apiKey !== undefined
+    && patch.apiKey !== canalExistant.apiKey
   const schema = z.any().superRefine((valeurs, ctx) => {
     if (changementDeType) {
       if (valeurs.apiKey === undefined) {
@@ -93,6 +102,13 @@ function verifierModificationCanal(patch, canalExistant) {
       if (valeurs.token === undefined) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['token'], message: 'Changement de type : le secret (token) doit être fourni' })
       }
+    }
+    if (nouvelleCleApi && valeurs.token === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['token'],
+        message: 'Nouvelle clé API : le secret émis avec cette clé par I-CRM doit être saisi',
+      })
     }
     if (typeEffectif === CANAL_TYPE_ICRM_API_KEY) {
       verifierChampsCleApi({
@@ -144,6 +160,12 @@ const MESSAGES_ECHEC_PING = {
 }
 
 function messageEchecPing(status, code) {
+  if (status >= 200 && status < 300) {
+    // 2xx sans le corps du contrat (ok + api_version) : page d'un front en repli SPA,
+    // page de proxy, autre API… L'URL saisie n'est pas celle de l'API I-CRM.
+    return `Réponse inattendue (HTTP ${status}) : l'URL ne pointe pas vers l'API I-CRM. `
+      + "Vérifiez l'URL API (ex. https://icrm.api.ila26.fr, sans /api ni chemin de page comme /projects)."
+  }
   if (code && MESSAGES_ECHEC_PING[code]) return MESSAGES_ECHEC_PING[code]
   if (status === 401) return MESSAGES_ECHEC_PING.invalid_credentials
   if (status === 403) return 'Accès refusé par I-CRM (403) : client désactivé ou abonnement inactif.'
@@ -154,8 +176,10 @@ function messageEchecPing(status, code) {
 
 /**
  * Test d'un canal icrm_api_key : GET {apiUrl}/api/external/estimer-mes-aides/v1/ping.
- * Succès uniquement sur 2xx ; renvoie l'entreprise, le sous-type et le client I-CRM.
- * Les erreurs réseau / timeout remontent au catch de la route (502 / 504).
+ * Succès uniquement sur un 2xx au corps du contrat (`ok: true` + `api_version`) ;
+ * renvoie l'entreprise, le sous-type et le client I-CRM.
+ * Les erreurs réseau / timeout (y compris pendant la lecture du corps d'un 2xx)
+ * remontent au catch de la route (502 / 504).
  */
 async function testerCanalCleApi(canal, res) {
   if (!normaliserUrlApiIcrm(canal.apiUrl) || !canal.apiKey || !canal.token) {
@@ -178,7 +202,7 @@ async function testerCanalCleApi(canal, res) {
       redirect: 'manual',
       signal: controller.signal,
     })
-    corps = await lireCorpsJsonIcrm(icrmResponse)
+    corps = await lireCorpsJsonIcrm(icrmResponse, { propagerErreurLecture: icrmResponse.ok })
   } finally {
     clearTimeout(timeoutId)
   }
@@ -191,7 +215,7 @@ async function testerCanalCleApi(canal, res) {
     latencyMs: Date.now() - startedAt,
   }
 
-  if (icrmResponse.ok) {
+  if (icrmResponse.ok && estPingIcrmConforme(corps)) {
     return res.json({
       ...base,
       success: true,
@@ -205,7 +229,7 @@ async function testerCanalCleApi(canal, res) {
     })
   }
 
-  const code = codeErreurIcrm(corps)
+  const code = icrmResponse.ok ? CODE_REPONSE_NON_CONFORME : codeErreurIcrm(corps)
   let requestId = corps?.error?.request_id ?? null
   if (!requestId) {
     try { requestId = icrmResponse.headers?.get?.('x-request-id') ?? null } catch { requestId = null }

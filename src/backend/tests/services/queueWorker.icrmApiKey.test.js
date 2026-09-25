@@ -5,8 +5,13 @@
  *   - payload (buildIcrmEnregistrementPayload) : contact, réponses + libellés d'options,
  *     métadonnées borne / formulaire, langue, created_at ;
  *   - en-têtes X-Api-Key / X-Api-Secret / Idempotency-Key, jamais d'appel Azure AD ;
- *   - 2xx = succès (+ crmProjetId / crmProjetRef) ; 401/403/404/413/422 = échec
- *     définitif immédiat ; 408/409/429/5xx/réseau/timeout = backoff existant ;
+ *   - 2xx au corps du contrat (status + projet_id) = succès (+ crmProjetId /
+ *     crmProjetRef) ; 2xx non conforme (page HTML, autre API) = échec définitif,
+ *     jamais « partagé » ; 2xx au corps illisible = backoff ;
+ *   - 401/403/404/413/422 = échec définitif immédiat ; 408/409/429/5xx/réseau/
+ *     timeout = backoff existant ;
+ *   - bloc contact aux contraintes d'I-CRM (e-mail valide, longueurs max) : une
+ *     valeur refusée quitte le contact mais reste dans reponses ;
  *   - aucun secret ni valeur saisie dans les logs (RGPD).
  * Le chemin historique azure_ad est couvert par tests/queueWorker.test.js et
  * tests/services/queueWorker.test.js (inchangés).
@@ -342,6 +347,87 @@ describe('buildIcrmEnregistrementPayload — contrat v1', () => {
   })
 })
 
+describe('buildIcrmEnregistrementPayload — bloc contact aux contraintes d’I-CRM', () => {
+  // Questions reconnues par LIBELLÉ (pas de crmFieldIds) : non validées à la soumission.
+  const qEmailLibelle = q(null, 'E-mail')
+  const qTelLibelle = q(null, 'Téléphone')
+  const qCpLibelle = q(null, 'Code postal')
+
+  const contactDe = (reponses, borne) => buildIcrmEnregistrementPayload(makeEnregistrement({
+    reponses,
+    ...(borne ? { borne: { ...makeEnregistrement().borne, ...borne } } : {}),
+  }))
+
+  it.each([
+    ['virgule au lieu du point', 'JEAN@GMAIL,COM'],
+    ['espace', 'JEAN DUPONT@GMAIL'],
+    ['sans domaine', 'jean.dupont'],
+  ])('e-mail invalide (%s) : retiré du contact, conservé dans reponses', (_cas, email) => {
+    const payload = contactDe([rep(Q.nom, 'DUPONT'), rep(qEmailLibelle, email)])
+
+    expect(payload.contact).toEqual({ last_name: 'DUPONT' })
+    const reponse = payload.reponses.find((r) => r.libelle === 'E-mail')
+    expect(reponse).toMatchObject({ valeur: email, valeur_libelles: [email] })
+  })
+
+  it('e-mail valide saisi en majuscules (champ texte) : normalisé en minuscules', () => {
+    const payload = contactDe([rep(qEmailLibelle, ' JEAN.DUPONT@GMAIL.COM ')])
+    expect(payload.contact).toEqual({ email_adress: 'jean.dupont@gmail.com' })
+  })
+
+  it('téléphone et code postal : normalisés si valides pour le pays de la borne, sinon gardés tels quels', () => {
+    const fr = contactDe([rep(qTelLibelle, '06 12 34 56 78'), rep(qCpLibelle, '75 011')])
+    expect(fr.contact).toEqual({ phone_number: '+33612345678', code_postale: '75011' })
+
+    const es = contactDe([rep(qTelLibelle, '612 34 56 78'), rep(qCpLibelle, '28013')], { pays: 'ES' })
+    expect(es.contact).toEqual({ phone_number: '+34612345678', code_postale: '28013' })
+
+    // Format douteux mais accepté par I-CRM : on ne retire pas une donnée d'identité
+    const douteux = contactDe([rep(qTelLibelle, '06 12'), rep(qCpLibelle, 'CEDEX 9')])
+    expect(douteux.contact).toEqual({ phone_number: '06 12', code_postale: 'CEDEX 9' })
+  })
+
+  it('valeur plus longue que la limite I-CRM : retirée du contact, conservée dans reponses', () => {
+    const groupee = q([2262, 2087, 2088, 2217, 2089, 2090, 2015, 2016], 'Informations personnelles')
+    const bloc = 'M. DUPONT JEAN 12 RUE X 75011 PARIS 0612345678 A@B.FR'
+    const payload = contactDe([
+      rep(groupee, bloc),
+      rep(qCpLibelle, '1'.repeat(21)),
+      rep(Q.prenom, 'J'.repeat(256)),
+      rep(Q.nom, 'DUPONT'),
+    ])
+
+    expect(payload.contact).toEqual({ last_name: 'DUPONT' })
+    expect(payload.reponses.map((r) => r.valeur)).toEqual([bloc, '1'.repeat(21), 'J'.repeat(256), 'DUPONT'])
+  })
+
+  it('une valeur refusée n’écrase pas une valeur valide du même champ', () => {
+    const payload = contactDe([rep(Q.email, 'jean.dupont@example.com'), rep(qEmailLibelle, 'PAS UN EMAIL')])
+    expect(payload.contact.email_adress).toBe('jean.dupont@example.com')
+  })
+
+  it('processJob : journalise les champs retirés (nom + motif), jamais leur valeur', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({
+      reponses: [rep(Q.nom, 'DUPONT'), rep(qEmailLibelle, 'JEAN@GMAIL,COM')],
+    }))
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: 3 }))
+
+    await processJob(makeJob())
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body)
+    expect(body.contact).toEqual({ last_name: 'DUPONT' })
+    const log = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /retirées du bloc contact/.test(l.message))
+    expect(log).toMatchObject({
+      enregistrementId: ENR_ID,
+      canalId: 'canal-uuid-1',
+      contactEcarte: [{ champ: 'email_adress', motif: 'EMAIL_INVALIDE', question_id: 'q-E-mail' }],
+    })
+    expect(tousLesLogs()).not.toContain('JEAN@GMAIL,COM')
+    expect(tousLesLogs()).not.toContain('DUPONT')
+    expect(appelsUpdateJob('succes')).toHaveLength(1)
+  })
+})
+
 // ─── processJob — canal icrm_api_key ─────────────────────────────────────────
 
 describe('processJob — canal icrm_api_key : envoi', () => {
@@ -465,13 +551,80 @@ describe('processJob — canal icrm_api_key : réponses 2xx', () => {
     expect(appelsUpdateJob('echec_temporaire')).toHaveLength(0)
   })
 
-  it('2xx sans corps exploitable → succès sans trace', async () => {
-    global.fetch.mockResolvedValue(reponseHttp(204))
+  it('projet_id numérique en chaîne accepté', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: '1234', projet_ref: 'P-1' }))
 
     await processJob(makeJob())
 
     const succes = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')
-    expect(succes.data).toMatchObject({ crmProjetId: null, crmProjetRef: null })
+    expect(succes.data).toMatchObject({ crmProjetId: '1234', crmProjetRef: 'P-1' })
+  })
+})
+
+describe('processJob — canal icrm_api_key : 2xx non conforme au contrat', () => {
+  // Page d'un front en repli SPA (URL de l'application au lieu de l'API), page de
+  // proxy, autre API derrière une mauvaise URL de base : aucune preuve que
+  // l'opportunité existe → jamais « partagé ».
+  it.each([
+    ['page HTML 200 (repli SPA d’un front)', () => reponseHttp(200, '<!doctype html><html><body><div id="app"></div></body></html>'), /réponse non JSON/],
+    ['204 sans corps', () => reponseHttp(204), /réponse non JSON/],
+    ['JSON 200 d’une autre API', () => reponseHttp(200, { ok: true }), /ni status ni projet_id/],
+    ['201 sans projet_id', () => reponseHttp(201, { status: 'created', warnings: [] }), /ni status ni projet_id/],
+    ['200 status inconnu', () => reponseHttp(200, { status: 'accepted', projet_id: 12 }), /ni status ni projet_id/],
+  ])('%s → echec_definitif dès la 1re tentative, enregistrement non partagé', async (_cas, fabrique, nature) => {
+    global.fetch.mockResolvedValue(fabrique())
+
+    await processJob(makeJob({ tentatives: 0 }))
+
+    expect(appelsUpdateJob('succes')).toHaveLength(0)
+    expect(appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')).toBeUndefined()
+    expect(mockNotifySucces).not.toHaveBeenCalled()
+
+    const jobDefinitif = appelsUpdateJob('echec_definitif')[0][0].data
+    expect(jobDefinitif.tentatives).toBe(1)
+    expect(jobDefinitif.erreur).toMatch(/non conforme au contrat/)
+    expect(jobDefinitif.erreur).toMatch(nature)
+    expect(jobDefinitif.erreur).toMatch(/vérifier l'URL API/)
+    expect(appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'echec_definitif')).toBeDefined()
+    expect(mockNotifyEchec).toHaveBeenCalledWith('borne-uuid-1', ENR_ID, expect.stringMatching(/non conforme/))
+
+    const logErreur = mockLogger.error.mock.calls.map((c) => c[0]).find((l) => /échec définitif/.test(l.message))
+    expect(logErreur).toMatchObject({ codeIcrm: 'reponse_non_conforme' })
+    expect(tousLesLogs()).not.toContain('<!doctype html>')
+  })
+
+  it('2xx dont le corps ne peut pas être lu (délai dépassé) → échec temporaire, jamais « partagé »', async () => {
+    const abort = Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })
+    global.fetch.mockResolvedValue({
+      ok: true,
+      status: 201,
+      headers: { get: () => null },
+      text: async () => { throw abort },
+    })
+
+    await processJob(makeJob({ tentatives: 0 }))
+
+    expect(appelsUpdateJob('succes')).toHaveLength(0)
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    const [appel] = appelsUpdateJob('echec_temporaire')
+    expect(appel[0].data).toMatchObject({ tentatives: 1, prochainEssai: expect.any(Date) })
+    expect(appel[0].data.erreur).toBe(
+      'I-CRM HTTP 201 : lecture de la réponse impossible (délai de 30 s dépassé) — nouvel essai automatique',
+    )
+    expect(appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')).toBeUndefined()
+  })
+
+  it('un corps illisible sur une erreur HTTP garde la classification par statut', async () => {
+    global.fetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      headers: { get: () => null },
+      text: async () => { throw new Error('socket hang up') },
+    })
+
+    await processJob(makeJob())
+
+    expect(appelsUpdateJob('echec_definitif')[0][0].data.erreur).toBe('I-CRM HTTP 401 (réponse non JSON)')
   })
 
   it('journalise les warnings I-CRM sans leurs valeurs (RGPD)', async () => {

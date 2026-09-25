@@ -9,9 +9,13 @@ import {
   enTetesCleApiIcrm,
   estStatutIcrmDefinitif,
   lireCorpsJsonIcrm,
+  lireSuccesEnregistrementIcrm,
   formaterErreurIcrm,
+  formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
+  CODE_REPONSE_NON_CONFORME,
 } from '../lib/icrmApiKey.js'
+import { validateEmail, validateTelephone, validateCodePostal } from '../lib/contactFormats.js'
 
 const POLL_INTERVAL = 30 * 1000
 const MAX_TENTATIVES = 5
@@ -346,6 +350,52 @@ function normaliserCivilite(libelle, valeurBrute) {
   return libelle.replace(/\.+$/, '').trim()
 }
 
+// Longueurs maximales du bloc `contact` acceptées par I-CRM (EnregistrementValidator).
+// Au-delà, I-CRM répond 422 validation_failed — définitif pour EMA : le lead serait perdu.
+const LONGUEUR_MAX_CONTACT_ICRM = {
+  civility: 32,
+  first_name: 255,
+  last_name: 255,
+  phone_number: 64,
+  email_adress: 255,
+  adresse: 255,
+  code_postale: 20,
+  ville: 255,
+}
+
+/**
+ * Valeur admissible dans le bloc `contact` d'I-CRM, ou motif de mise à l'écart.
+ *
+ * Les questions reconnues par field ID unique ou par typeOption sont déjà
+ * validées/normalisées à la soumission (contactFormats) ; celles reconnues par
+ * LIBELLÉ ou par une question groupée ne le sont pas. I-CRM refuse (422) un
+ * e-mail mal formé et toute valeur trop longue : ces valeurs sont retirées du
+ * contact — jamais du lead — et restent transmises dans `reponses`.
+ * Téléphone et code postal : normalisés quand ils sont valides, sinon gardés
+ * tels quels (I-CRM n'en contrôle que la longueur ; les écarter pourrait
+ * retirer la seule donnée d'identité du visiteur).
+ *
+ * @returns {{ valeur: string } | { motif: string }}
+ */
+function valeurContactIcrm(champ, valeur, pays) {
+  let v = String(valeur).trim()
+  if (champ === 'email_adress') {
+    const email = validateEmail(v)
+    if (!email.valid) return { motif: email.code || 'EMAIL_INVALIDE' }
+    v = email.value
+  } else if (champ === 'phone_number') {
+    const tel = validateTelephone(v, pays)
+    if (tel.valid) v = tel.value
+  } else if (champ === 'code_postale') {
+    const cp = validateCodePostal(v, pays)
+    if (cp.valid) v = cp.value
+  }
+  if (v === '') return { motif: 'VIDE' }
+  const max = LONGUEUR_MAX_CONTACT_ICRM[champ]
+  if (max && v.length > max) return { motif: 'TROP_LONG' }
+  return { valeur: v }
+}
+
 /**
  * Construit le corps de POST /api/external/estimer-mes-aides/v1/enregistrements
  * (contrat EMA → I-CRM v1). Fonction pure, exportée pour les tests.
@@ -358,9 +408,21 @@ function normaliserCivilite(libelle, valeurBrute) {
  * @returns {Object} payload JSON du contrat
  */
 function buildIcrmEnregistrementPayload(enregistrement) {
+  return construirePayloadIcrm(enregistrement).payload
+}
+
+/**
+ * Payload du contrat + valeurs retirées du bloc contact (champ, motif, question —
+ * jamais la valeur, pour pouvoir être journalisé).
+ *
+ * @returns {{ payload: Object, contactEcarte: Array<{ champ: string, motif: string, question_id: ?string }> }}
+ */
+function construirePayloadIcrm(enregistrement) {
   const enr = enregistrement || {}
   const langue = LANGUES_CONTRAT.has(enr.langueUtilisee) ? enr.langueUtilisee : undefined
+  const paysBorne = enr.borne?.pays
   const contact = {}
+  const contactEcarte = []
   const reponses = []
 
   for (const r of enr.reponses || []) {
@@ -393,7 +455,12 @@ function buildIcrmEnregistrementPayload(enregistrement) {
         || (Array.isArray(question.options) && question.options.length > 0)
       let valeurContact = aChoix ? valeurLibelles.join(', ') : valeur
       if (champContact === 'civility') valeurContact = normaliserCivilite(valeurContact, valeur)
-      if (valeurContact.trim() !== '') contact[champContact] = valeurContact
+      const retenue = valeurContactIcrm(champContact, valeurContact, paysBorne)
+      if (retenue.valeur !== undefined) {
+        contact[champContact] = retenue.valeur
+      } else if (retenue.motif !== 'VIDE') {
+        contactEcarte.push({ champ: champContact, motif: retenue.motif, question_id: r.questionId ?? question.id ?? null })
+      }
     }
   }
 
@@ -417,7 +484,7 @@ function buildIcrmEnregistrementPayload(enregistrement) {
   })
   const nonVide = (bloc) => (Object.keys(bloc).length > 0 ? bloc : undefined)
 
-  return compacter({
+  const payload = compacter({
     external_id: enr.id,
     created_at: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined,
     langue,
@@ -426,6 +493,7 @@ function buildIcrmEnregistrementPayload(enregistrement) {
     contact: nonVide(contact),
     reponses,
   })
+  return { payload, contactEcarte }
 }
 
 function erreurPartage(message, { definitif = false, httpStatus = null, code = null } = {}) {
@@ -441,9 +509,14 @@ function erreurPartage(message, { definitif = false, httpStatus = null, code = n
  * Aucun appel Azure (pas de getValidToken). Les redirections ne sont pas suivies
  * (le secret ne doit jamais partir vers un autre hôte).
  *
- * @returns {{ crmProjetId: string|null, crmProjetRef: string|null, statutIcrm: string|null,
+ * Succès UNIQUEMENT sur un 2xx au corps du contrat (status + projet_id) : un autre
+ * 2xx (front en repli SPA, page de proxy, mauvaise URL de base) ne prouve pas que
+ * l'opportunité existe et ne doit jamais marquer l'enregistrement « partagé ».
+ *
+ * @returns {{ crmProjetId: string, crmProjetRef: string|null, statutIcrm: string,
  *             httpStatus: number, warnings: Array }}
- * @throws Error avec `definitif=true` pour 401/403/404/413/422/3xx (pas de réessai)
+ * @throws Error avec `definitif=true` pour 401/403/404/413/422/3xx et 2xx non conforme
+ *         (pas de réessai) ; sans `definitif` (backoff) pour un 2xx au corps illisible
  */
 async function envoyerViaCleApiIcrm(canal, enregistrement) {
   if (!normaliserUrlApiIcrm(canal.apiUrl) || !canal.apiKey || !canal.token) {
@@ -453,7 +526,16 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
     )
   }
 
-  const payload = buildIcrmEnregistrementPayload(enregistrement)
+  const { payload, contactEcarte } = construirePayloadIcrm(enregistrement)
+  if (contactEcarte.length > 0) {
+    // Noms de champ et motifs uniquement — jamais la valeur saisie (RGPD).
+    logger.warn({
+      message: '[QUEUE] Valeurs retirées du bloc contact (format ou longueur refusés par I-CRM) — transmises dans reponses',
+      enregistrementId: enregistrement.id,
+      canalId: canal.id ?? null,
+      contactEcarte,
+    })
+  }
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 30 * 1000)
@@ -472,19 +554,36 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
       signal: controller.signal,
     })
     // Lecture du corps sous le même délai de 30 s (un corps bloqué ne fige pas le worker)
-    corps = await lireCorpsJsonIcrm(res)
+    try {
+      corps = await lireCorpsJsonIcrm(res, { propagerErreurLecture: res.ok })
+    } catch (err) {
+      // 2xx dont le corps n'a pas pu être lu : I-CRM a peut-être créé l'opportunité.
+      // Nouvel essai (idempotent sur external_id → 200 already_processed), jamais « partagé ».
+      const cause = err?.name === 'AbortError' ? 'délai de 30 s dépassé' : 'flux interrompu'
+      throw erreurPartage(
+        `I-CRM HTTP ${res.status} : lecture de la réponse impossible (${cause}) — nouvel essai automatique`,
+        { httpStatus: res.status },
+      )
+    }
   } finally {
     clearTimeout(timeoutId)
   }
 
   if (res.ok) {
-    const projetId = corps?.projet_id
+    const succes = lireSuccesEnregistrementIcrm(corps)
+    if (!succes) {
+      throw erreurPartage(formaterSuccesNonConformeIcrm(res.status, corps), {
+        definitif: true,
+        httpStatus: res.status,
+        code: CODE_REPONSE_NON_CONFORME,
+      })
+    }
     return {
-      crmProjetId: projetId === null || projetId === undefined ? null : String(projetId),
-      crmProjetRef: typeof corps?.projet_ref === 'string' && corps.projet_ref !== '' ? corps.projet_ref : null,
-      statutIcrm: typeof corps?.status === 'string' ? corps.status : null,
+      crmProjetId: succes.projetId,
+      crmProjetRef: succes.projetRef,
+      statutIcrm: succes.statut,
       httpStatus: res.status,
-      warnings: Array.isArray(corps?.warnings) ? corps.warnings : [],
+      warnings: succes.warnings,
     }
   }
 

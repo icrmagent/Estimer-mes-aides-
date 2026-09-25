@@ -17,8 +17,12 @@ import {
   enTetesCleApiIcrm,
   estStatutIcrmDefinitif,
   lireCorpsJsonIcrm,
+  lireSuccesEnregistrementIcrm,
+  estPingIcrmConforme,
   formaterErreurIcrm,
+  formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
+  CODE_REPONSE_NON_CONFORME,
 } from '../../src/lib/icrmApiKey.js'
 
 const CLE = 'emak_' + 'A1b2C3d4E5f6G7h8I9j0K1l2'
@@ -105,6 +109,15 @@ describe('icrmApiKey — lecture du corps et message d’erreur', () => {
     await expect(lireCorpsJsonIcrm({ text: async () => { throw new Error('flux coupé') } })).resolves.toBeNull()
   })
 
+  it('propagerErreurLecture : une erreur de lecture est levée, un corps non JSON reste null', async () => {
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' })
+    await expect(lireCorpsJsonIcrm({ text: async () => { throw abort } }, { propagerErreurLecture: true }))
+      .rejects.toBe(abort)
+    await expect(lireCorpsJsonIcrm({ text: async () => '<!doctype html>' }, { propagerErreurLecture: true }))
+      .resolves.toBeNull()
+    await expect(lireCorpsJsonIcrm({ text: async () => '' }, { propagerErreurLecture: true })).resolves.toBeNull()
+  })
+
   it('inclut statut, code, message, noms de champs (sans valeurs) et request_id', () => {
     const msg = formaterErreurIcrm(422, {
       error: {
@@ -140,5 +153,49 @@ describe('icrmApiKey — lecture du corps et message d’erreur', () => {
     expect(codeErreurIcrm({ error: { code: 'client_disabled' } })).toBe('client_disabled')
     expect(codeErreurIcrm({ error: 'texte' })).toBeNull()
     expect(codeErreurIcrm(null)).toBeNull()
+  })
+})
+
+describe('icrmApiKey — conformité des réponses 2xx au contrat v1', () => {
+  it('201 / 200 conformes : statut, projet_id (chaîne), projet_ref, warnings', () => {
+    expect(lireSuccesEnregistrementIcrm({
+      status: 'created', projet_id: 1234, projet_ref: 'P-XX2026001234', contact_id: 5, warnings: [{ code: 'unmapped_field' }],
+    })).toEqual({ statut: 'created', projetId: '1234', projetRef: 'P-XX2026001234', warnings: [{ code: 'unmapped_field' }] })
+    expect(lireSuccesEnregistrementIcrm({ status: 'already_processed', projet_id: '77', projet_ref: '' }))
+      .toEqual({ statut: 'already_processed', projetId: '77', projetRef: null, warnings: [] })
+  })
+
+  it.each([
+    ['corps absent (204 / non JSON)', null],
+    ['tableau', [{ status: 'created', projet_id: 1 }]],
+    ['objet quelconque (autre API)', { ok: true }],
+    ['status inconnu', { status: 'queued', projet_id: 1 }],
+    ['projet_id absent', { status: 'created' }],
+    ['projet_id null', { status: 'created', projet_id: null }],
+    ['projet_id nul ou négatif', { status: 'created', projet_id: 0 }],
+    ['projet_id non entier', { status: 'created', projet_id: '12a' }],
+    ['projet_id décimal', { status: 'created', projet_id: 1.5 }],
+  ])('non conforme : %s → null', (_cas, corps) => {
+    expect(lireSuccesEnregistrementIcrm(corps)).toBeNull()
+  })
+
+  it('ping conforme : ok === true et api_version renseignée', () => {
+    expect(estPingIcrmConforme({ ok: true, api_version: '1', entreprise: 'LENA' })).toBe(true)
+    expect(estPingIcrmConforme({ ok: true, api_version: 1 })).toBe(true)
+    expect(estPingIcrmConforme(null)).toBe(false)
+    expect(estPingIcrmConforme({ ok: true })).toBe(false)
+    expect(estPingIcrmConforme({ ok: true, api_version: '  ' })).toBe(false)
+    expect(estPingIcrmConforme({ ok: 'true', api_version: '1' })).toBe(false)
+    expect(estPingIcrmConforme({ status: 'up' })).toBe(false)
+  })
+
+  it('message d’un 2xx non conforme : statut, nature, URL à vérifier, sans rien du corps', () => {
+    expect(CODE_REPONSE_NON_CONFORME).toBe('reponse_non_conforme')
+    const html = formaterSuccesNonConformeIcrm(200, null)
+    expect(html).toMatch(/^I-CRM HTTP 200 : réponse non conforme au contrat \(réponse non JSON\)/)
+    expect(html).toMatch(/NON partagé/)
+    expect(html).toMatch(/vérifier l'URL API/)
+    expect(formaterSuccesNonConformeIcrm(201, { secret: 'x' })).toMatch(/ni status ni projet_id/)
+    expect(formaterSuccesNonConformeIcrm(201, { secret: 'x' })).not.toContain('secret')
   })
 })

@@ -4,7 +4,8 @@
  * Couvre : validation Zod par type (azure_ad par défaut, icrm_api_key avec clé
  * « emak_… » + secret de 48 caractères + URL https), changement de type,
  * projection publique (secret jamais renvoyé, identifiant de clé exposé),
- * test de connexion (ping I-CRM pour icrm_api_key, OPTIONS historique sinon).
+ * test de connexion (ping I-CRM pour icrm_api_key, OPTIONS historique sinon),
+ * nouvelle clé API sans son secret refusée, ping 2xx non conforme au contrat.
  */
 
 import { jest } from '@jest/globals'
@@ -99,7 +100,7 @@ function reponseHttp(status, corps, headers = {}) {
     ok: status >= 200 && status < 300,
     status,
     headers: { get: (nom) => headers[nom.toLowerCase()] ?? null },
-    text: async () => (corps === undefined ? '' : JSON.stringify(corps)),
+    text: async () => (corps === undefined ? '' : typeof corps === 'string' ? corps : JSON.stringify(corps)),
   }
 }
 
@@ -319,6 +320,38 @@ describe('PUT /api/canaux/:id — cohérence avec le type', () => {
     expect(res.status).toBe(200)
   })
 
+  it('nouvelle clé API sans secret : refusée (I-CRM émet toujours la clé avec un nouveau secret)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+    const nouvelleCle = 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ'
+
+    const refus = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA)
+      .send({ type: 'icrm_api_key', apiKey: nouvelleCle, label: 'lena' })
+    expect(refus.status).toBe(400)
+    expect(refus.body.details).toEqual([
+      expect.objectContaining({ path: ['token'], message: expect.stringMatching(/Nouvelle clé API/) }),
+    ])
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+
+    const avecSecret = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA)
+      .send({ apiKey: nouvelleCle, token: 'N'.repeat(48) })
+    expect(avecSecret.status).toBe(200)
+    expect(mockPrisma.canal.update).toHaveBeenCalledWith({
+      where: { id: CANAL_ID }, data: { apiKey: nouvelleCle, token: 'N'.repeat(48) },
+    })
+  })
+
+  it('clé API identique renvoyée sans secret : acceptée (aucun changement de clé)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+    const res = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiKey: CLE, label: 'lena' })
+    expect(res.status).toBe(200)
+  })
+
+  it('canal azure_ad : un nouveau refresh token seul reste accepté (comportement historique)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ type: 'azure_ad', apiKey: 'rt', token: 'at' }))
+    const res = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiKey: 'nouveau-rt' })
+    expect(res.status).toBe(200)
+  })
+
   it('ADMIN_BORNE : 403 avant toute validation de cohérence sur un canal d’une autre borne', async () => {
     mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ borne: { adminBorneId: 'autre' } }))
     const res = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authAB).send({ token: 'court' })
@@ -418,6 +451,35 @@ describe('POST /api/canaux/:id/test — icrm_api_key (ping I-CRM)', () => {
     const r = await request(app).post(`/api/canaux/${CANAL_ID}/test`).set(authSA)
     expect(r.status).toBe(502)
     expect(r.body.success).toBe(false)
+  })
+
+  it.each([
+    ['page HTML (front en repli SPA, ex. URL …/projects)', '<!doctype html><html><body><div id="app"></div></body></html>'],
+    ['corps vide', undefined],
+    ['JSON d’une autre API', { status: 'up' }],
+    ['ok sans api_version', { ok: true, entreprise: 'LENA' }],
+  ])('2xx non conforme au contrat (%s) : échec « URL à vérifier », jamais « Connecté »', async (_cas, corps) => {
+    global.fetch.mockResolvedValue(reponseHttp(200, corps))
+
+    const res = await request(app).post(`/api/canaux/${CANAL_ID}/test`).set(authSA)
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      success: false, reachable: true, httpStatus: 200, authValid: null, code: 'reponse_non_conforme',
+    })
+    expect(res.body.error).toMatch(/Réponse inattendue \(HTTP 200\) : l'URL ne pointe pas vers l'API I-CRM/)
+    expect(res.body.entreprise).toBeUndefined()
+  })
+
+  it('2xx dont le corps ne se lit pas avant le délai → 504', async () => {
+    const abort = new Error('aborted')
+    abort.name = 'AbortError'
+    global.fetch.mockResolvedValue({
+      ok: true, status: 200, headers: { get: () => null }, text: async () => { throw abort },
+    })
+    const res = await request(app).post(`/api/canaux/${CANAL_ID}/test`).set(authSA)
+    expect(res.status).toBe(504)
+    expect(res.body.success).toBe(false)
   })
 
   it('canal incomplet : 400 sans appel réseau', async () => {

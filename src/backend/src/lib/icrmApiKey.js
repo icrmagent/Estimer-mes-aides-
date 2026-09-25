@@ -79,17 +79,77 @@ export function estStatutIcrmDefinitif(status) {
   return STATUTS_ICRM_DEFINITIFS.includes(status) || (status >= 300 && status < 400)
 }
 
-/** Lit le corps JSON d'une réponse ; null si absent ou non JSON. */
-export async function lireCorpsJsonIcrm(res) {
+/**
+ * Lit le corps JSON d'une réponse ; null si absent ou non JSON.
+ *
+ * Par défaut, une erreur de LECTURE (flux coupé, délai dépassé) donne aussi null.
+ * Avec `propagerErreurLecture`, elle est levée : sur un 2xx, elle ne doit pas être
+ * confondue avec un corps non JSON (I-CRM a peut-être créé l'opportunité).
+ */
+export async function lireCorpsJsonIcrm(res, { propagerErreurLecture = false } = {}) {
+  let texte
   try {
-    const texte = typeof res.text === 'function'
+    texte = typeof res.text === 'function'
       ? await res.text()
       : JSON.stringify(await res.json())
-    if (!texte) return null
+  } catch (err) {
+    if (propagerErreurLecture) throw err
+    return null
+  }
+  if (!texte) return null
+  try {
     return JSON.parse(texte)
   } catch {
     return null
   }
+}
+
+// Code EMA (pas un code I-CRM) : 2xx dont le corps n'est pas celui du contrat v1.
+export const CODE_REPONSE_NON_CONFORME = 'reponse_non_conforme'
+
+const STATUTS_ENREGISTREMENT_ICRM = Object.freeze(['created', 'already_processed'])
+
+function entierPositif(valeur) {
+  if (typeof valeur === 'number') return Number.isSafeInteger(valeur) && valeur > 0 ? valeur : null
+  if (typeof valeur === 'string' && /^\d+$/.test(valeur)) {
+    const n = Number(valeur)
+    return Number.isSafeInteger(n) && n > 0 ? n : null
+  }
+  return null
+}
+
+/**
+ * Corps d'un 2xx de POST /enregistrements conforme au contrat v1 :
+ * `{ status: created|already_processed, projet_id: entier > 0, projet_ref?, warnings? }`.
+ *
+ * Tout autre 2xx (page HTML d'un front en repli SPA, page de proxy, autre API
+ * derrière une mauvaise URL de base…) renvoie null : il ne prouve PAS que
+ * l'opportunité existe, l'enregistrement ne doit donc pas être marqué partagé.
+ *
+ * @returns {{ statut: string, projetId: string, projetRef: string|null, warnings: Array }|null}
+ */
+export function lireSuccesEnregistrementIcrm(corps) {
+  if (!corps || typeof corps !== 'object' || Array.isArray(corps)) return null
+  if (!STATUTS_ENREGISTREMENT_ICRM.includes(corps.status)) return null
+  const projetId = entierPositif(corps.projet_id)
+  if (projetId === null) return null
+  return {
+    statut: corps.status,
+    projetId: String(projetId),
+    projetRef: typeof corps.projet_ref === 'string' && corps.projet_ref !== '' ? corps.projet_ref : null,
+    warnings: Array.isArray(corps.warnings) ? corps.warnings : [],
+  }
+}
+
+/**
+ * Corps d'un 2xx de GET /ping conforme au contrat v1 : `ok === true` et `api_version`
+ * renseignée. Sinon, l'URL du canal ne pointe pas vers l'API I-CRM.
+ */
+export function estPingIcrmConforme(corps) {
+  if (!corps || typeof corps !== 'object' || Array.isArray(corps)) return false
+  if (corps.ok !== true) return false
+  const version = corps.api_version
+  return (typeof version === 'string' && version.trim() !== '') || typeof version === 'number'
 }
 
 function lireEnTete(res, nom) {
@@ -128,6 +188,17 @@ export function formaterErreurIcrm(status, corps, res = null) {
   if (requestId) texte += ` [request_id ${requestId}]`
 
   return texte.length > LONGUEUR_MAX_MESSAGE ? `${texte.slice(0, LONGUEUR_MAX_MESSAGE - 1)}…` : texte
+}
+
+/**
+ * Message d'un 2xx non conforme au contrat (sans rien du corps reçu : il peut
+ * s'agir d'une page quelconque).
+ */
+export function formaterSuccesNonConformeIcrm(status, corps) {
+  const nature = corps === null ? 'réponse non JSON' : 'ni status ni projet_id attendus'
+  return `I-CRM HTTP ${status} : réponse non conforme au contrat (${nature}) — `
+    + "enregistrement NON partagé ; vérifier l'URL API du canal (ex. https://icrm.api.ila26.fr, "
+    + 'sans /api ni chemin de page) puis relancer'
 }
 
 /** Code d'erreur I-CRM (`error.code`) d'un corps de réponse, ou null. */
