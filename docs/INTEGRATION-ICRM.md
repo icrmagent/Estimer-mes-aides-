@@ -25,7 +25,8 @@
 - EMA envoie **toutes les réponses** (et plus seulement l'identité, comme le canal Azure AD) :
   I-CRM résout les field IDs du formulaire (ids CAE España 2087…2307) vers les champs du
   tenant et signale en avertissement ce qu'il n'a pas pu mapper.
-- Contrat de référence : **v1**, partagé avec l'implémentation I-CRM.
+- Contrat de référence : **v1** + addendum **v1.1** (widget « Borne » → « Info borne », §4.1),
+  partagé avec l'implémentation I-CRM.
 
 ## 2. Cibles de production
 
@@ -88,9 +89,11 @@ Corps de `POST /enregistrements` (voir `buildIcrmEnregistrementPayload` dans
 | Champ | Contenu |
 |-------|---------|
 | `external_id` | UUID de l'enregistrement EMA (clé d'idempotence, aussi dans `Idempotency-Key`) |
-| `created_at`, `langue` | date de soumission (ISO-8601), `fr` / `es` / `en` |
+| `created_at` | **toujours envoyé** (v1.1) : `enregistrement.createdAt` en ISO-8601 UTC (`2026-09-25T10:42:17.311Z`). Sans date valide, l'envoi est refusé en échec définitif (cas impossible en base : colonne `NOT NULL`) |
+| `langue` | `fr` / `es` / `en` (autre valeur : omise) |
 | `formulaire` | `id`, `version` figée à la soumission, `label` |
 | `borne` | `id`, `id_borne`, `pays`, `adresse`, `commercant`, `regie`, `installateur` |
+| `borne.admin` (v1.1) | AdminBorne propriétaire de la borne : `nom`, `prenom`, `email`, `raison_sociale`, `siret`. Absent si la borne n'a pas d'admin (borne du SuperAdmin) ; membres vides omis, e-mail mal formé ou valeur > 255 caractères omis (un 422 ferait perdre le lead) |
 | `contact` | civilité, nom, prénom, adresse, code postal, ville, téléphone, e-mail (même correspondance que le canal historique : field IDs 2262/2087/2088/2217/2089/2090/2015/2016, puis libellé FR) |
 | `reponses[]` | `question_id`, `libelle` (FR), `type`, `crm_field_ids`, `valeur` (brute), `valeur_libelles` |
 
@@ -113,6 +116,78 @@ en commentaire de l'opportunité) ; le worker journalise le nom du champ et le m
 Seules les questions reconnues par libellé ou groupées sont concernées : celles qui portent un
 field ID unique (2089/2015/2016) ou un type `email`/`telephone` sont déjà validées à la soumission.
 
+### 4.1 Widget « Borne » → « Info borne » dans I-CRM (contrat v1.1)
+
+I-CRM range les informations de la borne et de l'enregistrement dans un widget **« Borne »**,
+sous-widget **« Info borne »** (en espagnol « Terminal » → « Info terminal »), ajouté à la fin de
+l'onglet du sous-type BORNE TACTILE qui porte les questions EMA (CAE España : onglet 22
+« ESTIMER VOS AIDES » ; LENA : son clone). Les 14 champs remplis, clés identiques dans chaque tenant :
+
+| # | Champ I-CRM | Clé | Type | Source EMA |
+|---|-------------|-----|------|------------|
+| 1 | ID borne | `projets_ema_id_borne` | Texte | `borne.id_borne` (`Borne.idBorne`) |
+| 2 | Adresse de la borne | `projets_ema_adresse_borne` | Texte | `borne.adresse` |
+| 3 | Pays de la borne | `projets_ema_pays_borne` | Texte | `borne.pays` |
+| 4 | Commerçant | `projets_ema_commercant` | Texte | `borne.commercant` |
+| 5 | Régie | `projets_ema_regie` | Texte | `borne.regie` |
+| 6 | Installateur | `projets_ema_installateur` | Texte | `borne.installateur` |
+| 7 | Admin borne | `projets_ema_admin_borne` | Texte | `borne.admin.prenom`, une espace, `borne.admin.nom` (ex. « Claire LEFEBVRE ») |
+| 8 | Email admin borne | `projets_ema_admin_email` | Texte | `borne.admin.email` |
+| 9 | Entreprise admin borne | `projets_ema_admin_raison_sociale` | Texte | `borne.admin.raison_sociale` (`AdminBorne.raisonSociale`) |
+| 10 | SIRET admin borne | `projets_ema_admin_siret` | Texte | `borne.admin.siret` |
+| 11 | Date et heure de l'enregistrement | `projets_ema_date_enregistrement` | Date et temps | `created_at` (UTC, converti par I-CRM en heure locale du tenant) |
+| 12 | Langue utilisée | `projets_ema_langue` | Texte | `langue` (`Enregistrement.langueUtilisee`) |
+| 13 | Formulaire | `projets_ema_formulaire` | Texte | `formulaire.label`, « v », `formulaire.version` (ex. « Estimer mes aides v1.3.0 ») |
+| 14 | Référence enregistrement EMA | `projets_ema_ref_enregistrement` | Texte | `external_id` (id de l'enregistrement) |
+
+- **Rien à configurer côté EMA** : le worker envoie ces données avec chaque enregistrement (canal
+  clé API uniquement ; le canal Azure AD n'envoie que le contact). Les champs sont créés par I-CRM
+  (« provisioning ») à l'émission de la clé, ou à la demande
+  (`POST /api/admin/external-api-clients/{id}/provision-borne-fields`,
+  `php artisan external-api:provision-borne-fields`).
+- Une valeur absente côté EMA n'est pas écrite : borne sans régie → « Régie » vide ; borne sans
+  AdminBorne (borne du SuperAdmin) → champs 7 à 10 vides.
+- Champ absent du tenant (non provisionné) : I-CRM recopie la valeur dans le commentaire de
+  l'opportunité et renvoie l'avertissement `borne_field_missing` avec sa `key` ; le worker journalise
+  le code et la clé, jamais la valeur. Le commentaire n'est plus écrit que pour ce qui n'a pas de
+  champ (réponses non mappées, options non reconnues, champs « Info borne » absents).
+- Le bloc `borne.admin` contient des données personnelles (nom, e-mail, SIRET de l'AdminBorne) :
+  il n'est jamais journalisé par EMA.
+- Rétrocompatible : un I-CRM antérieur à la v1.1 ignore `borne.admin`.
+
+### 4.2 Options du formulaire ↔ options du tenant I-CRM
+
+Pour une question à choix, I-CRM cherche l'option du champ cible qui correspond au premier
+`valeur_libelles`, en ignorant accents, casse, espaces, typographie (’, tiret insécable) et le
+préfixe « N- ». Sans correspondance, le libellé brut est stocké, l'avertissement `unmatched_option`
+est renvoyé et la valeur est recopiée en commentaire : rien n'est perdu, mais le champ ne porte pas
+une option du tenant (filtres, exports).
+
+Seed (`src/backend/prisma/seed.js`) comparé aux options de CAE España (onglet 22, relevé du
+2026-09-25) : 48 options sur 53 reconnues.
+
+| Field | Option EMA | Situation | Action |
+|-------|------------|-----------|--------|
+| 2294 Revenu | « 4- Supérieur à 42 849 € » | le tenant dit « 4- Sup à 42849€ » (abréviation, jamais reconnue) | **seed aligné** : `crmValue` = `4- Sup à 42849€` ; libellé affiché et id d'option inchangés |
+| 2301 Chauffage | « Autre » | aucune option « Autre » dans le tenant (le texte libre va dans 2302) | non alignable côté EMA : ajouter l'option « Autre » au champ 2301 dans I-CRM, ou accepter l'avertissement |
+| 2306 Date de construction | « 1- Entre 2 ans et 15 ans », « 2- Plus de 15 ans » | champ « Option unique » **sans aucune option** dans le tenant | non alignable côté EMA : recréer ces deux options sur le champ 2306 dans I-CRM |
+| 2262 Civilité | « Mr. », « Mme » | champ Texte dans le tenant (pas d'options) | rien à faire : I-CRM normalise en `Mr` / `Mme` |
+
+⚠️ **Production : le seed n'est pas rejoué.** Le formulaire de production garde les options avec
+lesquelles il a été créé. À vérifier dans le back-office avant la mise en service, question
+« À combien s'élève le revenu total de votre foyer fiscal » (field 2294), option 4 :
+
+- la valeur envoyée est le `crmValue` de l'option s'il existe (invisible dans le back-office,
+  lisible dans `GET /api/formulaires/:id` → `questions[].options[].crmValue`), sinon le libellé FR ;
+- **enregistrer une question dans le back-office supprime les `crmValue` de ses options** (le schéma
+  de `PUT /api/formulaires/:id/questions/:qid` ne les connaît pas) : c'est alors le libellé FR qui
+  part, reconnu pour toutes les options sauf « Supérieur » ≠ « Sup » ;
+- correction côté EMA : libellé FR de l'option 4 = « 4- Sup à 42 849 € », puis **Enregistrer**
+  (la clé de comparaison devient celle du tenant) ; ou, côté I-CRM, renommer l'option du tenant —
+  à éviter : les opportunités existantes portent le libellé actuel ;
+- après les premiers envois réels, contrôler les journaux `[QUEUE] I-CRM a signalé…` :
+  un `unmatched_option` sur `crm_field_ids` 2294, 2301 ou 2306 signale une option non alignée.
+
 ## 5. Réponses I-CRM et réessais
 
 | Réponse I-CRM | Effet dans EMA |
@@ -129,8 +204,9 @@ field ID unique (2089/2015/2016) ou un type `email`/`telephone` sont déjà vali
   sessions abandonnées sans identité finissent donc en échec définitif, sans réessai.
 - Après correction (clé, secret, URL), relancer depuis **Partage CRM** : bouton **Relancer** d'un job,
   ou **Mettre en file d'attente** pour toute la borne.
-- Les avertissements renvoyés par I-CRM (`unmapped_field`, `unmatched_option`) sont journalisés
-  (codes, field IDs, libellés — jamais les valeurs) ; I-CRM les recopie aussi en commentaire de l'opportunité.
+- Les avertissements renvoyés par I-CRM (`unmapped_field`, `unmatched_option`, `borne_field_missing`)
+  sont journalisés (codes, field IDs, libellés, clé du champ « Info borne » — jamais les valeurs) ;
+  I-CRM recopie les valeurs concernées en commentaire de l'opportunité.
 
 ⚠️ **Premier envoi = tout l'historique.** « Mettre en file d'attente » reprend **tous** les
 enregistrements non partagés de la borne (tests, sessions abandonnées, doublons hors-ligne).
@@ -141,7 +217,9 @@ Faire le tri avant le premier lancement sur une borne de production.
 - Le secret est stocké dans `canaux.token` (comme les jetons Azure AD) et n'est **jamais** renvoyé
   par l'API : la projection publique expose `type`, `hasApiKey`, `hasToken` et `apiKeyId`
   (l'identifiant `emak_…`, public par construction).
-- Ni le secret ni les valeurs saisies par les visiteurs ne sont journalisés (RGPD).
+- Ni le secret, ni les valeurs saisies par les visiteurs, ni les données de l'AdminBorne (bloc
+  `borne.admin`) ne sont journalisés (RGPD). Le worker ne lit de l'AdminBorne que `nom`, `prenom`,
+  `email`, `raisonSociale` et `siret` (jamais `passwordHash`).
 - Les redirections HTTP ne sont **pas suivies** : le secret ne part jamais vers un autre hôte.
 - Aucun appel à Azure AD pour ce type de canal.
 

@@ -19,6 +19,38 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### 2026-09-26 — contrat I-CRM v1.1 : widget « Borne » → « Info borne »
+
+Même branche `feat/canal-icrm-cle-api`, **non mergée**. Côté I-CRM, l'addendum v1.1 crée dans
+l'onglet BORNE TACTILE un widget « Borne » / sous-widget « Info borne » de 14 champs (id borne,
+adresse, pays, commerçant, régie, installateur, admin, e-mail, entreprise et SIRET de l'admin,
+date et heure de l'enregistrement, langue, formulaire, référence EMA). Rétrocompatible : un I-CRM
+v1 ignore le nouveau bloc. Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §4.1 et §4.2.
+
+#### Ajouté
+- **`borne.admin`** dans le payload du canal clé API : `nom`, `prenom`, `email`,
+  `raison_sociale`, `siret` de l'AdminBorne propriétaire de la borne. Objet omis si la borne
+  n'a pas d'admin ; membres vides, e-mail mal formé ou valeur de plus de 255 caractères omis.
+  Jamais journalisé (RGPD).
+- Avertissement I-CRM `borne_field_missing` (champ « Info borne » absent du tenant) : le worker
+  journalise sa `key` (identifiant de champ uniquement), jamais la valeur.
+- **Tests** : 17 tests Jest de plus dans `tests/services/queueWorker.icrmApiKey.test.js`
+  (bloc admin avec / sans admin, membres vides, e-mail, longueur ; `created_at` obligatoire ;
+  `select` fermé de l'AdminBorne ; journaux sans données de l'admin).
+
+#### Modifié
+- **`created_at` obligatoire** : toujours envoyé, = `enregistrement.createdAt` en ISO-8601 UTC ;
+  sans date valide, échec définitif sans appel réseau (au lieu d'omettre le champ).
+- **Worker** : la requête Prisma charge l'AdminBorne de la borne avec une liste fermée de
+  colonnes (`nom`, `prenom`, `email`, `raisonSociale`, `siret` — jamais `passwordHash`).
+  Chemin `azure_ad` inchangé.
+- **Seed** : `crmValue` de l'option 4 du revenu fiscal (field 2294) = `4- Sup à 42849€`, libellé
+  exact de CAE España (`4- Supérieur à 42849€` n'était jamais reconnu par I-CRM) ; libellé
+  affiché, id d'option et configuration V1 inchangés. 2301 « Autre » et les options de 2306
+  n'ont pas d'équivalent dans le tenant : à traiter côté I-CRM. ⚠️ Le seed n'est pas rejoué en
+  production : vérifier les options du formulaire de production dans le back-office
+  (INTEGRATION-ICRM §4.2).
+
 ### 2026-09-25 — canal I-CRM par clé API (opportunités BORNE TACTILE)
 
 Branche `feat/canal-icrm-cle-api`, **non mergée** (merger `main` = mise en production :
