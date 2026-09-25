@@ -4,6 +4,8 @@
  * Contrat EMA → I-CRM v1 : POST {apiUrl}/api/external/estimer-mes-aides/v1/enregistrements
  *   - payload (buildIcrmEnregistrementPayload) : contact, réponses + libellés d'options,
  *     métadonnées borne / formulaire, langue, created_at ;
+ *   - addendum v1.1 : borne.admin (AdminBorne, select fermé, membres vides omis) et
+ *     created_at obligatoire (createdAt ISO-8601 UTC, sinon échec définitif) ;
  *   - en-têtes X-Api-Key / X-Api-Secret / Idempotency-Key, jamais d'appel Azure AD ;
  *   - 2xx au corps du contrat (status + projet_id) = succès (+ crmProjetId /
  *     crmProjetRef) ; 2xx non conforme (page HTML, autre API) = échec définitif,
@@ -102,6 +104,22 @@ const Q = {
   commentaire: q([2305], 'Commentaires ou informations complémentaires', 'texte_long'),
 }
 
+// AdminBorne propriétaire de la borne, tel que chargé par le worker (select fermé)
+const ADMIN_BORNE = {
+  nom: 'LEFEBVRE',
+  prenom: 'Claire',
+  email: 'claire.lefebvre@brico-sud-ouest.example',
+  raisonSociale: 'BRICO SUD-OUEST SAS',
+  siret: '12345678900011',
+}
+const ADMIN_ATTENDU = {
+  nom: 'LEFEBVRE',
+  prenom: 'Claire',
+  email: 'claire.lefebvre@brico-sud-ouest.example',
+  raison_sociale: 'BRICO SUD-OUEST SAS',
+  siret: '12345678900011',
+}
+
 function makeEnregistrement(overrides = {}) {
   return {
     id: ENR_ID,
@@ -122,6 +140,7 @@ function makeEnregistrement(overrides = {}) {
       commercant: 'BRICO SUD-OUEST',
       regie: null,
       installateur: 'LENA SOLUTIONS',
+      adminBorne: { ...ADMIN_BORNE },
       canalTransmission: 'icrm-lena-prod',
       canaux: [
         {
@@ -222,6 +241,7 @@ describe('buildIcrmEnregistrementPayload — contrat v1', () => {
         adresse: '12 AVENUE DU COMMERCE, 33000 BORDEAUX',
         commercant: 'BRICO SUD-OUEST',
         installateur: 'LENA SOLUTIONS',
+        admin: ADMIN_ATTENDU,
       },
       contact: {
         civility: 'Mr',
@@ -339,11 +359,114 @@ describe('buildIcrmEnregistrementPayload — contrat v1', () => {
       .toEqual({ civility: 'Mme' })
   })
 
-  it('omet langue inconnue, blocs vides et contact vide ; garde reponses même vide', () => {
+  it('omet langue inconnue, blocs vides et contact vide ; garde reponses même vide et created_at', () => {
     const payload = buildIcrmEnregistrementPayload({
-      id: ENR_ID, langueUtilisee: 'de', borne: null, formulaire: null, reponses: [],
+      id: ENR_ID,
+      createdAt: new Date('2026-09-25T10:42:17.311Z'),
+      langueUtilisee: 'de',
+      borne: null,
+      formulaire: null,
+      reponses: [],
     })
-    expect(payload).toEqual({ external_id: ENR_ID, reponses: [] })
+    expect(payload).toEqual({ external_id: ENR_ID, created_at: '2026-09-25T10:42:17.311Z', reponses: [] })
+  })
+})
+
+describe('buildIcrmEnregistrementPayload — v1.1 : created_at obligatoire', () => {
+  it('created_at = enregistrement.createdAt en ISO-8601 UTC (Date, chaîne avec décalage)', () => {
+    expect(buildIcrmEnregistrementPayload(makeEnregistrement()).created_at).toBe('2026-09-25T10:42:17.311Z')
+
+    const avecDecalage = makeEnregistrement({ createdAt: '2026-09-25T12:42:17+02:00' })
+    expect(buildIcrmEnregistrementPayload(avecDecalage).created_at).toBe('2026-09-25T10:42:17.000Z')
+  })
+
+  it.each([
+    ['absent', undefined],
+    ['null', null],
+    ['vide', ''],
+    ['invalide', 'pas une date'],
+  ])('createdAt %s → erreur définitive, aucun payload sans date', (_cas, createdAt) => {
+    const enr = makeEnregistrement({ createdAt })
+
+    let erreur = null
+    try {
+      buildIcrmEnregistrementPayload(enr)
+    } catch (err) {
+      erreur = err
+    }
+    expect(erreur).toBeInstanceOf(Error)
+    expect(erreur.definitif).toBe(true)
+    expect(erreur.message).toMatch(/created_at est obligatoire/)
+  })
+
+  it('processJob : createdAt invalide → echec_definitif dès la 1re tentative, sans appel réseau', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({ createdAt: null }))
+
+    await processJob(makeJob({ tentatives: 0 }))
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(appelsUpdateJob('succes')).toHaveLength(0)
+    const jobDefinitif = appelsUpdateJob('echec_definitif')[0][0].data
+    expect(jobDefinitif.tentatives).toBe(1)
+    expect(jobDefinitif.erreur).toMatch(/sans date de création valide/)
+  })
+})
+
+describe('buildIcrmEnregistrementPayload — v1.1 : borne.admin (widget « Info borne »)', () => {
+  const avecAdmin = (adminBorne) => makeEnregistrement({
+    borne: { ...makeEnregistrement().borne, adminBorne },
+  })
+
+  it('transmet nom, prénom, e-mail, raison sociale (raison_sociale) et SIRET de l’AdminBorne', () => {
+    const { borne } = buildIcrmEnregistrementPayload(makeEnregistrement())
+    expect(borne.admin).toEqual(ADMIN_ATTENDU)
+    // Clés du contrat uniquement (jamais raisonSociale, passwordHash, actif…)
+    expect(Object.keys(borne.admin).sort()).toEqual(['email', 'nom', 'prenom', 'raison_sociale', 'siret'])
+  })
+
+  it.each([
+    ['null (borne du SuperAdmin)', null],
+    ['absent', undefined],
+    ['sans aucun membre renseigné', { nom: '', prenom: '  ', email: null, raisonSociale: undefined, siret: '' }],
+  ])('admin %s → pas d’objet admin, le reste du bloc borne est inchangé', (_cas, adminBorne) => {
+    const { borne } = buildIcrmEnregistrementPayload(avecAdmin(adminBorne))
+    expect(borne).not.toHaveProperty('admin')
+    expect(borne).toEqual({
+      id: 'borne-uuid-1',
+      id_borne: 'BORNE-1A2B3C4D',
+      pays: 'FR',
+      adresse: '12 AVENUE DU COMMERCE, 33000 BORDEAUX',
+      commercant: 'BRICO SUD-OUEST',
+      installateur: 'LENA SOLUTIONS',
+    })
+  })
+
+  it('omet les membres vides et rogne les espaces', () => {
+    const { borne } = buildIcrmEnregistrementPayload(avecAdmin({
+      nom: '  LEFEBVRE ', prenom: '', email: null, raisonSociale: '   ', siret: ' 12345678900011 ',
+    }))
+    expect(borne.admin).toEqual({ nom: 'LEFEBVRE', siret: '12345678900011' })
+  })
+
+  it('e-mail mal formé omis, e-mail valide mis en minuscules ; valeur de plus de 255 caractères omise', () => {
+    const invalide = buildIcrmEnregistrementPayload(avecAdmin({ ...ADMIN_BORNE, email: 'claire@brico,fr' }))
+    expect(invalide.borne.admin).toEqual({
+      nom: 'LEFEBVRE', prenom: 'Claire', raison_sociale: 'BRICO SUD-OUEST SAS', siret: '12345678900011',
+    })
+
+    const majuscules = buildIcrmEnregistrementPayload(avecAdmin({ ...ADMIN_BORNE, email: ' Claire.Lefebvre@Brico.FR ' }))
+    expect(majuscules.borne.admin.email).toBe('claire.lefebvre@brico.fr')
+
+    const tropLong = buildIcrmEnregistrementPayload(avecAdmin({ ...ADMIN_BORNE, raisonSociale: 'X'.repeat(256) }))
+    expect(tropLong.borne.admin).not.toHaveProperty('raison_sociale')
+    expect(tropLong.borne.admin.nom).toBe('LEFEBVRE')
+    const limite = buildIcrmEnregistrementPayload(avecAdmin({ ...ADMIN_BORNE, raisonSociale: 'X'.repeat(255) }))
+    expect(limite.borne.admin.raison_sociale).toHaveLength(255)
+  })
+
+  it('seul l’admin renseigné : le bloc borne ne contient que admin', () => {
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement({ borne: { adminBorne: ADMIN_BORNE } }))
+    expect(payload.borne).toEqual({ admin: ADMIN_ATTENDU })
   })
 })
 
@@ -476,6 +599,26 @@ describe('processJob — canal icrm_api_key : envoi', () => {
     expect(include.formulaire).toEqual({ select: { id: true, label: true, version: true } })
   })
 
+  it('charge l’AdminBorne de la borne avec une liste fermée de colonnes (jamais passwordHash)', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: 1 }))
+    await processJob(makeJob())
+
+    const { include } = mockPrisma.enregistrement.findUnique.mock.calls[0][0]
+    expect(include.borne.select.adminBorne).toEqual({
+      select: { nom: true, prenom: true, email: true, raisonSociale: true, siret: true },
+    })
+    expect(include.borne.select.adminBorne.select).not.toHaveProperty('passwordHash')
+  })
+
+  it('envoie borne.admin et created_at dans le corps POST', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: 1 }))
+    await processJob(makeJob())
+
+    const body = JSON.parse(global.fetch.mock.calls[0][1].body)
+    expect(body.created_at).toBe('2026-09-25T10:42:17.311Z')
+    expect(body.borne.admin).toEqual(ADMIN_ATTENDU)
+  })
+
   it('choisit le canal par canalTransmission même si un canal azure_ad est plus récent', async () => {
     const enr = makeEnregistrement()
     enr.borne.canaux = [
@@ -509,6 +652,11 @@ describe('processJob — canal icrm_api_key : envoi', () => {
     expect(url).toBe('https://legacy.example/api/customContacts?lang=fr')
     expect(options.headers.Authorization).toBe(`Bearer ${accessToken}`)
     expect(options.headers['X-Api-Key']).toBeUndefined()
+    // Corps historique inchangé : ni bloc borne/admin ni created_at du contrat v1.1
+    const corps = JSON.parse(options.body)
+    expect(corps).not.toHaveProperty('borne')
+    expect(corps).not.toHaveProperty('created_at')
+    expect(options.body).not.toContain(ADMIN_BORNE.email)
     // Le chemin historique n'écrit pas les colonnes de traçabilité
     const succes = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')
     expect(succes.data).toEqual({ statutPartage: 'partage', partageAt: expect.any(Date) })
@@ -647,6 +795,27 @@ describe('processJob — canal icrm_api_key : 2xx non conforme au contrat', () =
     expect(tousLesLogs()).not.toContain('APPELER APRÈS 18H')
     expect(tousLesLogs()).not.toContain('23734€')
   })
+
+  it('v1.1 borne_field_missing : journalise la clé du champ « Info borne », jamais la valeur', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, {
+      status: 'created', projet_id: 10, projet_ref: 'P-10',
+      warnings: [
+        { code: 'borne_field_missing', key: 'projets_ema_admin_email', value: ADMIN_BORNE.email },
+        // clé inattendue (pas un identifiant de champ) : ignorée
+        { code: 'borne_field_missing', key: ADMIN_BORNE.email, value: 'x' },
+      ],
+    }))
+
+    await processJob(makeJob())
+
+    const log = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /non mappées/.test(l.message))
+    expect(log.warnings).toEqual([
+      { code: 'borne_field_missing', crm_field_ids: [], libelle: null, key: 'projets_ema_admin_email' },
+      { code: 'borne_field_missing', crm_field_ids: [], libelle: null },
+    ])
+    expect(tousLesLogs()).not.toContain(ADMIN_BORNE.email)
+    expect(appelsUpdateJob('succes')).toHaveLength(1)
+  })
 })
 
 describe('processJob — canal icrm_api_key : échecs définitifs immédiats', () => {
@@ -679,6 +848,24 @@ describe('processJob — canal icrm_api_key : échecs définitifs immédiats', (
 
     const logErreur = mockLogger.error.mock.calls.map((c) => c[0]).find((l) => /échec définitif/.test(l.message))
     expect(logErreur).toMatchObject({ httpStatus: status, codeIcrm: code })
+  })
+
+  it('422 sur borne.admin : l’erreur nomme le champ, jamais la valeur de l’AdminBorne', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(422, {
+      error: {
+        code: 'validation_failed',
+        message: 'Données invalides',
+        request_id: 'req-43',
+        details: { 'borne.admin.email': [`${ADMIN_BORNE.email} n'est pas accepté`] },
+      },
+    }))
+
+    await processJob(makeJob())
+
+    const erreur = appelsUpdateJob('echec_definitif')[0][0].data.erreur
+    expect(erreur).toContain('borne.admin.email')
+    expect(erreur).not.toContain(ADMIN_BORNE.email)
+    expect(tousLesLogs()).not.toContain(ADMIN_BORNE.email)
   })
 
   it('redirection (3xx) → échec définitif, la redirection n’est pas suivie', async () => {
@@ -774,6 +961,11 @@ describe('processJob — canal icrm_api_key : confidentialité des journaux', ()
     expect(logs).not.toContain('DUPONT')
     expect(logs).not.toContain('jean.dupont@example.com')
     expect(logs).not.toContain('+33612345678')
+    // Données de l'AdminBorne (bloc borne.admin) : jamais journalisées
+    expect(logs).not.toContain(ADMIN_BORNE.nom)
+    expect(logs).not.toContain(ADMIN_BORNE.email)
+    expect(logs).not.toContain(ADMIN_BORNE.raisonSociale)
+    expect(logs).not.toContain(ADMIN_BORNE.siret)
     const erreurs = mockPrisma.partageJob.update.mock.calls.map((c) => c[0].data.erreur).filter(Boolean)
     erreurs.forEach((e) => expect(e).not.toContain(SECRET))
   })

@@ -396,16 +396,75 @@ function valeurContactIcrm(champ, valeur, pays) {
   return { valeur: v }
 }
 
+// Les champs I-CRM « Info borne » sont de type Texte (255 caractères) : une valeur
+// plus longue est omise plutôt que de risquer un 422 définitif sur tout le lead.
+const LONGUEUR_MAX_ADMIN_BORNE_ICRM = 255
+
+/**
+ * Bloc `borne.admin` du contrat v1.1 : l'AdminBorne propriétaire de la borne
+ * (nom, prénom, e-mail, raison sociale, SIRET), écrit par I-CRM dans le widget
+ * « Borne » → « Info borne » de l'opportunité.
+ *
+ * Membres vides omis ; e-mail envoyé seulement s'il est bien formé (en
+ * minuscules) ; valeur de plus de 255 caractères omise. `undefined` quand la
+ * borne n'a pas d'admin (borne du SuperAdmin) ou qu'aucun membre n'est renseigné.
+ * Données personnelles : ce bloc n'est jamais journalisé (RGPD).
+ *
+ * @param {?{ nom?: string, prenom?: string, email?: string, raisonSociale?: string, siret?: string }} admin
+ * @returns {{ nom?: string, prenom?: string, email?: string, raison_sociale?: string, siret?: string } | undefined}
+ */
+function blocAdminBorne(admin) {
+  if (!admin || typeof admin !== 'object') return undefined
+  const texte = (v) => {
+    if (v === null || v === undefined) return undefined
+    const s = String(v).trim()
+    return s !== '' && s.length <= LONGUEUR_MAX_ADMIN_BORNE_ICRM ? s : undefined
+  }
+  const email = texte(admin.email)
+  const emailVerifie = email === undefined ? null : validateEmail(email)
+  const bloc = compacter({
+    nom: texte(admin.nom),
+    prenom: texte(admin.prenom),
+    email: emailVerifie?.valid ? emailVerifie.value : undefined,
+    raison_sociale: texte(admin.raisonSociale),
+    siret: texte(admin.siret),
+  })
+  return Object.keys(bloc).length > 0 ? bloc : undefined
+}
+
+/**
+ * `created_at` du contrat : date de création de l'enregistrement EMA
+ * (`enregistrement.createdAt`), en ISO-8601 UTC. OBLIGATOIRE depuis la v1.1 :
+ * I-CRM la recopie dans le champ « Date et heure de l'enregistrement ». La
+ * colonne est NOT NULL en base ; son absence est un défaut qu'un réessai ne
+ * corrigera pas → erreur définitive (relance manuelle après correction).
+ */
+function dateEnregistrementIso(createdAt) {
+  const date = createdAt === null || createdAt === undefined || createdAt === ''
+    ? null
+    : new Date(createdAt)
+  if (!date || Number.isNaN(date.getTime())) {
+    throw erreurPartage(
+      'Enregistrement sans date de création valide : created_at est obligatoire (contrat I-CRM v1.1)',
+      { definitif: true },
+    )
+  }
+  return date.toISOString()
+}
+
 /**
  * Construit le corps de POST /api/external/estimer-mes-aides/v1/enregistrements
- * (contrat EMA → I-CRM v1). Fonction pure, exportée pour les tests.
+ * (contrat EMA → I-CRM v1 + addendum v1.1). Fonction pure, exportée pour les tests.
  *
  * Les réponses vides sont omises (aucune information) ; les blocs facultatifs
- * (borne, formulaire, contact) ne contiennent que des valeurs renseignées.
+ * (borne, borne.admin, formulaire, contact) ne contiennent que des valeurs
+ * renseignées. `created_at` (createdAt en ISO-8601 UTC) est toujours présent.
  *
- * @param {Object} enregistrement Enregistrement chargé avec borne, formulaire,
+ * @param {Object} enregistrement Enregistrement chargé avec createdAt,
+ *   borne { …, adminBorne { nom, prenom, email, raisonSociale, siret } }, formulaire,
  *   reponses[].question { libelleQuestion, typeOption, options, crmFieldIds }
  * @returns {Object} payload JSON du contrat
+ * @throws Error `definitif` si createdAt est absent ou invalide
  */
 function buildIcrmEnregistrementPayload(enregistrement) {
   return construirePayloadIcrm(enregistrement).payload
@@ -466,7 +525,7 @@ function construirePayloadIcrm(enregistrement) {
 
   const borne = enr.borne || {}
   const formulaire = enr.formulaire || {}
-  const createdAt = enr.createdAt ? new Date(enr.createdAt) : null
+  const createdAt = dateEnregistrementIso(enr.createdAt)
   const blocFormulaire = compacter({
     id: enr.formulaireId ?? formulaire.id,
     // Version figée à la soumission, à défaut la version courante du formulaire
@@ -481,12 +540,13 @@ function construirePayloadIcrm(enregistrement) {
     commercant: borne.commercant,
     regie: borne.regie,
     installateur: borne.installateur,
+    admin: blocAdminBorne(borne.adminBorne),
   })
   const nonVide = (bloc) => (Object.keys(bloc).length > 0 ? bloc : undefined)
 
   const payload = compacter({
     external_id: enr.id,
-    created_at: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined,
+    created_at: createdAt,
     langue,
     formulaire: nonVide(blocFormulaire),
     borne: nonVide(blocBorne),
@@ -637,6 +697,11 @@ async function processJob(job) {
             commercant: true,
             regie: true,
             installateur: true,
+            // Bloc « borne.admin » du contrat v1.1 (widget I-CRM « Borne » → « Info borne »).
+            // Liste fermée : jamais passwordHash, actif ni les autres colonnes.
+            adminBorne: {
+              select: { nom: true, prenom: true, email: true, raisonSociale: true, siret: true },
+            },
             canaux: {
               where: { actif: true },
               orderBy: { createdAt: 'desc' },
@@ -763,7 +828,9 @@ async function processJob(job) {
     ])
 
     if (envoiCleApi?.warnings.length > 0) {
-      // Codes, field IDs et libellés de question uniquement — jamais `value` (RGPD).
+      // Codes, field IDs, libellés de question et clés de champ uniquement — jamais
+      // `value` (RGPD). v1.1 : `borne_field_missing` porte la clé du champ « Info borne »
+      // absent du tenant (ex. projets_ema_admin_email), pas de field ID.
       logger.warn({
         message: '[QUEUE] I-CRM a signalé des réponses non mappées ou options non reconnues',
         jobId: job.id,
@@ -775,6 +842,7 @@ async function processJob(job) {
           code: w?.code ?? null,
           crm_field_ids: Array.isArray(w?.crm_field_ids) ? w.crm_field_ids : [],
           libelle: typeof w?.libelle === 'string' ? w.libelle : null,
+          ...(typeof w?.key === 'string' && /^[A-Za-z0-9_]{1,100}$/.test(w.key) ? { key: w.key } : {}),
         })),
       })
     }
