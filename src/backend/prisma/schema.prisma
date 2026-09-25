@@ -254,6 +254,9 @@ model Enregistrement {
   tentatives         Int                     @default(0)
   derniereErreur     String?
   partageAt          DateTime?
+  // Opportunité créée dans I-CRM (canal icrm_api_key) : id et référence renvoyés par l'API
+  crmProjetId        String?
+  crmProjetRef       String?
   submissionId       String?                 @unique
   submission         Submission?             @relation(fields: [submissionId], references: [id])
   createdAt          DateTime                @default(now())
@@ -300,9 +303,13 @@ model PartageJob {
 
 // ─── Canal models ────────────────────────────────────────────────────────────
 
+// type = azure_ad (historique : apiKey = refresh token Azure AD, token = access token Bearer)
+//      | icrm_api_key (apiKey = identifiant de clé I-CRM « emak_… », public ; token = secret)
+// apiKey / token ne sont jamais renvoyés bruts par l'API (voir routes/canaux.js).
 model Canal {
   id          String   @id @default(uuid())
   label       String
+  type        String   @default("azure_ad")
   apiUrl      String
   apiKey      String
   token       String

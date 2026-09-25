@@ -1,6 +1,17 @@
 import { prisma } from '../lib/prisma.js'
 import { notifyPartageSucces, notifyPartageEchec, publishEvent } from './pusherService.js'
 import logger from '../lib/logger.js'
+import {
+  CANAL_TYPE_ICRM_API_KEY,
+  estCanalCleApi,
+  urlPointAccesIcrm,
+  normaliserUrlApiIcrm,
+  enTetesCleApiIcrm,
+  estStatutIcrmDefinitif,
+  lireCorpsJsonIcrm,
+  formaterErreurIcrm,
+  codeErreurIcrm,
+} from '../lib/icrmApiKey.js'
 
 const POLL_INTERVAL = 30 * 1000
 const MAX_TENTATIVES = 5
@@ -227,6 +238,263 @@ function mapReponsesToICRM(reponses, contexte = {}) {
   return { payload, champsNonTransmis }
 }
 
+// ─── Canal « Clé API I-CRM » (type icrm_api_key) ─────────────────────────────
+//
+// Le contrat v1 transmet TOUTES les réponses (et plus seulement l'identité) :
+// I-CRM crée l'opportunité du sous-type lié à la clé et résout lui-même les
+// field IDs (ids CAE España du formulaire) vers les champs du tenant.
+
+const TYPES_A_CHOIX = new Set(['option_unique', 'options_multiples'])
+const LANGUES_CONTRAT = new Set(['fr', 'es', 'en'])
+
+function premierNonVide(...valeurs) {
+  for (const v of valeurs) {
+    if (v === null || v === undefined) continue
+    const s = String(v)
+    if (s.trim() !== '') return s
+  }
+  return null
+}
+
+// Supprime les clés null / undefined / '' d'un bloc facultatif du contrat.
+function compacter(objet) {
+  const out = {}
+  for (const [cle, valeur] of Object.entries(objet)) {
+    if (valeur === null || valeur === undefined) continue
+    if (typeof valeur === 'string' && valeur.trim() === '') continue
+    out[cle] = valeur
+  }
+  return out
+}
+
+function idsChampsCrmEntiers(crmFieldIds) {
+  return normaliseCrmFieldIds(crmFieldIds)
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id > 0)
+}
+
+// Même résolution que mapReponsesToICRM (FIELD_ID_MAP puis LABEL_MAP) — dupliquée
+// volontairement pour ne pas toucher au chemin historique azure_ad.
+function champContactDeLaReponse(ids, libelle) {
+  for (const id of ids) {
+    if (FIELD_ID_MAP[id]) return FIELD_ID_MAP[id]
+  }
+  return LABEL_MAP[libelle.toLowerCase().trim()] || null
+}
+
+function libelleOption(option, langue) {
+  if (!option || typeof option !== 'object') return null
+  const label = option.label
+  const labelFr = typeof label === 'string' ? label : label?.fr
+  const labelLangue = label && typeof label === 'object' && langue ? label[langue] : null
+  return premierNonVide(option.crmValue, labelFr, labelLangue, option.id)
+}
+
+/**
+ * Découpe une valeur « options_multiples » (ids joints par ", ") en tenant compte
+ * des ids qui contiennent eux-mêmes ", " (formulaires importés : id = texte CRM).
+ * Accepte aussi l'ancien format tableau JSON `["a","b"]`.
+ */
+function decouperValeurMultiple(valeur, options) {
+  const brut = String(valeur)
+  if (brut.trim().startsWith('[')) {
+    try {
+      const tableau = JSON.parse(brut)
+      if (Array.isArray(tableau)) return tableau.map(String).filter((v) => v.trim() !== '')
+    } catch { /* pas du JSON : découpage classique */ }
+  }
+  const ids = new Set(options.map((o) => String(o?.id)))
+  if (ids.has(brut)) return [brut]
+  const morceaux = brut.split(', ')
+  const resultat = []
+  let i = 0
+  while (i < morceaux.length) {
+    let fin = i + 1
+    for (let j = morceaux.length; j > i + 1; j--) {
+      if (ids.has(morceaux.slice(i, j).join(', '))) { fin = j; break }
+    }
+    const morceau = morceaux.slice(i, fin).join(', ')
+    if (morceau.trim() !== '') resultat.push(morceau)
+    i = fin
+  }
+  return resultat
+}
+
+/**
+ * Libellés humains des options choisies :
+ * option.crmValue ?? option.label.fr ?? option.label[langue] ?? id de l'option.
+ * Questions texte : [valeur].
+ */
+function resoudreLibellesValeur(valeur, question, langue) {
+  const options = Array.isArray(question?.options) ? question.options : []
+  const type = question?.typeOption
+  if (!TYPES_A_CHOIX.has(type) && options.length === 0) return [valeur]
+
+  const choisis = type === 'options_multiples' ? decouperValeurMultiple(valeur, options) : [valeur]
+  return choisis.map((choix) => {
+    const option = options.find((o) => String(o?.id) === String(choix))
+    return (option && libelleOption(option, langue)) || choix
+  })
+}
+
+// Civilité : "Mr." → "Mr". Valeur encodée par le seed sans option résolue
+// ("2262-1-mr") : même transformation que le chemin historique.
+function normaliserCivilite(libelle, valeurBrute) {
+  if (libelle === valeurBrute && /^\d+-\d+-.+/.test(valeurBrute)) {
+    return VALUE_TRANSFORMS.civility(valeurBrute)
+  }
+  return libelle.replace(/\.+$/, '').trim()
+}
+
+/**
+ * Construit le corps de POST /api/external/estimer-mes-aides/v1/enregistrements
+ * (contrat EMA → I-CRM v1). Fonction pure, exportée pour les tests.
+ *
+ * Les réponses vides sont omises (aucune information) ; les blocs facultatifs
+ * (borne, formulaire, contact) ne contiennent que des valeurs renseignées.
+ *
+ * @param {Object} enregistrement Enregistrement chargé avec borne, formulaire,
+ *   reponses[].question { libelleQuestion, typeOption, options, crmFieldIds }
+ * @returns {Object} payload JSON du contrat
+ */
+function buildIcrmEnregistrementPayload(enregistrement) {
+  const enr = enregistrement || {}
+  const langue = LANGUES_CONTRAT.has(enr.langueUtilisee) ? enr.langueUtilisee : undefined
+  const contact = {}
+  const reponses = []
+
+  for (const r of enr.reponses || []) {
+    if (r?.valeur === null || r?.valeur === undefined) continue
+    const valeur = String(r.valeur)
+    if (valeur.trim() === '') continue
+
+    const question = r.question || {}
+    const idsBruts = normaliseCrmFieldIds(question.crmFieldIds)
+    const crmFieldIds = idsChampsCrmEntiers(question.crmFieldIds)
+    const libelleFr = extraireLibelleFr(question.libelleQuestion)
+    const libelle = premierNonVide(
+      libelleFr,
+      idsBruts.map((id) => LIBELLES_CHAMPS_CRM[id]).filter(Boolean).join(' / '),
+    )
+    const valeurLibelles = resoudreLibellesValeur(valeur, question, langue)
+
+    reponses.push(compacter({
+      question_id: r.questionId ?? question.id,
+      libelle,
+      type: question.typeOption,
+      crm_field_ids: crmFieldIds,
+      valeur,
+      valeur_libelles: valeurLibelles,
+    }))
+
+    const champContact = champContactDeLaReponse(idsBruts, libelleFr)
+    if (champContact) {
+      const aChoix = TYPES_A_CHOIX.has(question.typeOption)
+        || (Array.isArray(question.options) && question.options.length > 0)
+      let valeurContact = aChoix ? valeurLibelles.join(', ') : valeur
+      if (champContact === 'civility') valeurContact = normaliserCivilite(valeurContact, valeur)
+      if (valeurContact.trim() !== '') contact[champContact] = valeurContact
+    }
+  }
+
+  const borne = enr.borne || {}
+  const formulaire = enr.formulaire || {}
+  const createdAt = enr.createdAt ? new Date(enr.createdAt) : null
+  const blocFormulaire = compacter({
+    id: enr.formulaireId ?? formulaire.id,
+    // Version figée à la soumission, à défaut la version courante du formulaire
+    version: enr.formulaireVersion ?? formulaire.version,
+    label: formulaire.label,
+  })
+  const blocBorne = compacter({
+    id: borne.id,
+    id_borne: borne.idBorne,
+    pays: borne.pays,
+    adresse: borne.adresse,
+    commercant: borne.commercant,
+    regie: borne.regie,
+    installateur: borne.installateur,
+  })
+  const nonVide = (bloc) => (Object.keys(bloc).length > 0 ? bloc : undefined)
+
+  return compacter({
+    external_id: enr.id,
+    created_at: createdAt && !Number.isNaN(createdAt.getTime()) ? createdAt.toISOString() : undefined,
+    langue,
+    formulaire: nonVide(blocFormulaire),
+    borne: nonVide(blocBorne),
+    contact: nonVide(contact),
+    reponses,
+  })
+}
+
+function erreurPartage(message, { definitif = false, httpStatus = null, code = null } = {}) {
+  const err = new Error(message)
+  err.definitif = definitif
+  err.httpStatus = httpStatus
+  err.codeIcrm = code
+  return err
+}
+
+/**
+ * Envoie un enregistrement à I-CRM via un canal `icrm_api_key`.
+ * Aucun appel Azure (pas de getValidToken). Les redirections ne sont pas suivies
+ * (le secret ne doit jamais partir vers un autre hôte).
+ *
+ * @returns {{ crmProjetId: string|null, crmProjetRef: string|null, statutIcrm: string|null,
+ *             httpStatus: number, warnings: Array }}
+ * @throws Error avec `definitif=true` pour 401/403/404/413/422/3xx (pas de réessai)
+ */
+async function envoyerViaCleApiIcrm(canal, enregistrement) {
+  if (!normaliserUrlApiIcrm(canal.apiUrl) || !canal.apiKey || !canal.token) {
+    throw erreurPartage(
+      'Canal I-CRM (clé API) incomplet : URL API, clé ou secret manquant — compléter le canal dans le back-office',
+      { definitif: true },
+    )
+  }
+
+  const payload = buildIcrmEnregistrementPayload(enregistrement)
+
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 30 * 1000)
+
+  let res
+  let corps
+  try {
+    res = await fetch(urlPointAccesIcrm(canal.apiUrl, '/enregistrements'), {
+      method: 'POST',
+      headers: enTetesCleApiIcrm(canal, {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': enregistrement.id,
+      }),
+      body: JSON.stringify(payload),
+      redirect: 'manual',
+      signal: controller.signal,
+    })
+    // Lecture du corps sous le même délai de 30 s (un corps bloqué ne fige pas le worker)
+    corps = await lireCorpsJsonIcrm(res)
+  } finally {
+    clearTimeout(timeoutId)
+  }
+
+  if (res.ok) {
+    const projetId = corps?.projet_id
+    return {
+      crmProjetId: projetId === null || projetId === undefined ? null : String(projetId),
+      crmProjetRef: typeof corps?.projet_ref === 'string' && corps.projet_ref !== '' ? corps.projet_ref : null,
+      statutIcrm: typeof corps?.status === 'string' ? corps.status : null,
+      httpStatus: res.status,
+      warnings: Array.isArray(corps?.warnings) ? corps.warnings : [],
+    }
+  }
+
+  throw erreurPartage(formaterErreurIcrm(res.status, corps, res), {
+    definitif: estStatutIcrmDefinitif(res.status),
+    httpStatus: res.status,
+    code: codeErreurIcrm(corps),
+  })
+}
+
 let workerInterval = null
 let isRunning = false
 
@@ -264,15 +532,31 @@ async function processJob(job) {
             id: true,
             idBorne: true,
             canalTransmission: true,
+            // Métadonnées transmises par le canal icrm_api_key (bloc « borne » du contrat)
+            pays: true,
+            adresse: true,
+            commercant: true,
+            regie: true,
+            installateur: true,
             canaux: {
               where: { actif: true },
               orderBy: { createdAt: 'desc' },
             },
           },
         },
+        formulaire: { select: { id: true, label: true, version: true } },
         reponses: {
           include: {
-            question: { select: { libelleQuestion: true, orderPage: true, crmFieldIds: true } },
+            question: {
+              select: {
+                id: true,
+                libelleQuestion: true,
+                orderPage: true,
+                crmFieldIds: true,
+                typeOption: true,
+                options: true,
+              },
+            },
           },
         },
       },
@@ -309,46 +593,55 @@ async function processJob(job) {
       })
     }
     const canal = matchedByLabel ?? enregistrement.borne?.canaux?.[0]
-    const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
-    const crmKey = canal
-      ? await getValidToken(canal)
-      : process.env.CRM_API_KEY
 
-    if (!crmUrl || !crmKey) {
-      throw new Error('Canal I-CRM non configuré pour cette borne — configurer via le back-office')
-    }
+    // Canal « Clé API I-CRM » : opportunité complète, sans Azure AD.
+    // Tout autre canal (azure_ad, ou lignes antérieures à la colonne `type`)
+    // suit le chemin historique ci-dessous, inchangé.
+    let envoiCleApi = null
+    if (canal && estCanalCleApi(canal)) {
+      envoiCleApi = await envoyerViaCleApiIcrm(canal, enregistrement)
+    } else {
+      const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
+      const crmKey = canal
+        ? await getValidToken(canal)
+        : process.env.CRM_API_KEY
 
-    const { payload: icrmPayload } = mapReponsesToICRM(enregistrement.reponses, {
-      jobId: job.id,
-      enregistrementId: job.enregistrementId,
-      borneId: enregistrement.borne?.id ?? null,
-      canalId: canal?.id ?? null,
-      canalLabel: canal?.label ?? null,
-      canalSource: canal ? 'borne' : 'env',
-    })
+      if (!crmUrl || !crmKey) {
+        throw new Error('Canal I-CRM non configuré pour cette borne — configurer via le back-office')
+      }
 
-    // Task 30.1 — 30-second timeout via AbortController
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 30 * 1000)
-
-    let crmRes
-    try {
-      crmRes = await fetch(`${crmUrl}/api/customContacts?lang=fr`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${crmKey}`,
-        },
-        body: JSON.stringify(icrmPayload),
-        signal: controller.signal,
+      const { payload: icrmPayload } = mapReponsesToICRM(enregistrement.reponses, {
+        jobId: job.id,
+        enregistrementId: job.enregistrementId,
+        borneId: enregistrement.borne?.id ?? null,
+        canalId: canal?.id ?? null,
+        canalLabel: canal?.label ?? null,
+        canalSource: canal ? 'borne' : 'env',
       })
-    } finally {
-      clearTimeout(timeoutId)
-    }
 
-    if (!crmRes.ok) {
-      const errText = await crmRes.text()
-      throw new Error(`CRM API error ${crmRes.status}: ${errText}`)
+      // Task 30.1 — 30-second timeout via AbortController
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30 * 1000)
+
+      let crmRes
+      try {
+        crmRes = await fetch(`${crmUrl}/api/customContacts?lang=fr`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${crmKey}`,
+          },
+          body: JSON.stringify(icrmPayload),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timeoutId)
+      }
+
+      if (!crmRes.ok) {
+        const errText = await crmRes.text()
+        throw new Error(`CRM API error ${crmRes.status}: ${errText}`)
+      }
     }
 
     // Succès — mettre à jour le job et l'enregistrement
@@ -362,9 +655,30 @@ async function processJob(job) {
         data: {
           statutPartage: 'partage',
           partageAt: new Date(),
+          // Traçabilité de l'opportunité créée (canal icrm_api_key uniquement)
+          ...(envoiCleApi
+            ? { crmProjetId: envoiCleApi.crmProjetId, crmProjetRef: envoiCleApi.crmProjetRef }
+            : {}),
         },
       }),
     ])
+
+    if (envoiCleApi?.warnings.length > 0) {
+      // Codes, field IDs et libellés de question uniquement — jamais `value` (RGPD).
+      logger.warn({
+        message: '[QUEUE] I-CRM a signalé des réponses non mappées ou options non reconnues',
+        jobId: job.id,
+        enregistrementId: job.enregistrementId,
+        canalId: canal?.id ?? null,
+        crmProjetId: envoiCleApi.crmProjetId,
+        nbWarnings: envoiCleApi.warnings.length,
+        warnings: envoiCleApi.warnings.slice(0, 50).map((w) => ({
+          code: w?.code ?? null,
+          crm_field_ids: Array.isArray(w?.crm_field_ids) ? w.crm_field_ids : [],
+          libelle: typeof w?.libelle === 'string' ? w.libelle : null,
+        })),
+      })
+    }
 
     // Notification Pusher succès
     await notifyPartageSucces(enregistrement.borne?.id, job.enregistrementId)
@@ -383,10 +697,21 @@ async function processJob(job) {
       enregistrementId: job.enregistrementId,
       status: 'succes',
       duration: Date.now() - jobStart,
+      ...(envoiCleApi
+        ? {
+            canalType: CANAL_TYPE_ICRM_API_KEY,
+            httpStatus: envoiCleApi.httpStatus,
+            statutIcrm: envoiCleApi.statutIcrm,
+            crmProjetId: envoiCleApi.crmProjetId,
+            crmProjetRef: envoiCleApi.crmProjetRef,
+          }
+        : {}),
     })
   } catch (err) {
     const newTentatives = job.tentatives + 1
-    const isDefinitif = newTentatives >= MAX_TENTATIVES
+    // err.definitif : réponse I-CRM qu'un réessai ne changera pas (401/403/404/413/422…)
+    // → échec définitif immédiat, sans épuiser les MAX_TENTATIVES.
+    const isDefinitif = err.definitif === true || newTentatives >= MAX_TENTATIVES
 
     if (isDefinitif) {
       // Échec définitif
@@ -431,6 +756,7 @@ async function processJob(job) {
         tentatives: newTentatives,
         duration: Date.now() - jobStart,
         error: err.message,
+        ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })
     } else {
       // Échec temporaire — backoff exponentiel + jitter (Task 30.2)
@@ -463,6 +789,7 @@ async function processJob(job) {
         duration: Date.now() - jobStart,
         prochainEssai: prochainEssai.toISOString(),
         error: err.message,
+        ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })
     }
   }
@@ -541,4 +868,6 @@ export {
   computeNextRetry,
   mapReponsesToICRM,
   FIELD_ID_MAP,
+  buildIcrmEnregistrementPayload,
+  envoyerViaCleApiIcrm,
 }

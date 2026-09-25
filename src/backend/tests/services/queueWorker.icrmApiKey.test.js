@@ -1,0 +1,627 @@
+/**
+ * Tests unitaires — queueWorker.js, canal « Clé API I-CRM » (type icrm_api_key).
+ *
+ * Contrat EMA → I-CRM v1 : POST {apiUrl}/api/external/estimer-mes-aides/v1/enregistrements
+ *   - payload (buildIcrmEnregistrementPayload) : contact, réponses + libellés d'options,
+ *     métadonnées borne / formulaire, langue, created_at ;
+ *   - en-têtes X-Api-Key / X-Api-Secret / Idempotency-Key, jamais d'appel Azure AD ;
+ *   - 2xx = succès (+ crmProjetId / crmProjetRef) ; 401/403/404/413/422 = échec
+ *     définitif immédiat ; 408/409/429/5xx/réseau/timeout = backoff existant ;
+ *   - aucun secret ni valeur saisie dans les logs (RGPD).
+ * Le chemin historique azure_ad est couvert par tests/queueWorker.test.js et
+ * tests/services/queueWorker.test.js (inchangés).
+ */
+
+import { jest } from '@jest/globals'
+
+// ─── Mocks (must be before any imports) ──────────────────────────────────────
+
+const mockPrisma = {
+  partageJob: { findMany: jest.fn(), update: jest.fn() },
+  enregistrement: { findUnique: jest.fn(), update: jest.fn() },
+  canal: { update: jest.fn() },
+  $transaction: jest.fn(),
+}
+
+jest.unstable_mockModule('../../src/lib/prisma.js', () => ({ prisma: mockPrisma }))
+
+const mockNotifySucces = jest.fn()
+const mockNotifyEchec = jest.fn()
+const mockPublishEvent = jest.fn().mockResolvedValue(undefined)
+
+jest.unstable_mockModule('../../src/services/pusherService.js', () => ({
+  notifyPartageSucces: mockNotifySucces,
+  notifyPartageEchec: mockNotifyEchec,
+  publishEvent: mockPublishEvent,
+}))
+
+const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
+jest.unstable_mockModule('../../src/lib/logger.js', () => ({ default: mockLogger }))
+
+global.fetch = jest.fn()
+
+// ─── Imports (after mocks) ────────────────────────────────────────────────────
+
+const {
+  processJob,
+  MAX_TENTATIVES,
+  buildIcrmEnregistrementPayload,
+} = await import('../../src/services/queueWorker.js')
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+const CLE = 'emak_A1b2C3d4E5f6G7h8I9j0K1l2'
+const SECRET = 'SeCrEt0123456789SeCrEt0123456789SeCrEt0123456789'
+const ENR_ID = '9f1c2e0a-6d7b-4c1e-9a55-2b8f0c3d4e5f'
+const URL_ATTENDUE = 'https://icrm.api.ila26.fr/api/external/estimer-mes-aides/v1/enregistrements'
+
+const q = (crmFieldIds, fr, typeOption = 'texte_court', options = null, extra = {}) => ({
+  id: `q-${crmFieldIds?.[0] ?? fr}`,
+  libelleQuestion: { fr, es: `${fr} (es)` },
+  orderPage: 1,
+  crmFieldIds,
+  typeOption,
+  options,
+  ...extra,
+})
+
+const rep = (question, valeur) => ({ questionId: question.id, valeur, question })
+
+const OPTIONS_CIVILITE = [
+  { id: '2262-1-mr', crmValue: 'Mr.', label: { fr: 'Mr.', es: 'Sr.', en: 'Mr.' } },
+  { id: '2262-2-mme', crmValue: 'Mme', label: { fr: 'Mme', es: 'Sra.', en: 'Mrs.' } },
+]
+const OPTIONS_REVENU = [
+  { id: '2294-1-1-inferieur-a-23734', crmValue: '1- Inférieur à 23734€', label: { fr: '1- Inférieur à 23 734 €' } },
+  { id: '2294-2-2-entre-23734-et-30427', crmValue: '2- Entre 23734€ et 30427€', label: { fr: '2- Entre 23 734 € et 30 427 €' } },
+]
+// Options créées dans le back-office : UUID, pas de crmValue
+const OPTIONS_TRAVAUX = [
+  { id: 'id-a', label: { fr: 'Isolation des combles', es: 'Aislamiento' } },
+  { id: 'id-b', label: { fr: 'Pompe à chaleur' } },
+  { id: 'id-c', label: { es: 'Solo español' } },
+  { id: 'id-d', label: {} },
+]
+
+const Q = {
+  civilite: q([2262], 'Civilité', 'option_unique', OPTIONS_CIVILITE),
+  nom: q([2087], 'Nom'),
+  prenom: q([2088], 'Prénom'),
+  adresse: q([2217], 'Adresse'),
+  cp: q([2089], 'Code Postal'),
+  ville: q([2090], 'Ville'),
+  tel: q([2015], 'Num. de Téléphone', 'telephone'),
+  email: q([2016], 'Adresse Email', 'email'),
+  revenu: q([2294], 'Revenu total du foyer fiscal', 'option_unique', OPTIONS_REVENU),
+  travaux: q([2303], 'Travaux souhaités', 'options_multiples', OPTIONS_TRAVAUX),
+  commentaire: q([2305], 'Commentaires ou informations complémentaires', 'texte_long'),
+}
+
+function makeEnregistrement(overrides = {}) {
+  return {
+    id: ENR_ID,
+    borneId: 'borne-uuid-1',
+    formulaireId: 'form-uuid-1',
+    formulaireVersion: '1.3.0',
+    langueUtilisee: 'fr',
+    statutPartage: 'en_attente',
+    tentatives: 0,
+    deletedAt: null,
+    createdAt: new Date('2026-09-25T10:42:17.311Z'),
+    formulaire: { id: 'form-uuid-1', label: 'Estimer mes aides', version: '1.4.0' },
+    borne: {
+      id: 'borne-uuid-1',
+      idBorne: 'BORNE-1A2B3C4D',
+      pays: 'FR',
+      adresse: '12 AVENUE DU COMMERCE, 33000 BORDEAUX',
+      commercant: 'BRICO SUD-OUEST',
+      regie: null,
+      installateur: 'LENA SOLUTIONS',
+      canalTransmission: 'icrm-lena-prod',
+      canaux: [
+        {
+          id: 'canal-uuid-1',
+          label: 'icrm-lena-prod',
+          type: 'icrm_api_key',
+          apiUrl: 'https://icrm.api.ila26.fr/api/',
+          apiKey: CLE,
+          token: SECRET,
+          actif: true,
+        },
+      ],
+    },
+    reponses: [
+      rep(Q.civilite, '2262-1-mr'),
+      rep(Q.nom, 'DUPONT'),
+      rep(Q.prenom, 'JEAN'),
+      rep(Q.adresse, '8 RUE DES LILAS'),
+      rep(Q.cp, '33000'),
+      rep(Q.ville, 'BORDEAUX'),
+      rep(Q.tel, '+33612345678'),
+      rep(Q.email, 'jean.dupont@example.com'),
+      rep(Q.revenu, '2294-2-2-entre-23734-et-30427'),
+      rep(Q.travaux, 'id-a, id-b'),
+      rep(Q.commentaire, 'APPELER APRÈS 18H'),
+    ],
+    ...overrides,
+  }
+}
+
+const makeJob = (overrides = {}) => ({
+  id: 'job-uuid-1',
+  enregistrementId: ENR_ID,
+  statut: 'en_attente',
+  tentatives: 0,
+  prochainEssai: null,
+  erreur: null,
+  ...overrides,
+})
+
+function reponseHttp(status, corps, headers = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (nom) => headers[nom.toLowerCase()] ?? null },
+    text: async () => (corps === undefined ? '' : typeof corps === 'string' ? corps : JSON.stringify(corps)),
+  }
+}
+
+const erreurIcrm = (code, message = 'Refusé') => ({ error: { code, message, request_id: 'req-42' } })
+
+// ─── Setup ────────────────────────────────────────────────────────────────────
+
+beforeEach(() => {
+  jest.clearAllMocks()
+  process.env.CRM_API_URL = 'http://crm-legacy.example.com'
+  process.env.CRM_API_KEY = 'legacy-crm-key'
+
+  mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement())
+  mockPrisma.enregistrement.update.mockResolvedValue({})
+  mockPrisma.partageJob.update.mockResolvedValue({})
+  mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
+  mockNotifySucces.mockResolvedValue(undefined)
+  mockNotifyEchec.mockResolvedValue(undefined)
+})
+
+const appelsUpdateJob = (statut) =>
+  mockPrisma.partageJob.update.mock.calls.filter((c) => c[0].data?.statut === statut)
+
+const appelsUpdateEnregistrement = () => mockPrisma.enregistrement.update.mock.calls.map((c) => c[0])
+
+function tousLesLogs() {
+  return JSON.stringify([
+    ...mockLogger.info.mock.calls,
+    ...mockLogger.warn.mock.calls,
+    ...mockLogger.error.mock.calls,
+    ...mockLogger.debug.mock.calls,
+  ])
+}
+
+// ─── buildIcrmEnregistrementPayload ──────────────────────────────────────────
+
+describe('buildIcrmEnregistrementPayload — contrat v1', () => {
+  it('construit le payload complet d’un enregistrement réaliste', () => {
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement())
+
+    expect(payload).toEqual({
+      external_id: ENR_ID,
+      created_at: '2026-09-25T10:42:17.311Z',
+      langue: 'fr',
+      // version figée à la soumission (1.3.0), pas la version courante (1.4.0)
+      formulaire: { id: 'form-uuid-1', version: '1.3.0', label: 'Estimer mes aides' },
+      // regie null omise, canaux / canalTransmission jamais transmis
+      borne: {
+        id: 'borne-uuid-1',
+        id_borne: 'BORNE-1A2B3C4D',
+        pays: 'FR',
+        adresse: '12 AVENUE DU COMMERCE, 33000 BORDEAUX',
+        commercant: 'BRICO SUD-OUEST',
+        installateur: 'LENA SOLUTIONS',
+      },
+      contact: {
+        civility: 'Mr',
+        last_name: 'DUPONT',
+        first_name: 'JEAN',
+        adresse: '8 RUE DES LILAS',
+        code_postale: '33000',
+        ville: 'BORDEAUX',
+        phone_number: '+33612345678',
+        email_adress: 'jean.dupont@example.com',
+      },
+      reponses: expect.any(Array),
+    })
+    expect(payload.reponses).toHaveLength(11)
+    expect(JSON.stringify(payload)).not.toContain(SECRET)
+    expect(JSON.stringify(payload)).not.toContain(CLE)
+  })
+
+  it('décrit chaque réponse : question_id, libellé FR, type, crm_field_ids, valeur brute, libellés', () => {
+    const { reponses } = buildIcrmEnregistrementPayload(makeEnregistrement())
+    const parChamp = Object.fromEntries(reponses.map((r) => [r.crm_field_ids[0], r]))
+
+    expect(parChamp[2087]).toEqual({
+      question_id: 'q-2087', libelle: 'Nom', type: 'texte_court',
+      crm_field_ids: [2087], valeur: 'DUPONT', valeur_libelles: ['DUPONT'],
+    })
+    expect(parChamp[2294]).toEqual({
+      question_id: 'q-2294', libelle: 'Revenu total du foyer fiscal', type: 'option_unique',
+      crm_field_ids: [2294], valeur: '2294-2-2-entre-23734-et-30427',
+      valeur_libelles: ['2- Entre 23734€ et 30427€'],
+    })
+    expect(parChamp[2303]).toEqual({
+      question_id: 'q-2303', libelle: 'Travaux souhaités', type: 'options_multiples',
+      crm_field_ids: [2303], valeur: 'id-a, id-b',
+      valeur_libelles: ['Isolation des combles', 'Pompe à chaleur'],
+    })
+    expect(parChamp[2262].valeur_libelles).toEqual(['Mr.'])
+    expect(parChamp[2015].type).toBe('telephone')
+    expect(parChamp[2305]).toMatchObject({ type: 'texte_long', valeur_libelles: ['APPELER APRÈS 18H'] })
+  })
+
+  it('résout crmValue ?? label.fr ?? label[langue] ?? id, et garde une valeur inconnue telle quelle', () => {
+    const enr = makeEnregistrement({
+      langueUtilisee: 'es',
+      reponses: [rep(Q.travaux, 'id-a, id-c, id-d, id-inconnu')],
+    })
+    const [r] = buildIcrmEnregistrementPayload(enr).reponses
+    expect(r.valeur_libelles).toEqual(['Isolation des combles', 'Solo español', 'id-d', 'id-inconnu'])
+  })
+
+  it('ne découpe pas une option_unique et découpe options_multiples sur ", " en respectant les ids qui contiennent ", "', () => {
+    const options = [
+      { id: 'Isolation des murs, combles', crmValue: 'Isolation des murs, combles' },
+      { id: 'Pompe à chaleur', crmValue: 'PAC' },
+    ]
+    const multiple = q([2303], 'Travaux', 'options_multiples', options)
+    const unique = q([2299], 'Isolation', 'option_unique', options)
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement({
+      reponses: [
+        rep(multiple, 'Isolation des murs, combles, Pompe à chaleur'),
+        rep(unique, 'Isolation des murs, combles'),
+      ],
+    }))
+    expect(payload.reponses[0].valeur_libelles).toEqual(['Isolation des murs, combles', 'PAC'])
+    expect(payload.reponses[1].valeur_libelles).toEqual(['Isolation des murs, combles'])
+  })
+
+  it('accepte l’ancien format tableau JSON pour options_multiples', () => {
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement({
+      reponses: [rep(Q.travaux, '["id-b","id-a"]')],
+    }))
+    expect(payload.reponses[0]).toMatchObject({
+      valeur: '["id-b","id-a"]',
+      valeur_libelles: ['Pompe à chaleur', 'Isolation des combles'],
+    })
+  })
+
+  it('omet les réponses vides, normalise crm_field_ids en entiers et complète un libellé absent', () => {
+    const sansLibelle = { id: 'q-x', libelleQuestion: null, typeOption: 'option_unique', crmFieldIds: ['2292'], options: null }
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement({
+      reponses: [
+        rep(Q.nom, 'DUPONT'),
+        rep(Q.prenom, '   '),
+        rep(Q.ville, null),
+        rep(sansLibelle, 'MAISON'),
+        rep(q(null, 'Question libre'), 'réponse'),
+      ],
+    }))
+    expect(payload.reponses).toHaveLength(3)
+    expect(payload.reponses[1]).toEqual({
+      question_id: 'q-x',
+      libelle: 'Votre projet concerne (type de logement)',
+      type: 'option_unique',
+      crm_field_ids: [2292],
+      valeur: 'MAISON',
+      valeur_libelles: ['MAISON'],
+    })
+    expect(payload.reponses[2].crm_field_ids).toEqual([])
+    expect(payload.contact).toEqual({ last_name: 'DUPONT' })
+  })
+
+  it('mappe le contact par libellé FR quand crmFieldIds est absent (LABEL_MAP)', () => {
+    const payload = buildIcrmEnregistrementPayload(makeEnregistrement({
+      reponses: [rep(q(null, 'Nom'), 'MARTIN'), rep(q(null, 'E-mail', 'email'), 'c@example.com')],
+    }))
+    expect(payload.contact).toEqual({ last_name: 'MARTIN', email_adress: 'c@example.com' })
+  })
+
+  it('civilité : option sans crmValue (label) et valeur encodée sans option', () => {
+    const civLibelle = q([2262], 'Civilité', 'option_unique', [{ id: 'u-1', label: { fr: 'Mme' } }])
+    const civSansOptions = q([2262], 'Civilité', 'option_unique', null)
+    expect(buildIcrmEnregistrementPayload(makeEnregistrement({ reponses: [rep(civLibelle, 'u-1')] })).contact)
+      .toEqual({ civility: 'Mme' })
+    expect(buildIcrmEnregistrementPayload(makeEnregistrement({ reponses: [rep(civSansOptions, '2262-2-mme')] })).contact)
+      .toEqual({ civility: 'Mme' })
+  })
+
+  it('omet langue inconnue, blocs vides et contact vide ; garde reponses même vide', () => {
+    const payload = buildIcrmEnregistrementPayload({
+      id: ENR_ID, langueUtilisee: 'de', borne: null, formulaire: null, reponses: [],
+    })
+    expect(payload).toEqual({ external_id: ENR_ID, reponses: [] })
+  })
+})
+
+// ─── processJob — canal icrm_api_key ─────────────────────────────────────────
+
+describe('processJob — canal icrm_api_key : envoi', () => {
+  it('POST sur l’URL normalisée avec X-Api-Key, X-Api-Secret, Idempotency-Key, sans Azure ni Bearer', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, {
+      status: 'created', projet_id: 1234, projet_ref: 'P-XX2026001234', contact_id: 567, warnings: [],
+    }))
+
+    await processJob(makeJob())
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [url, options] = global.fetch.mock.calls[0]
+    expect(url).toBe(URL_ATTENDUE)
+    expect(options.method).toBe('POST')
+    expect(options.redirect).toBe('manual')
+    expect(options.signal).toBeInstanceOf(AbortSignal)
+    expect(options.headers).toEqual({
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'X-Api-Key': CLE,
+      'X-Api-Secret': SECRET,
+      'Idempotency-Key': ENR_ID,
+    })
+    expect(options.headers.Authorization).toBeUndefined()
+    // Jamais d'appel à l'autorité Azure AD ni de persistance de token
+    expect(url).not.toMatch(/oauth2|auth\.dev\.ila26\.fr|customContacts/)
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+
+    const body = JSON.parse(options.body)
+    expect(body.external_id).toBe(ENR_ID)
+    expect(body.contact.last_name).toBe('DUPONT')
+    expect(body.reponses).toHaveLength(11)
+  })
+
+  it('charge typeOption/options des questions et les métadonnées borne/formulaire', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: 1 }))
+    await processJob(makeJob())
+
+    const { include } = mockPrisma.enregistrement.findUnique.mock.calls[0][0]
+    expect(include.reponses.include.question.select).toMatchObject({
+      libelleQuestion: true, crmFieldIds: true, typeOption: true, options: true,
+    })
+    expect(include.borne.select).toMatchObject({
+      canalTransmission: true, pays: true, adresse: true, commercant: true, regie: true, installateur: true,
+    })
+    expect(include.formulaire).toEqual({ select: { id: true, label: true, version: true } })
+  })
+
+  it('choisit le canal par canalTransmission même si un canal azure_ad est plus récent', async () => {
+    const enr = makeEnregistrement()
+    enr.borne.canaux = [
+      { id: 'canal-azure', label: 'ancien', type: 'azure_ad', apiUrl: 'https://legacy.example', apiKey: 'rt', token: 'at', actif: true },
+      ...enr.borne.canaux,
+    ]
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(enr)
+    global.fetch.mockResolvedValue(reponseHttp(201, { status: 'created', projet_id: 1 }))
+
+    await processJob(makeJob())
+
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_ATTENDUE)
+  })
+
+  it('un canal sans type (antérieur à la migration) suit le chemin historique Bearer / customContacts', async () => {
+    // access token encore valide 1 h : pas de refresh Azure, un seul appel réseau
+    const accessToken = [
+      'e30',
+      Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url'),
+      'signature',
+    ].join('.')
+    const enr = makeEnregistrement()
+    enr.borne.canaux = [{ id: 'c', label: 'icrm-lena-prod', apiUrl: 'https://legacy.example', apiKey: 'rt', token: accessToken, actif: true }]
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(enr)
+    global.fetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+
+    await processJob(makeJob())
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [url, options] = global.fetch.mock.calls[0]
+    expect(url).toBe('https://legacy.example/api/customContacts?lang=fr')
+    expect(options.headers.Authorization).toBe(`Bearer ${accessToken}`)
+    expect(options.headers['X-Api-Key']).toBeUndefined()
+    // Le chemin historique n'écrit pas les colonnes de traçabilité
+    const succes = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')
+    expect(succes.data).toEqual({ statutPartage: 'partage', partageAt: expect.any(Date) })
+  })
+})
+
+describe('processJob — canal icrm_api_key : réponses 2xx', () => {
+  it('201 created → succès, trace crmProjetId / crmProjetRef, notification Pusher', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, {
+      status: 'created', projet_id: 1234, projet_ref: 'P-XX2026001234', contact_id: 567, warnings: [],
+    }))
+
+    await processJob(makeJob())
+
+    expect(appelsUpdateJob('succes')).toHaveLength(1)
+    const succes = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')
+    expect(succes.data).toEqual({
+      statutPartage: 'partage',
+      partageAt: expect.any(Date),
+      crmProjetId: '1234',
+      crmProjetRef: 'P-XX2026001234',
+    })
+    expect(mockNotifySucces).toHaveBeenCalledWith('borne-uuid-1', ENR_ID)
+    expect(mockNotifyEchec).not.toHaveBeenCalled()
+
+    const logSucces = mockLogger.info.mock.calls.map((c) => c[0]).find((l) => /Job succès/.test(l.message))
+    expect(logSucces).toMatchObject({
+      canalType: 'icrm_api_key', httpStatus: 201, statutIcrm: 'created', crmProjetId: '1234',
+    })
+  })
+
+  it('200 already_processed (rejeu idempotent) → succès', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(200, {
+      status: 'already_processed', projet_id: 1234, projet_ref: 'P-XX2026001234', contact_id: 567, warnings: [],
+    }))
+
+    await processJob(makeJob({ tentatives: 2 }))
+
+    expect(appelsUpdateJob('succes')).toHaveLength(1)
+    expect(appelsUpdateJob('echec_temporaire')).toHaveLength(0)
+  })
+
+  it('2xx sans corps exploitable → succès sans trace', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(204))
+
+    await processJob(makeJob())
+
+    const succes = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'partage')
+    expect(succes.data).toMatchObject({ crmProjetId: null, crmProjetRef: null })
+  })
+
+  it('journalise les warnings I-CRM sans leurs valeurs (RGPD)', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(201, {
+      status: 'created', projet_id: 9, projet_ref: 'P-9',
+      warnings: [
+        { code: 'unmapped_field', crm_field_ids: [2305], libelle: 'Commentaires', value: 'APPELER APRÈS 18H' },
+        { code: 'unmatched_option', crm_field_ids: [2294], libelle: 'Revenu', value: '2- Entre 23734€ et 30427€' },
+      ],
+    }))
+
+    await processJob(makeJob())
+
+    const log = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /non mappées/.test(l.message))
+    expect(log).toMatchObject({ nbWarnings: 2, crmProjetId: '9', jobId: 'job-uuid-1' })
+    expect(log.warnings).toEqual([
+      { code: 'unmapped_field', crm_field_ids: [2305], libelle: 'Commentaires' },
+      { code: 'unmatched_option', crm_field_ids: [2294], libelle: 'Revenu' },
+    ])
+    expect(tousLesLogs()).not.toContain('APPELER APRÈS 18H')
+    expect(tousLesLogs()).not.toContain('23734€')
+  })
+})
+
+describe('processJob — canal icrm_api_key : échecs définitifs immédiats', () => {
+  it.each([
+    [401, 'invalid_credentials'],
+    [403, 'client_disabled'],
+    [403, 'subscription_inactive'],
+    [404, 'not_found'],
+    [413, 'payload_too_large'],
+    [422, 'insufficient_identity'],
+    [422, 'validation_failed'],
+  ])('HTTP %i %s → echec_definitif dès la 1re tentative, sans réessai', async (status, code) => {
+    global.fetch.mockResolvedValue(reponseHttp(status, erreurIcrm(code)))
+
+    await processJob(makeJob({ tentatives: 0 }))
+
+    expect(appelsUpdateJob('echec_temporaire')).toHaveLength(0)
+    const [ops] = mockPrisma.$transaction.mock.calls[0]
+    expect(ops).toHaveLength(2)
+    const jobDefinitif = appelsUpdateJob('echec_definitif')[0][0].data
+    expect(jobDefinitif.tentatives).toBe(1)
+    expect(jobDefinitif.prochainEssai).toBeUndefined()
+    expect(jobDefinitif.erreur).toContain(`HTTP ${status}`)
+    expect(jobDefinitif.erreur).toContain(code)
+    expect(jobDefinitif.erreur).toContain('req-42')
+
+    const enrDefinitif = appelsUpdateEnregistrement().find((u) => u.data.statutPartage === 'echec_definitif')
+    expect(enrDefinitif.data.derniereErreur).toContain(code)
+    expect(mockNotifyEchec).toHaveBeenCalledWith('borne-uuid-1', ENR_ID, expect.stringContaining(code))
+
+    const logErreur = mockLogger.error.mock.calls.map((c) => c[0]).find((l) => /échec définitif/.test(l.message))
+    expect(logErreur).toMatchObject({ httpStatus: status, codeIcrm: code })
+  })
+
+  it('redirection (3xx) → échec définitif, la redirection n’est pas suivie', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(301, undefined, { location: 'https://ailleurs.example' }))
+
+    await processJob(makeJob())
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const jobDefinitif = appelsUpdateJob('echec_definitif')[0][0].data
+    expect(jobDefinitif.erreur).toMatch(/redirection refusée/)
+  })
+
+  it('canal incomplet (secret manquant) → échec définitif sans appel réseau', async () => {
+    const enr = makeEnregistrement()
+    enr.borne.canaux[0].token = ''
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(enr)
+
+    await processJob(makeJob())
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(appelsUpdateJob('echec_definitif')[0][0].data.erreur).toMatch(/incomplet/)
+  })
+})
+
+describe('processJob — canal icrm_api_key : échecs temporaires (backoff existant)', () => {
+  it.each([
+    [409, 'delivery_in_progress'],
+    [408, 'request_timeout'],
+    [429, 'too_many_requests'],
+    [500, 'internal_error'],
+    [503, 'internal_error'],
+  ])('HTTP %i %s → echec_temporaire avec prochainEssai', async (status, code) => {
+    global.fetch.mockResolvedValue(reponseHttp(status, erreurIcrm(code)))
+
+    await processJob(makeJob({ tentatives: 0 }))
+
+    const [appel] = appelsUpdateJob('echec_temporaire')
+    expect(appel[0].data).toMatchObject({ tentatives: 1, prochainEssai: expect.any(Date) })
+    expect(appel[0].data.erreur).toContain(code)
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    expect(mockNotifyEchec).not.toHaveBeenCalled()
+  })
+
+  it('réponse 502 non JSON (proxy) → échec temporaire lisible', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(502, '<html>Bad Gateway</html>'))
+
+    await processJob(makeJob())
+
+    const [appel] = appelsUpdateJob('echec_temporaire')
+    expect(appel[0].data.erreur).toBe('I-CRM HTTP 502 (réponse non JSON)')
+  })
+
+  it('erreur réseau → échec temporaire', async () => {
+    global.fetch.mockRejectedValue(new Error('getaddrinfo ENOTFOUND icrm.api.ila26.fr'))
+
+    await processJob(makeJob())
+
+    expect(appelsUpdateJob('echec_temporaire')[0][0].data.erreur).toContain('ENOTFOUND')
+  })
+
+  it('timeout (AbortError) → échec temporaire', async () => {
+    const abort = new Error('The operation was aborted')
+    abort.name = 'AbortError'
+    global.fetch.mockRejectedValue(abort)
+
+    await processJob(makeJob())
+
+    expect(appelsUpdateJob('echec_temporaire')).toHaveLength(1)
+  })
+
+  it('5xx sur la dernière tentative → echec_definitif (MAX_TENTATIVES)', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(500, erreurIcrm('internal_error')))
+
+    await processJob(makeJob({ tentatives: MAX_TENTATIVES - 1 }))
+
+    expect(appelsUpdateJob('echec_definitif')[0][0].data.tentatives).toBe(MAX_TENTATIVES)
+    expect(mockNotifyEchec).toHaveBeenCalled()
+  })
+})
+
+describe('processJob — canal icrm_api_key : confidentialité des journaux', () => {
+  it.each([
+    ['succès', () => reponseHttp(201, { status: 'created', projet_id: 1 })],
+    ['422', () => reponseHttp(422, erreurIcrm('insufficient_identity'))],
+    ['500', () => reponseHttp(500, erreurIcrm('internal_error'))],
+  ])('%s : ni secret, ni clé, ni valeur saisie dans les logs', async (_cas, fabrique) => {
+    global.fetch.mockResolvedValue(fabrique())
+
+    await processJob(makeJob())
+
+    const logs = tousLesLogs()
+    expect(logs).not.toContain(SECRET)
+    expect(logs).not.toContain('DUPONT')
+    expect(logs).not.toContain('jean.dupont@example.com')
+    expect(logs).not.toContain('+33612345678')
+    const erreurs = mockPrisma.partageJob.update.mock.calls.map((c) => c[0].data.erreur).filter(Boolean)
+    erreurs.forEach((e) => expect(e).not.toContain(SECRET))
+  })
+})
