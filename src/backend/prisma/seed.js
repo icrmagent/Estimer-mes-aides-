@@ -454,7 +454,7 @@ const legacyQuestionsV2 = [
       },
       {
         id: 'revenu-4',
-        crmValue: '4- Supérieur à 42849€',
+        crmValue: '4- Sup à 42849€', // libellé exact CAE España (voir CRM_VALUE_OVERRIDES)
         label: { fr: '4- Supérieur à 42 849 €', es: '4- Superior a 42 849 €', en: '4- More than €42,849' },
       },
     ],
@@ -984,6 +984,19 @@ const FIELD_OPTIONS_OVERRIDES = {
   2301: ['Bois', 'Fioul', 'Gaz', 'Pompe à chaleur', 'Électrique', 'Autre'],
 }
 
+// crmValue = libellé EXACT de l'option dans le tenant I-CRM de référence
+// (CAE España, onglet 22 « ESTIMER VOS AIDES »), quand il diffère de la valeur V1
+// de formDefinition (inchangée : rétrocompatibilité V1, docs/CONTEXT.md).
+// I-CRM rapproche les libellés en ignorant accents, casse, espaces, typographie et
+// préfixe « N- » — pas une abréviation : « Supérieur » ≠ « Sup ».
+// L'id de l'option reste calculé sur la valeur V1 : les réponses déjà enregistrées
+// restent résolues. Le seed n'est pas rejoué en production : voir
+// docs/INTEGRATION-ICRM.md §4.2 (options du formulaire ↔ options du tenant).
+// Sans équivalent CAE España (non alignables ici) : 2301 « Autre », options de 2306.
+const CRM_VALUE_OVERRIDES = {
+  2294: { '4- Supérieur à 42849€': '4- Sup à 42849€' },
+}
+
 const FIELD_LABEL_TRANSLATIONS = {
   2262: { fr: 'Civilité', es: 'Tratamiento', en: 'Title' },
   2087: { fr: 'Nom', es: 'Apellido', en: 'Last name' },
@@ -1130,7 +1143,7 @@ function buildQuestionsV2FromFields() {
           options: hasOptions
             ? optionValues.map((value, index) => ({
                 id: optionId(field.id, value, index),
-                crmValue: value,
+                crmValue: CRM_VALUE_OVERRIDES[field.id]?.[value] ?? value,
                 label: (OPTION_TRANSLATIONS[field.id]?.[value]) || i18nSame(value),
               }))
             : null,
