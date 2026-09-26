@@ -464,6 +464,32 @@ describe('buildIcrmEnregistrementPayload — v1.1 : borne.admin (widget « Info 
     expect(limite.borne.admin.raison_sociale).toHaveLength(255)
   })
 
+  it('blocs borne et formulaire : valeurs rognées et coupées aux longueurs d’I-CRM (jamais un 422 définitif)', () => {
+    const enr = makeEnregistrement({
+      borne: {
+        idBorne: 'B'.repeat(200),
+        pays: ' FRANCE METROPOLITAINE ',
+        adresse: 'é'.repeat(600),
+        commercant: 'C'.repeat(500),
+        regie: '  ',
+        installateur: `${'I'.repeat(499)}😀X`,
+      },
+      formulaire: { id: 'form-uuid-1', label: 'L'.repeat(300), version: '1.4.0' },
+      formulaireVersion: 'v'.repeat(70),
+    })
+    const { borne, formulaire } = buildIcrmEnregistrementPayload(enr)
+
+    expect(borne.id_borne).toBe('B'.repeat(128))
+    expect(borne.pays).toBe('FRANCE M')
+    expect(borne.adresse).toBe('é'.repeat(500))
+    expect(borne.commercant).toHaveLength(500)
+    expect(borne).not.toHaveProperty('regie')
+    // coupe en points de code : l'émoji (2 unités UTF-16) n'est jamais tranché
+    expect(Array.from(borne.installateur)).toHaveLength(500)
+    expect(borne.installateur.endsWith('😀')).toBe(true)
+    expect(formulaire).toEqual({ id: 'form-uuid-1', version: 'v'.repeat(64), label: 'L'.repeat(255) })
+  })
+
   it('seul l’admin renseigné : le bloc borne ne contient que admin', () => {
     const payload = buildIcrmEnregistrementPayload(makeEnregistrement({ borne: { adminBorne: ADMIN_BORNE } }))
     expect(payload.borne).toEqual({ admin: ADMIN_ATTENDU })

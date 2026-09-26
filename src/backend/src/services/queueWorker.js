@@ -400,6 +400,30 @@ function valeurContactIcrm(champ, valeur, pays) {
 // plus longue est omise plutôt que de risquer un 422 définitif sur tout le lead.
 const LONGUEUR_MAX_ADMIN_BORNE_ICRM = 255
 
+// Longueurs maximales (caractères) des blocs `borne` et `formulaire` du contrat
+// (§2.3). Un I-CRM antérieur au correctif « informations annexes coupées »
+// refusait tout le lead au-delà (422 validation_failed, définitif) : une adresse
+// de borne ou un libellé de formulaire trop long perdait CHAQUE lead de cette
+// borne ou de ce formulaire. Au-delà, la valeur est coupée ici (informations
+// d'affichage, jamais d'identité : external_id n'est pas concerné).
+const LONGUEUR_MAX_BORNE_ICRM = Object.freeze({
+  id: 128, id_borne: 128, pays: 8, adresse: 500, commercant: 500, regie: 500, installateur: 500,
+})
+const LONGUEUR_MAX_FORMULAIRE_ICRM = Object.freeze({ id: 128, version: 64, label: 255 })
+
+/**
+ * Valeur d'un bloc annexe (borne, formulaire) : chaîne rognée, coupée à `max`
+ * caractères (points de code, jamais au milieu d'un caractère) ; `undefined`
+ * si absente ou vide.
+ */
+function texteAnnexe(valeur, max) {
+  if (valeur === null || valeur === undefined) return undefined
+  const s = String(valeur).trim()
+  if (s === '') return undefined
+  const caracteres = Array.from(s)
+  return caracteres.length > max ? caracteres.slice(0, max).join('').trimEnd() : s
+}
+
 /**
  * Bloc `borne.admin` du contrat v1.1 : l'AdminBorne propriétaire de la borne
  * (nom, prénom, e-mail, raison sociale, SIRET), écrit par I-CRM dans le widget
@@ -526,20 +550,22 @@ function construirePayloadIcrm(enregistrement) {
   const borne = enr.borne || {}
   const formulaire = enr.formulaire || {}
   const createdAt = dateEnregistrementIso(enr.createdAt)
+  const F = LONGUEUR_MAX_FORMULAIRE_ICRM
+  const B = LONGUEUR_MAX_BORNE_ICRM
   const blocFormulaire = compacter({
-    id: enr.formulaireId ?? formulaire.id,
+    id: texteAnnexe(enr.formulaireId ?? formulaire.id, F.id),
     // Version figée à la soumission, à défaut la version courante du formulaire
-    version: enr.formulaireVersion ?? formulaire.version,
-    label: formulaire.label,
+    version: texteAnnexe(enr.formulaireVersion ?? formulaire.version, F.version),
+    label: texteAnnexe(formulaire.label, F.label),
   })
   const blocBorne = compacter({
-    id: borne.id,
-    id_borne: borne.idBorne,
-    pays: borne.pays,
-    adresse: borne.adresse,
-    commercant: borne.commercant,
-    regie: borne.regie,
-    installateur: borne.installateur,
+    id: texteAnnexe(borne.id, B.id),
+    id_borne: texteAnnexe(borne.idBorne, B.id_borne),
+    pays: texteAnnexe(borne.pays, B.pays),
+    adresse: texteAnnexe(borne.adresse, B.adresse),
+    commercant: texteAnnexe(borne.commercant, B.commercant),
+    regie: texteAnnexe(borne.regie, B.regie),
+    installateur: texteAnnexe(borne.installateur, B.installateur),
     admin: blocAdminBorne(borne.adminBorne),
   })
   const nonVide = (bloc) => (Object.keys(bloc).length > 0 ? bloc : undefined)
