@@ -91,8 +91,8 @@ Corps de `POST /enregistrements` (voir `buildIcrmEnregistrementPayload` dans
 | `external_id` | UUID de l'enregistrement EMA (clé d'idempotence, aussi dans `Idempotency-Key`) |
 | `created_at` | **toujours envoyé** (v1.1) : `enregistrement.createdAt` en ISO-8601 UTC (`2026-09-25T10:42:17.311Z`). Sans date valide, l'envoi est refusé en échec définitif (cas impossible en base : colonne `NOT NULL`) |
 | `langue` | `fr` / `es` / `en` (autre valeur : omise) |
-| `formulaire` | `id`, `version` figée à la soumission, `label` |
-| `borne` | `id`, `id_borne`, `pays`, `adresse`, `commercant`, `regie`, `installateur` |
+| `formulaire` | `id`, `version` figée à la soumission, `label` — coupés à 128 / 64 / 255 caractères |
+| `borne` | `id`, `id_borne`, `pays`, `adresse`, `commercant`, `regie`, `installateur` — coupés à 128 / 128 / 8 / 500 / 500 / 500 / 500 caractères (longueurs du contrat : un I-CRM antérieur refusait tout le lead au-delà, 422 définitif ; I-CRM coupe lui aussi désormais) |
 | `borne.admin` (v1.1) | AdminBorne propriétaire de la borne : `nom`, `prenom`, `email`, `raison_sociale`, `siret`. Absent si la borne n'a pas d'admin (borne du SuperAdmin) ; membres vides omis, e-mail mal formé ou valeur > 255 caractères omis (un 422 ferait perdre le lead) |
 | `contact` | civilité, nom, prénom, adresse, code postal, ville, téléphone, e-mail (même correspondance que le canal historique : field IDs 2262/2087/2088/2217/2089/2090/2015/2016, puis libellé FR) |
 | `reponses[]` | `question_id`, `libelle` (FR), `type`, `crm_field_ids`, `valeur` (brute), `valeur_libelles` |
@@ -147,10 +147,15 @@ l'onglet du sous-type BORNE TACTILE qui porte les questions EMA (CAE España : o
   `php artisan external-api:provision-borne-fields`).
 - Une valeur absente côté EMA n'est pas écrite : borne sans régie → « Régie » vide ; borne sans
   AdminBorne (borne du SuperAdmin) → champs 7 à 10 vides.
-- Champ absent du tenant (non provisionné) : I-CRM recopie la valeur dans le commentaire de
-  l'opportunité et renvoie l'avertissement `borne_field_missing` avec sa `key` ; le worker journalise
-  le code et la clé, jamais la valeur. Le commentaire n'est plus écrit que pour ce qui n'a pas de
-  champ (réponses non mappées, options non reconnues, champs « Info borne » absents).
+- Champ absent (tenant non provisionné, ou widget « Borne » absent des onglets du sous-type — I-CRM
+  ne cherche les clés que parmi les champs **affichés** pour le sous-type) : I-CRM recopie la valeur
+  dans le commentaire de l'opportunité (si le commentaire est activé sur la clé) et renvoie
+  l'avertissement `{ "code": "borne_field_missing", "key": "projets_ema_…", "value": "…" }` ; le
+  worker journalise le code et la clé, **jamais la valeur**. Le commentaire n'est plus écrit que pour
+  ce qui n'a pas de champ (réponses non mappées, options non reconnues, champs « Info borne »
+  absents).
+- Un texte qui commence par `=` est écrit par I-CRM avec le sosie `＝` (jamais une formule dans les
+  exports Excel du CRM) ; `<` `>` deviennent `‹` `›`.
 - Le bloc `borne.admin` contient des données personnelles (nom, e-mail, SIRET de l'AdminBorne) :
   il n'est jamais journalisé par EMA.
 - Rétrocompatible : un I-CRM antérieur à la v1.1 ignore `borne.admin`.
@@ -159,7 +164,8 @@ l'onglet du sous-type BORNE TACTILE qui porte les questions EMA (CAE España : o
 
 Pour une question à choix, I-CRM cherche l'option du champ cible qui correspond au premier
 `valeur_libelles`, en ignorant accents, casse, espaces, typographie (’, tiret insécable) et le
-préfixe « N- ». Sans correspondance, le libellé brut est stocké, l'avertissement `unmatched_option`
+préfixe « N- » (chiffres, tiret collé, espace : « 2- 71 à 120 m2 » ≡ « 71 à 120 m2 » ; une plage
+comme « 70-100 m2 » n'est pas une numérotation). Sans correspondance, le libellé brut est stocké, l'avertissement `unmatched_option`
 est renvoyé et la valeur est recopiée en commentaire : rien n'est perdu, mais le champ ne porte pas
 une option du tenant (filtres, exports).
 
@@ -206,7 +212,11 @@ lesquelles il a été créé. À vérifier dans le back-office avant la mise en 
   ou **Mettre en file d'attente** pour toute la borne.
 - Les avertissements renvoyés par I-CRM (`unmapped_field`, `unmatched_option`, `borne_field_missing`)
   sont journalisés (codes, field IDs, libellés, clé du champ « Info borne » — jamais les valeurs) ;
-  I-CRM recopie les valeurs concernées en commentaire de l'opportunité.
+  I-CRM recopie les valeurs concernées en commentaire de l'opportunité, sauf si le commentaire est
+  désactivé sur la clé (`comment_enabled: false`) : la valeur n'est alors que dans l'avertissement
+  (`value`, jamais journalisé par EMA) et dans l'enregistrement EMA.
+- Forme des avertissements (contrat §2.3, errata §5) : `{ code, crm_field_ids, libelle, value }`
+  pour `unmapped_field` / `unmatched_option` ; `{ code, key, value }` pour `borne_field_missing`.
 
 ⚠️ **Premier envoi = tout l'historique.** « Mettre en file d'attente » reprend **tous** les
 enregistrements non partagés de la borne (tests, sessions abandonnées, doublons hors-ligne).

@@ -38,6 +38,15 @@ v1 ignore le nouveau bloc. Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION
   (bloc admin avec / sans admin, membres vides, e-mail, longueur ; `created_at` obligatoire ;
   `select` fermé de l'AdminBorne ; journaux sans données de l'admin).
 
+#### Corrigé (revue B2/C2, 2026-09-26)
+- **Blocs `borne` et `formulaire` coupés aux longueurs du contrat** (id / id_borne 128, pays 8,
+  adresse, commerçant, régie, installateur 500 ; formulaire id 128, version 64, label 255) : une
+  valeur plus longue faisait refuser tout le lead par I-CRM (422, échec définitif). Coupe en
+  points de code. I-CRM coupe aussi désormais au lieu de refuser.
+- **Docs** (INTEGRATION-ICRM §4.1, §4.2, §5) : `borne_field_missing` porte aussi `value` (jamais
+  journalisée par EMA) ; champs « Info borne » cherchés parmi les champs affichés pour le
+  sous-type ; commentaire soumis à `comment_enabled` ; préfixe « N- » ; `=` de tête neutralisé.
+
 #### Modifié
 - **`created_at` obligatoire** : toujours envoyé, = `enregistrement.createdAt` en ISO-8601 UTC ;
   sans date valide, échec définitif sans appel réseau (au lieu d'omettre le champ).
