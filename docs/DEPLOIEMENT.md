@@ -449,6 +449,29 @@ VITE_PUSHER_CLUSTER=eu
 
 ---
 
+## Partage I-CRM — canal par clé API
+
+Depuis le 2026-09-25, un canal peut s'authentifier auprès d'I-CRM par **clé API**
+(type `icrm_api_key`, en-têtes `X-Api-Key` / `X-Api-Secret`) au lieu d'un jeton Azure AD.
+Chaque enregistrement devient une **opportunité BORNE TACTILE** dans le tenant lié à la clé.
+Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
+
+| Borne | Tenant I-CRM | URL API du canal (sans `/api`) |
+|-------|--------------|--------------------------------|
+| France | LENA | `https://icrm.api.ila26.fr` |
+| Espagne | CAE España | `https://icrm.api.es.ila26.com` |
+
+- **Migration** `20260925000000_canal_type_icrm_api_key` (additive, idempotente) : colonnes
+  `canaux.type` (défaut `azure_ad` → canaux existants inchangés), `enregistrements.crmProjetId`
+  et `crmProjetRef`. Appliquée par `prisma migrate deploy` comme les autres.
+- **Aucune variable d'environnement nouvelle** : l'URL, la clé et le secret vivent dans la ligne du canal.
+- **Réessais** : 2xx au corps du contrat (`status` + `projet_id`) = succès ; 401/403/404/413/422 et
+  2xx non conforme (page HTML d'un front, mauvaise URL) = échec définitif immédiat (pas de réessai) ;
+  408/409/429/5xx/réseau/timeout et 2xx au corps illisible = backoff existant (5 tentatives).
+- ⚠️ Le premier « Mettre en file d'attente » d'une borne envoie tout son historique non partagé.
+
+---
+
 ## Base de données — Schéma
 
 ```
