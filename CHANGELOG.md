@@ -19,6 +19,60 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### 2026-09-27 — entreprise I-CRM (tenant) choisie borne par borne
+
+Branche `feat/entreprise-icrm-par-borne`, **non mergée** (merger `main` = mise en production :
+Render, Vercel et `prisma migrate deploy`). Besoin : depuis le back-office, choisir l'entreprise
+I-CRM (tenant) de chaque borne ; chaque borne envoie ses enregistrements à l'entreprise choisie.
+Chaque entreprise est enregistrée **une fois** avec sa clé API, au lieu d'un canal par borne.
+Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §9.
+
+#### Ajouté
+- **Entreprises I-CRM** (`entreprises_icrm`) : nom, URL API, clé `emak_…`, secret (écriture seule),
+  actif, entreprise et sous-type renvoyés par I-CRM, date et résultat du dernier test ; suppression
+  logique.
+- **`/api/entreprises-icrm`** (et `/api/backoffice/entreprises-icrm`, CSRF comme les canaux) :
+  liste et détail (SuperAdmin ; AdminBorne limité aux entreprises de ses bornes), création,
+  modification, suppression (SuperAdmin). Projection publique `apiKeyId` + `hasToken`, jamais le
+  secret. Validation Zod : clé, secret, URL https (hors localhost), nom unique ; nouvelle clé sans
+  secret refusée ; changer l'URL ou la clé efface l'entreprise vérifiée. Suppression d'une entreprise
+  encore affectée : 409 `ENTREPRISE_ICRM_EN_USAGE` avec la liste des bornes, `?force=true` les
+  désaffecte dans la même transaction.
+- **`POST /api/entreprises-icrm/:id/test`** : ping I-CRM (même logique que le test d'un canal clé
+  API), mémorise `nomIcrm`, `sousTypeIcrm`, `derniereVerification`, `dernierStatut`.
+- **Borne → entreprise** : `bornes.entrepriseIcrmId` (création et modification, uuid nullable,
+  entreprise existante et active) ; choix réservé au SuperAdmin (403 pour un AdminBorne qui le change,
+  valeur renvoyée inchangée acceptée) ; liste et détail des bornes incluent
+  `entrepriseIcrm { id, nom, nomIcrm, sousTypeIcrm, actif }`.
+- **Traçabilité** : `enregistrements.crmEntrepriseIcrmId` = entreprise qui a reçu l'enregistrement
+  (succès d'un envoi par entreprise) ; exposée avec les jobs de `GET /api/partage/jobs`.
+- **Migration `20260927000000_entreprise_icrm_par_borne`** (additive, idempotente, FK `ON DELETE SET NULL`).
+- **Back-office** : menu « Entreprises I-CRM » (tableau nom / entreprise I-CRM + sous-type / URL /
+  clé / dernière vérification / bornes / actif, actions Tester – toast avec l'entreprise et le
+  sous-type –, Modifier, Supprimer avec confirmation de désaffectation) et fenêtre de saisie (secret
+  masqué, afficher/masquer, « laisser vide pour ne pas changer ») ; fiche borne : choix « Entreprise
+  I-CRM destinataire » (« Aucune (utiliser les canaux) », lecture seule hors SuperAdmin, entreprise
+  inactive signalée) ; colonne « Destination I-CRM » dans les listes de bornes (SuperAdmin et
+  AdminBorne) ; page Partage CRM : destination de la borne et de chaque job.
+- **Tests** : backend `tests/routes/entreprisesIcrm.test.js`, `tests/routes/bornesEntrepriseIcrm.test.js`,
+  `tests/routes/partageLancer.test.js`, `tests/services/queueWorker.entrepriseIcrm.test.js`,
+  `tests/lib/icrmApiKey.test.js` (+94 tests) ; back-office `entrepriseIcrmConfig.test.js`,
+  `EntrepriseIcrmModal.test.jsx`, `EntrepriseIcrmSelect.test.jsx`, `EntreprisesIcrmPage.test.jsx` (+41 tests).
+
+#### Modifié
+- **Worker** : destination d'un job = l'entreprise I-CRM de la borne si elle est active et non
+  supprimée, sinon le canal (`canalTransmission`, puis premier canal actif), sinon les variables
+  d'environnement. L'envoi par entreprise réutilise l'émetteur du canal clé API
+  (`envoyerViaCleApiIcrm`, désormais paramétré par `{ apiUrl, apiKey, token }`) : même payload,
+  mêmes en-têtes, même classification des réponses. Journaux : champ `destination`
+  (`entreprise_icrm` / `canal` / `env`). Chemins canal clé API et `azure_ad` inchangés.
+- **`POST /api/partage/bornes/:id/lancer`** : accepte une borne qui n'a qu'une entreprise active (sans
+  canal) et renvoie `destination` ; sans entreprise active, `NO_ACTIVE_CHANNEL` /
+  `CHANNEL_LABEL_MISMATCH` inchangés.
+- **Test de connexion** : ping I-CRM factorisé dans `services/icrmPingService.js`, partagé par les
+  canaux et les entreprises (réponses de `POST /api/canaux/:id/test` inchangées, sauf la fin du
+  message 401 qui ne dit plus « du canal »).
+
 ### 2026-09-26 — contrat I-CRM v1.1 : widget « Borne » → « Info borne »
 
 Même branche `feat/canal-icrm-cle-api`, **non mergée**. Côté I-CRM, l'addendum v1.1 crée dans

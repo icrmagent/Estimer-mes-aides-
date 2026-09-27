@@ -470,6 +470,18 @@ Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
   408/409/429/5xx/réseau/timeout et 2xx au corps illisible = backoff existant (5 tentatives).
 - ⚠️ Le premier « Mettre en file d'attente » d'une borne envoie tout son historique non partagé.
 
+### Entreprise I-CRM par borne (recommandé, 2026-09-27)
+
+Chaque entreprise (tenant) I-CRM est enregistrée **une fois** (menu « Entreprises I-CRM »,
+`/api/entreprises-icrm`) avec sa clé API, puis choisie dans la fiche de chaque borne
+(« Entreprise I-CRM destinataire »). Une entreprise active est **prioritaire sur les canaux**.
+Détail : [INTEGRATION-ICRM.md](INTEGRATION-ICRM.md) §9.
+
+- **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente) : table
+  `entreprises_icrm`, colonnes `bornes.entrepriseIcrmId` et `enregistrements.crmEntrepriseIcrmId`
+  (NULL pour l'existant → comportement inchangé).
+- **Aucune variable d'environnement nouvelle** : URL, clé et secret vivent dans la ligne de l'entreprise.
+
 ---
 
 ## Base de données — Schéma

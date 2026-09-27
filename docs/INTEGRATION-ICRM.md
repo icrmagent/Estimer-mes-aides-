@@ -4,6 +4,10 @@
 > Chaque enregistrement d'une borne devient une **opportunité** du sous-type
 > **BORNE TACTILE** dans le tenant I-CRM lié à la clé (avec son contact).
 > Le canal historique **« Azure AD (ancien) »** (`azure_ad`) reste disponible et inchangé.
+>
+> **Recommandé depuis le 2026-09-27 : l'entreprise I-CRM par borne** (§9). Chaque entreprise
+> (LENA, CAE España…) est enregistrée **une fois** avec sa clé, puis choisie dans la fiche de chaque
+> borne — plus besoin d'un canal par borne. Même contrat, même envoi, même payload que ci-dessous.
 
 ---
 
@@ -39,6 +43,9 @@ L'URL est l'URL **de base, sans `/api`** (un `/api` ou un `/` final saisi par er
 automatiquement). `https` est obligatoire (seul `http://localhost` est toléré, pour le développement).
 
 ## 3. Configurer un canal (back-office)
+
+> Pour une nouvelle borne, préférer l'**entreprise I-CRM par borne** (§9) : une clé saisie une
+> seule fois pour toutes les bornes du tenant. Le canal reste utile en repli (§9.3).
 
 Prérequis : la clé API et son secret, délivrés par un administrateur I-CRM pour le tenant visé.
 Le secret n'est affiché **qu'une fois** par I-CRM : le transmettre par un canal sûr, jamais par e-mail en clair.
@@ -226,7 +233,9 @@ Faire le tri avant le premier lancement sur une borne de production.
 
 - Le secret est stocké dans `canaux.token` (comme les jetons Azure AD) et n'est **jamais** renvoyé
   par l'API : la projection publique expose `type`, `hasApiKey`, `hasToken` et `apiKeyId`
-  (l'identifiant `emak_…`, public par construction).
+  (l'identifiant `emak_…`, public par construction). Idem pour une entreprise I-CRM (§9) :
+  secret dans `entreprises_icrm.token`, projection publique `apiKeyId` + `hasToken` ; la borne
+  n'expose de son entreprise que `id`, `nom`, `nomIcrm`, `sousTypeIcrm` et `actif`.
 - Ni le secret, ni les valeurs saisies par les visiteurs, ni les données de l'AdminBorne (bloc
   `borne.admin`) ne sont journalisés (RGPD). Le worker ne lit de l'AdminBorne que `nom`, `prenom`,
   `email`, `raisonSociale` et `siret` (jamais `passwordHash`).
@@ -255,6 +264,105 @@ ALTER TABLE "enregistrements" ADD COLUMN IF NOT EXISTS "crmProjetRef" TEXT;
 ```bash
 cd src/backend
 npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit \
-  tests/lib/icrmApiKey.test.js tests/services/queueWorker.icrmApiKey.test.js tests/routes/canaux.test.js
-cd ../backoffice && npx vitest run src/components/forms
+  tests/lib/icrmApiKey.test.js tests/services/queueWorker.icrmApiKey.test.js tests/routes/canaux.test.js \
+  tests/routes/entreprisesIcrm.test.js tests/routes/bornesEntrepriseIcrm.test.js \
+  tests/routes/partageLancer.test.js tests/services/queueWorker.entrepriseIcrm.test.js
+cd ../backoffice && npx vitest run src/components/forms src/pages
 ```
+
+## 9. Entreprise I-CRM par borne (recommandé)
+
+> Ajouté le 2026-09-27. Répond au besoin : « depuis le back-office EMA, sélectionner l'entreprise
+> I-CRM (tenant) de chaque borne ; chaque borne envoie ses enregistrements vers l'entreprise choisie ».
+
+Une **entreprise I-CRM** (table `entreprises_icrm`) porte les mêmes trois valeurs qu'un canal clé
+API — URL API, clé `emak_…`, secret — mais **une seule fois par tenant** : toutes les bornes de LENA
+pointent vers l'entreprise « LENA », toutes celles de CAE España vers « CAE España ». Changer le
+tenant d'une borne = changer un choix dans sa fiche, sans ressaisir de secret.
+
+### 9.1 Enregistrer une entreprise (SuperAdmin)
+
+1. Menu **Intégration → Entreprises I-CRM** → **+ Nouvelle entreprise**.
+2. **Nom** : libellé EMA, ex. `LENA (France)` / `CAE España` (unique, casse ignorée).
+3. **URL API I-CRM** : `https://icrm.api.ila26.fr` (FR) ou `https://icrm.api.es.ila26.com` (ES) — voir §2.
+4. **Clé API (X-Api-Key)** et **Secret (X-Api-Secret)** : ceux émis par I-CRM pour ce tenant.
+5. **Entreprise active** cochée → **Créer l'entreprise**.
+6. **Tester** : le ping I-CRM (§3 étape 9, même contrôle du contrat) renvoie l'entreprise et le
+   sous-type liés à la clé ; ils sont mémorisés et affichés dans le tableau (colonne « Entreprise
+   I-CRM ») et dans le choix de la borne (« LENA (France) — LENA (BORNE TACTILE) »). La colonne
+   « Dernière vérification » garde le résultat et la date du dernier test (`ok`, clé refusée, URL à
+   vérifier, délai dépassé…). **Vérifier que l'entreprise renvoyée est la bonne avant d'affecter
+   des bornes.**
+
+Le secret est en **écriture seule** (jamais renvoyé ni journalisé : l'API expose `apiKeyId` et
+`hasToken`). Mêmes règles que les canaux : https obligatoire (hors `localhost`), une **nouvelle clé**
+exige son secret (400 sinon), un champ laissé vide en modification n'est pas modifié. Changer l'URL
+ou la clé efface l'entreprise / le sous-type vérifiés (à retester) ; changer le secret seul efface
+le statut du dernier test.
+
+### 9.2 Choisir l'entreprise d'une borne
+
+Fiche de la borne (**Bornes → Modifier**, ou à la création) → **Entreprise I-CRM destinataire** :
+les entreprises actives, ou « Aucune (utiliser les canaux) ». Choix réservé au **SuperAdmin**
+(`PUT /api/bornes/:id { entrepriseIcrmId }` : 403 pour un AdminBorne qui tente de le changer ;
+renvoyer la valeur actuelle reste accepté). Une entreprise inconnue, supprimée ou inactive est
+refusée (400 `ENTREPRISE_ICRM_NOT_FOUND` / `ENTREPRISE_ICRM_INACTIVE`). La liste des bornes, la
+page **Partage CRM** et la page « Mes bornes » de l'AdminBorne affichent la destination.
+
+### 9.3 Ordre de résolution (worker)
+
+Pour chaque job de partage :
+
+1. **l'entreprise I-CRM de la borne**, si elle est renseignée, **active** et non supprimée → envoi
+   par clé API avec l'URL, la clé et le secret de l'entreprise (même émetteur, même payload §4,
+   mêmes en-têtes dont `Idempotency-Key`, mêmes réessais §5 que le canal clé API) ;
+2. sinon, **le canal** : celui dont le label = `canalTransmission`, sinon le premier canal actif
+   (comportement inchangé, `azure_ad` compris) ;
+3. sinon, les variables d'environnement `CRM_API_URL` / `CRM_API_KEY` (chemin historique).
+
+- Une entreprise **désactivée** (ou supprimée) n'arrête pas les envois : la borne repasse sur ses
+  canaux (le worker le journalise en warn). Pour **suspendre** les envois d'une borne, lui retirer
+  aussi ses canaux actifs.
+- Au succès, l'enregistrement garde `crmEntrepriseIcrmId` (entreprise qui l'a reçu) en plus de
+  `crmProjetId` / `crmProjetRef` ; la page Partage CRM l'affiche dans la colonne « Destination ».
+- Journaux : `destination` (`entreprise_icrm` / `canal` / `env`) et `entrepriseIcrmId` ou `canalId`
+  — jamais la clé, le secret ni les valeurs saisies.
+- **Mettre en file d'attente** (`POST /api/partage/bornes/:id/lancer`) accepte une borne qui n'a
+  qu'une entreprise active, sans canal ; sans entreprise active, les erreurs historiques
+  `NO_ACTIVE_CHANNEL` / `CHANNEL_LABEL_MISMATCH` s'appliquent.
+
+### 9.4 Supprimer une entreprise
+
+**Supprimer** = suppression logique. Si des bornes l'ont pour destination, l'API répond
+409 `ENTREPRISE_ICRM_EN_USAGE` avec la liste des bornes ; le back-office demande alors une
+confirmation (« Désaffecter et supprimer », `DELETE /api/entreprises-icrm/:id?force=true`) qui
+retire l'entreprise de ces bornes dans la même transaction — elles repassent sur leurs canaux.
+
+### 9.5 Passer des canaux par borne aux entreprises
+
+Sans interruption d'envoi, pour chaque tenant :
+
+1. Créer l'entreprise (§9.1) avec la clé et le secret **déjà utilisés par les canaux** de ce tenant
+   (ou une nouvelle clé émise par I-CRM), puis **Tester** : l'entreprise et le sous-type doivent être
+   ceux des canaux.
+2. Dans la fiche de chaque borne du tenant, choisir l'entreprise. Dès l'enregistrement, les nouveaux
+   jobs partent vers l'entreprise ; les canaux ne servent plus qu'en repli.
+3. Contrôler sur **Partage CRM** (colonne « Destination » = 🏢 entreprise, jobs en succès).
+4. Facultatif, une fois tout vérifié : désactiver ou supprimer les canaux devenus inutiles. Les
+   garder actifs assure le repli si l'entreprise est désactivée ; les supprimer rend cette
+   désactivation bloquante (plus aucun envoi, erreur « Canal I-CRM non configuré » si les variables
+   d'environnement ne sont pas renseignées).
+
+⚠️ **Changer l'entreprise d'une borne** alors que des jobs sont en échec temporaire : ils seront
+réessayés vers la **nouvelle** entreprise. Un enregistrement dont le premier envoi a été reçu par
+l'ancienne entreprise sans réponse lisible (délai dépassé) peut alors exister dans les deux tenants :
+l'idempotence d'I-CRM (`Idempotency-Key`) est propre à chaque tenant.
+
+### 9.6 Base de données
+
+`src/backend/prisma/migrations/20260927000000_entreprise_icrm_par_borne/migration.sql` —
+**additive et idempotente** (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, index
+`IF NOT EXISTS`, clés étrangères posées seulement si absentes) : table `entreprises_icrm`,
+`bornes.entrepriseIcrmId` (FK `ON DELETE SET NULL`, indexée), `enregistrements.crmEntrepriseIcrmId`
+(FK `ON DELETE SET NULL`). Les bornes existantes ont `entrepriseIcrmId = NULL` : **aucun changement de
+comportement** tant qu'aucune entreprise n'est affectée.

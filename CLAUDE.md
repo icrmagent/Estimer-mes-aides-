@@ -34,10 +34,13 @@ Phase 9 — Tests & Déploiement     ✅ Terminé
 ```
 Écran de veille des bornes        ✅ En production 2026-09-23 — v2.1.0 (PR #10, 2f36a76)
                                      APK 2.1.0 / build 63 publié en release GitHub v2.1.0
-Canal I-CRM par clé API           🚧 Branche feat/canal-icrm-cle-api (2026-09-25), non mergée
+Canal I-CRM par clé API           ✅ Mergé dans main (PR #16, 02a178a)
                                      → opportunités BORNE TACTILE, voir docs/INTEGRATION-ICRM.md
                                      + contrat v1.1 (2026-09-26) : widget I-CRM « Borne » →
                                        « Info borne » (borne.admin, created_at obligatoire)
+Entreprise I-CRM par borne        🚧 Branche feat/entreprise-icrm-par-borne (2026-09-27), non mergée
+                                     → tenant I-CRM enregistré une fois, choisi dans la fiche borne,
+                                       prioritaire sur les canaux (docs/INTEGRATION-ICRM.md §9)
 ```
 
 Diaporama (texte, photo, galerie, vidéo) affiché par la borne après une période
@@ -62,12 +65,12 @@ installation de l'APK 2.1.0.
 
 | Périmètre | Valeur | Commande de mesure |
 |-----------|--------|--------------------|
-| Backend — suite complète | **799 tests / 41 suites** (re-mesuré 2026-09-26, branche `feat/canal-icrm-cle-api` ; 1 échec environnemental connu : `tests/security/rate-limit.test.js:369`) | `cd src/backend && npm test` |
+| Backend — suite complète | **894 tests / 45 suites** (re-mesuré 2026-09-27, branche `feat/entreprise-icrm-par-borne` ; 1 échec environnemental connu : `tests/security/rate-limit.test.js:369`) | `cd src/backend && npm test` |
 | Backend — rétrocompat V1 | **41 tests / 3 suites** | `cd src/backend && npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
 | Frontend Borne (Vitest) | **139 tests / 11 fichiers** | `cd src/frontend && npm test` |
-| Back-Office (Vitest) | **117 tests / 7 fichiers** ⚠️ (re-mesuré 2026-09-26) | `cd src/backoffice && npm test` |
+| Back-Office (Vitest) | **158 tests / 11 fichiers** ⚠️ (re-mesuré 2026-09-27) | `cd src/backoffice && npm test` |
 | E2E Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
-| Routes API backend | **74 handlers / 14 fichiers** | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
+| Routes API backend | **80 handlers / 15 fichiers** (re-mesuré 2026-09-27) | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
 
 > ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 596 tests, toujours
 > 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
