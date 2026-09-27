@@ -474,13 +474,15 @@ Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
 
 Chaque entreprise (tenant) I-CRM est enregistrée **une fois** (menu « Entreprises I-CRM »,
 `/api/entreprises-icrm`) avec sa clé API, puis choisie dans la fiche de chaque borne
-(« Entreprise I-CRM destinataire »). Une borne affectée n'envoie **qu'à son entreprise** : jamais de
-repli sur ses canaux ; entreprise désactivée = envois **suspendus** (jobs reprogrammés toutes les
-10 min sans tentative comptée, relancés dès la réactivation).
+(« Entreprise I-CRM destinataire »). Chaque envoi fige sa cible à sa création et n'est envoyé qu'à
+elle : jamais de repli sur les canaux ; entreprise désactivée, supprimée ou à tester = envois au
+statut **`suspendu`**, hors de la file du worker (aucune place de cycle occupée), repris à la
+réactivation (si le dernier test a réussi) ou après un test réussi.
 Détail : [INTEGRATION-ICRM.md](INTEGRATION-ICRM.md) §9.
 
-- **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente) : table
-  `entreprises_icrm`, colonnes `bornes.entrepriseIcrmId` et `enregistrements.crmEntrepriseIcrmId`
+- **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente, FK `NOT VALID`
+  puis `VALIDATE`) : table `entreprises_icrm`, colonnes `bornes.entrepriseIcrmId`,
+  `partage_jobs.entrepriseIcrmId`, `enregistrements.crmEntrepriseIcrmId` et `crmDestination`
   (NULL pour l'existant → comportement inchangé).
 - **Aucune variable d'environnement nouvelle** : URL, clé et secret vivent dans la ligne de l'entreprise.
 
