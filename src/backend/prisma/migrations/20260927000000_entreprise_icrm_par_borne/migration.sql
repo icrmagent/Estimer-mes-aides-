@@ -22,10 +22,13 @@
 -- gardé jusqu'au COMMIT (NOT VALID puis VALIDATE n'y change donc rien : la
 -- validation est instantanée, toutes les nouvelles colonnes étant NULL). Le
 -- lock_timeout ci-dessous borne l'ATTENTE de ces verrous : si une transaction
--- longue tient l'une de ces tables, la migration échoue au bout de 5 s (rien
--- n'est appliqué, `prisma migrate deploy` peut être relancé) au lieu de bloquer
--- toutes les requêtes de l'application derrière elle. SET LOCAL : limité à la
--- transaction de la migration.
+-- longue tient l'une de ces tables, la migration échoue au bout de 5 s (erreur
+-- 55P03, rien n'est appliqué) au lieu de bloquer toutes les requêtes de
+-- l'application derrière elle. Prisma la marque alors « en échec » (P3009 aux
+-- déploiements suivants) : une fois la transaction longue terminée, exécuter
+--   npx prisma migrate resolve --rolled-back 20260927000000_entreprise_icrm_par_borne
+-- puis relancer le déploiement (vérifié sur une base locale). SET LOCAL : limité
+-- à la transaction de la migration.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 SET LOCAL lock_timeout = '5s';
