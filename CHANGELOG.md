@@ -73,6 +73,50 @@ Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §9.
   canaux et les entreprises (réponses de `POST /api/canaux/:id/test` inchangées, sauf la fin du
   message 401 qui ne dit plus « du canal »).
 
+#### Modifié (seconde revue, 2026-09-27) — destination actuelle, « Mettre en file » explicite, liste blanche d'hôtes
+Complète la révision ci-dessous (constats A à G de la seconde revue indépendante).
+- **Suppression forcée avec redirection (A)** : chaque envoi va vers la destination ACTUELLE de SA
+  borne, relue après la désaffectation — son entreprise si la borne a été réaffectée entre-temps
+  (elle ne part plus vers les canaux d'une borne passée de CAE à LENA), sinon ses canaux. Le 409
+  renvoie la répartition qu'aurait la redirection (`details.redirection`, « 3 → LENA, 1 → canaux »),
+  la réponse la répartition effectuée (`destinations`) ; le back-office l'affiche avant de confirmer.
+- **Envois non livrés (B.1)** : les échecs définitifs sont comptés et redirigés avec les envois en
+  attente (fiche borne, changement de destination, suppression) ; une redirection change seulement
+  leur cible (relance explicite ensuite).
+- **« Mettre en file » (B.2, B.3)** : action explicite « envoyer vers la destination actuelle de la
+  borne » — un envoi sans cible (ère des canaux) sur une borne affectée part vers son entreprise
+  (jamais vers ses canaux ni l'environnement) ; un envoi ciblant une autre entreprise la garde, sauf
+  `redirigerEnvoisEnAttente: true`. Réponse `destinations: [{ type, nom, total, suspendus }]`,
+  `destination` seulement si une seule s'applique ; **`?simulation=true`** sans écriture ; le
+  back-office simule puis confirme avec la répartition (et l'option « tout envoyer vers la
+  destination actuelle »).
+- **Instantané de livraison (C)** : `crmDestination` réduit à `nom` / `nomIcrm` / `sousTypeIcrm`
+  pour l'AdminBorne (liste et détail) ; complet pour le SuperAdmin.
+- **Worker (D)** : balayage en début de cycle (suspendus d'une entreprise redevenue envoyable → en
+  file) ; prise ATOMIQUE du job (seulement s'il est encore en file) puis relecture de sa cible
+  courante. **`POST /api/bornes/:id/rediriger-envois`** (SuperAdmin, `{ vers: 'destination_actuelle' }`,
+  `?simulation=true`) : envois non livrés hors destination actuelle → destination actuelle (sortie
+  de l'impasse d'après une suppression forcée) ; bouton « Rediriger vers la destination actuelle… »
+  dans la fiche borne ; le 409 `ENVOI_SUSPENDU` de « Relancer » y renvoie.
+- **Liste blanche d'hôtes I-CRM (E)** : remplace l'heuristique des IP internes. URL https sans
+  identifiants, hôte = suffixe autorisé ou sous-domaine (défaut `ila26.fr`, `ila26.com`,
+  `azurewebsites.net`, `code.run` ; variable **`ICRM_API_HOSTS_AUTORISES`**, qui remplace le défaut
+  sauf mot `defaut`) ; jamais d'IP littérale ; localhost hors production seulement. Revérifiée **à
+  l'envoi** (entreprise → suspendu, canal clé API → échec définitif, sans appel réseau) et **au
+  test** (`url_non_autorisee`, sans appel réseau). Entreprises et canaux clé API.
+- **Migration (F)** : `SET LOCAL lock_timeout = '5s'` et commentaire corrigé (Prisma exécute le
+  fichier en une transaction : `NOT VALID` / `VALIDATE` n'y apporte rien). Vérifié : sous verrou,
+  échec en ~5 s sans rien appliquer, puis `prisma migrate resolve --rolled-back` et redéploiement.
+  Modifiée en place : jamais appliquée sur une base partagée.
+- **Entreprise nouvelle « à tester » (G)** : créée avec `verificationRequise` (colonne
+  `DEFAULT true`) ; aucune capture ne lui est envoyée avant un test réussi (captures suspendues,
+  reprises par le test).
+- **Tests** : backend 969 → 1 027 (redirections par borne, lancer/simulation, projection
+  AdminBorne, balayage, prise atomique, relecture de la cible, `rediriger-envois`, liste blanche et
+  contournements `localhost.` / `[::7f00:1]` / `127.0.0.1.nip.io` / `metadata.google.internal`,
+  contrôle à l'envoi et au test, entreprise à tester) ; back-office 194 → 209 (confirmation de
+  « Mettre en file », suppression avec répartition, « Rediriger les envois », entreprise à tester).
+
 #### Modifié (revue indépendante, 2026-09-27) — cible figée par envoi, statut `suspendu`
 Remplace le mécanisme de pause de la décision précédente (job en `echec_temporaire` réexaminé
 toutes les 10 min, destination lue sur la borne au moment de l'envoi), qui posait trois problèmes :

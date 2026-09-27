@@ -468,23 +468,33 @@ Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
 - **Réessais** : 2xx au corps du contrat (`status` + `projet_id`) = succès ; 401/403/404/413/422 et
   2xx non conforme (page HTML d'un front, mauvaise URL) = échec définitif immédiat (pas de réessai) ;
   408/409/429/5xx/réseau/timeout et 2xx au corps illisible = backoff existant (5 tentatives).
-- ⚠️ Le premier « Mettre en file d'attente » d'une borne envoie tout son historique non partagé.
+- ⚠️ Le premier « Mettre en file d'attente » d'une borne envoie tout son historique non partagé
+  (le back-office affiche d'abord la répartition par destination, simulée côté serveur).
 
 ### Entreprise I-CRM par borne (recommandé, 2026-09-27)
 
 Chaque entreprise (tenant) I-CRM est enregistrée **une fois** (menu « Entreprises I-CRM »,
 `/api/entreprises-icrm`) avec sa clé API, puis choisie dans la fiche de chaque borne
 (« Entreprise I-CRM destinataire »). Chaque envoi fige sa cible à sa création et n'est envoyé qu'à
-elle : jamais de repli sur les canaux ; entreprise désactivée, supprimée ou à tester = envois au
+elle : jamais de repli sur les canaux ; entreprise désactivée, supprimée, à tester (dont toute
+entreprise **nouvelle**, jusqu'à son premier test réussi) ou à l'hôte non autorisé = envois au
 statut **`suspendu`**, hors de la file du worker (aucune place de cycle occupée), repris à la
-réactivation (si le dernier test a réussi) ou après un test réussi.
+réactivation (si le dernier test a réussi), après un test réussi ou par le balayage du worker.
+Toute redirection explicite vise la destination ACTUELLE de chaque borne, annoncée par destination.
 Détail : [INTEGRATION-ICRM.md](INTEGRATION-ICRM.md) §9.
 
-- **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente, FK `NOT VALID`
-  puis `VALIDATE`) : table `entreprises_icrm`, colonnes `bornes.entrepriseIcrmId`,
-  `partage_jobs.entrepriseIcrmId`, `enregistrements.crmEntrepriseIcrmId` et `crmDestination`
-  (NULL pour l'existant → comportement inchangé).
-- **Aucune variable d'environnement nouvelle** : URL, clé et secret vivent dans la ligne de l'entreprise.
+- **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente) : table
+  `entreprises_icrm`, colonnes `bornes.entrepriseIcrmId`, `partage_jobs.entrepriseIcrmId`,
+  `enregistrements.crmEntrepriseIcrmId` et `crmDestination` (NULL pour l'existant → comportement
+  inchangé). `lock_timeout` de 5 s : si elle échoue sur un verrou (55P03, rien n'est appliqué, le
+  serveur ne démarre pas — l'ancienne version continue de servir), attendre la fin de la
+  transaction longue puis exécuter
+  `npx prisma migrate resolve --rolled-back 20260927000000_entreprise_icrm_par_borne` et redéployer.
+- **Variable facultative `ICRM_API_HOSTS_AUTORISES`** : liste blanche des hôtes d'API I-CRM
+  (défaut `ila26.fr, ila26.com, azurewebsites.net, code.run`) ; une valeur **remplace** ce défaut
+  sauf si elle contient `defaut`. Une erreur de saisie suspendrait tous les envois des
+  entreprises : la liste effective est affichée au démarrage (`[validateEnv]`). URL, clé et secret
+  restent dans la ligne de l'entreprise.
 
 ---
 

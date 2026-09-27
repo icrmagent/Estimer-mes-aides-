@@ -42,7 +42,8 @@ Entreprise I-CRM par borne        🚧 Branche feat/entreprise-icrm-par-borne (2
                                      → tenant I-CRM enregistré une fois, choisi dans la fiche borne ;
                                        chaque envoi fige sa cible (jamais de repli canal), statut
                                        `suspendu` hors file si l'entreprise est désactivée / à tester,
-                                       réaffectation explicite (docs/INTEGRATION-ICRM.md §9)
+                                       redirection explicite vers la destination actuelle, liste
+                                       blanche d'hôtes (docs/INTEGRATION-ICRM.md §9)
 ```
 
 Diaporama (texte, photo, galerie, vidéo) affiché par la borne après une période
@@ -67,12 +68,12 @@ installation de l'APK 2.1.0.
 
 | Périmètre | Valeur | Commande de mesure |
 |-----------|--------|--------------------|
-| Backend — suite complète | **969 tests / 45 suites** (re-mesuré 2026-09-27, branche `feat/entreprise-icrm-par-borne` ; 1 échec environnemental connu : `tests/security/rate-limit.test.js:369`) | `cd src/backend && npm test` |
+| Backend — suite complète | **1 027 tests / 46 suites** (re-mesuré 2026-09-27, branche `feat/entreprise-icrm-par-borne` ; 1 échec environnemental connu : `tests/security/rate-limit.test.js:369`) | `cd src/backend && npm test` |
 | Backend — rétrocompat V1 | **41 tests / 3 suites** | `cd src/backend && npx cross-env NODE_OPTIONS=--experimental-vm-modules npx jest --forceExit --testPathPattern="tests/(submissions\|configuration\|services/submission)"` |
 | Frontend Borne (Vitest) | **139 tests / 11 fichiers** | `cd src/frontend && npm test` |
-| Back-Office (Vitest) | **194 tests / 13 fichiers** ⚠️ (re-mesuré 2026-09-27) | `cd src/backoffice && npm test` |
+| Back-Office (Vitest) | **209 tests / 14 fichiers** ⚠️ (re-mesuré 2026-09-27) | `cd src/backoffice && npm test` |
 | E2E Playwright | **69 tests / 4 specs** | `cd tests/e2e && npx playwright test --list` |
-| Routes API backend | **80 handlers / 15 fichiers** (re-mesuré 2026-09-27) | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
+| Routes API backend | **81 handlers / 15 fichiers** (re-mesuré 2026-09-27) | voir `docs/DEPLOIEMENT.md` § « Chiffres de référence » |
 
 > ⚠️ Le total backend a évolué pendant l'audit lui-même (491 → 596 tests, toujours
 > 35 suites) : des tests ont été ajoutés à une suite existante en parallèle. Ce nombre
