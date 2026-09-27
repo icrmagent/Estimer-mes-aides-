@@ -154,6 +154,15 @@ export default function SADashboardPage() {
             icon="👥"
             onClick={() => navigate('/superadmin/admin-bornes')}
           />
+          {stats.suspendusCRM > 0 && (
+            <StatCard
+              label="Envois suspendus (entreprise I-CRM désactivée)"
+              value={stats.suspendusCRM}
+              icon="⏸"
+              color="#c2410c"
+              onClick={() => navigate('/superadmin/partage')}
+            />
+          )}
         </div>
 
         {/* Graphique */}

@@ -19,6 +19,176 @@ Versionnement : [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Non publié]
 
+### 2026-09-27 — entreprise I-CRM (tenant) choisie borne par borne
+
+Branche `feat/entreprise-icrm-par-borne`, **non mergée** (merger `main` = mise en production :
+Render, Vercel et `prisma migrate deploy`). Besoin : depuis le back-office, choisir l'entreprise
+I-CRM (tenant) de chaque borne ; chaque borne envoie ses enregistrements à l'entreprise choisie.
+Chaque entreprise est enregistrée **une fois** avec sa clé API, au lieu d'un canal par borne.
+Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §9.
+
+#### Ajouté
+- **Entreprises I-CRM** (`entreprises_icrm`) : nom, URL API, clé `emak_…`, secret (écriture seule),
+  actif, entreprise et sous-type renvoyés par I-CRM, date et résultat du dernier test ; suppression
+  logique.
+- **`/api/entreprises-icrm`** (et `/api/backoffice/entreprises-icrm`, CSRF comme les canaux) :
+  liste et détail, création,
+  modification, suppression (SuperAdmin). Projection publique `apiKeyId` + `hasToken`, jamais le
+  secret. Validation Zod : clé, secret, URL https (hors localhost), nom unique ; nouvelle clé sans
+  secret refusée ; changer l'URL ou la clé efface l'entreprise vérifiée. Suppression d'une entreprise
+  encore affectée : 409 `ENTREPRISE_ICRM_EN_USAGE` avec la liste des bornes, `?force=true` les
+  désaffecte dans la même transaction.
+- **`POST /api/entreprises-icrm/:id/test`** : ping I-CRM (même logique que le test d'un canal clé
+  API), mémorise `nomIcrm`, `sousTypeIcrm`, `derniereVerification`, `dernierStatut`.
+- **Borne → entreprise** : `bornes.entrepriseIcrmId` (création et modification, uuid nullable,
+  entreprise existante et active) ; choix réservé au SuperAdmin (403 pour un AdminBorne qui le change,
+  valeur renvoyée inchangée acceptée) ; liste et détail des bornes incluent
+  `entrepriseIcrm { id, nom, nomIcrm, sousTypeIcrm, actif }`.
+- **Traçabilité** : `enregistrements.crmEntrepriseIcrmId` = entreprise qui a reçu l'enregistrement
+  (succès d'un envoi par entreprise) ; exposée avec les jobs de `GET /api/partage/jobs`.
+- **Migration `20260927000000_entreprise_icrm_par_borne`** (additive, idempotente ; voir la révision ci-dessous).
+- **Back-office** : menu « Entreprises I-CRM » (tableau nom / entreprise I-CRM + sous-type / URL /
+  clé / dernière vérification / bornes / actif, actions Tester – toast avec l'entreprise et le
+  sous-type –, Modifier, Supprimer avec confirmation de désaffectation) et fenêtre de saisie (secret
+  masqué, afficher/masquer, « laisser vide pour ne pas changer ») ; fiche borne : choix « Entreprise
+  I-CRM destinataire » (« Aucune (utiliser les canaux) », lecture seule hors SuperAdmin, entreprise
+  désactivée signalée) ; colonne « Destination I-CRM » dans les listes de bornes (SuperAdmin et
+  AdminBorne) ; page Partage CRM : destination de la borne et de chaque job.
+- **Tests** : backend `tests/routes/entreprisesIcrm.test.js`, `tests/routes/bornesEntrepriseIcrm.test.js`,
+  `tests/routes/partageLancer.test.js`, `tests/services/queueWorker.entrepriseIcrm.test.js`,
+  `tests/lib/icrmApiKey.test.js` (+94 tests) ; back-office `entrepriseIcrmConfig.test.js`,
+  `EntrepriseIcrmModal.test.jsx`, `EntrepriseIcrmSelect.test.jsx`, `EntreprisesIcrmPage.test.jsx` (+41 tests).
+
+#### Modifié
+- **Worker** : destination d'un job = SA cible figée (entreprise I-CRM de la borne à la création de
+  l'envoi — inutilisable : envoi suspendu, jamais de repli ; voir la révision ci-dessous), sinon le
+  canal (`canalTransmission`, puis premier canal actif), sinon les variables d'environnement. L'envoi par entreprise réutilise l'émetteur du canal clé API
+  (`envoyerViaCleApiIcrm`, désormais paramétré par `{ apiUrl, apiKey, token }`) : même payload,
+  mêmes en-têtes, même classification des réponses. Journaux : champ `destination`
+  (`entreprise_icrm` / `canal` / `env`). Chemins canal clé API et `azure_ad` inchangés.
+- **`POST /api/partage/bornes/:id/lancer`** : accepte une borne qui n'a qu'une entreprise (sans
+  canal) et renvoie `destination` ; sans entreprise, `NO_ACTIVE_CHANNEL` /
+  `CHANNEL_LABEL_MISMATCH` inchangés.
+- **Test de connexion** : ping I-CRM factorisé dans `services/icrmPingService.js`, partagé par les
+  canaux et les entreprises (réponses de `POST /api/canaux/:id/test` inchangées, sauf la fin du
+  message 401 qui ne dit plus « du canal »).
+
+#### Modifié (seconde revue, 2026-09-27) — destination actuelle, « Mettre en file » explicite, liste blanche d'hôtes
+Complète la révision ci-dessous (constats A à G de la seconde revue indépendante).
+- **Suppression forcée avec redirection (A)** : chaque envoi va vers la destination ACTUELLE de SA
+  borne, relue après la désaffectation — son entreprise si la borne a été réaffectée entre-temps
+  (elle ne part plus vers les canaux d'une borne passée de CAE à LENA), sinon ses canaux. Le 409
+  renvoie la répartition qu'aurait la redirection (`details.redirection`, « 3 → LENA, 1 → canaux »),
+  la réponse la répartition effectuée (`destinations`) ; le back-office l'affiche avant de confirmer.
+- **Envois non livrés (B.1)** : les échecs définitifs sont comptés et redirigés avec les envois en
+  attente (fiche borne, changement de destination, suppression) ; une redirection change seulement
+  leur cible (relance explicite ensuite).
+- **« Mettre en file » (B.2, B.3)** : action explicite « envoyer vers la destination actuelle de la
+  borne » — un envoi sans cible (ère des canaux) sur une borne affectée part vers son entreprise
+  (jamais vers ses canaux ni l'environnement) ; un envoi ciblant une autre entreprise la garde, sauf
+  `redirigerEnvoisEnAttente: true`. Réponse `destinations: [{ type, nom, total, suspendus }]`,
+  `destination` seulement si une seule s'applique ; **`?simulation=true`** sans écriture ; le
+  back-office simule puis confirme avec la répartition (et l'option « tout envoyer vers la
+  destination actuelle »).
+- **Instantané de livraison (C)** : `crmDestination` réduit à `nom` / `nomIcrm` / `sousTypeIcrm`
+  pour l'AdminBorne (liste et détail) ; complet pour le SuperAdmin.
+- **Worker (D)** : balayage en début de cycle (suspendus d'une entreprise redevenue envoyable → en
+  file) ; prise ATOMIQUE du job (seulement s'il est encore en file) puis relecture de sa cible
+  courante. **`POST /api/bornes/:id/rediriger-envois`** (SuperAdmin, `{ vers: 'destination_actuelle' }`,
+  `?simulation=true`) : envois non livrés hors destination actuelle → destination actuelle (sortie
+  de l'impasse d'après une suppression forcée) ; bouton « Rediriger vers la destination actuelle… »
+  dans la fiche borne ; le 409 `ENVOI_SUSPENDU` de « Relancer » y renvoie.
+- **Liste blanche d'hôtes I-CRM (E)** : remplace l'heuristique des IP internes. URL https sans
+  identifiants, hôte = suffixe autorisé ou sous-domaine (défaut `ila26.fr`, `ila26.com`,
+  `azurewebsites.net`, `code.run` ; variable **`ICRM_API_HOSTS_AUTORISES`**, qui remplace le défaut
+  sauf mot `defaut`) ; jamais d'IP littérale ; localhost hors production seulement. Revérifiée **à
+  l'envoi** (entreprise → suspendu, canal clé API → échec définitif, sans appel réseau) et **au
+  test** (`url_non_autorisee`, sans appel réseau). Entreprises et canaux clé API.
+- **Migration (F)** : `SET LOCAL lock_timeout = '5s'` et commentaire corrigé (Prisma exécute le
+  fichier en une transaction : `NOT VALID` / `VALIDATE` n'y apporte rien). Vérifié : sous verrou,
+  échec en ~5 s sans rien appliquer, puis `prisma migrate resolve --rolled-back` et redéploiement.
+  Modifiée en place : jamais appliquée sur une base partagée.
+- **Entreprise nouvelle « à tester » (G)** : créée avec `verificationRequise` (colonne
+  `DEFAULT true`) ; aucune capture ne lui est envoyée avant un test réussi (captures suspendues,
+  reprises par le test).
+- **Tests** : backend 969 → 1 027 (redirections par borne, lancer/simulation, projection
+  AdminBorne, balayage, prise atomique, relecture de la cible, `rediriger-envois`, liste blanche et
+  contournements `localhost.` / `[::7f00:1]` / `127.0.0.1.nip.io` / `metadata.google.internal`,
+  contrôle à l'envoi et au test, entreprise à tester) ; back-office 194 → 209 (confirmation de
+  « Mettre en file », suppression avec répartition, « Rediriger les envois », entreprise à tester).
+
+#### Modifié (revue indépendante, 2026-09-27) — cible figée par envoi, statut `suspendu`
+Remplace le mécanisme de pause de la décision précédente (job en `echec_temporaire` réexaminé
+toutes les 10 min, destination lue sur la borne au moment de l'envoi), qui posait trois problèmes :
+famine de la file (les jobs en pause, les plus anciens, occupaient les 10 places de chaque cycle :
+au-delà de ~200, les envois des autres entreprises ne partaient plus), fuite à la réaffectation
+(changer l'entreprise d'une borne envoyait tout son arriéré à la nouvelle), reprise vers un tenant
+non vérifié (réactivation + changement d'URL / de clé dans la même requête).
+- **Cible figée** : `partage_jobs.entrepriseIcrmId` = l'entreprise de la borne à la création de
+  l'envoi (kiosque, « Mettre en file d'attente ») ; NULL = canaux. Le worker n'envoie un job qu'à SA
+  cible, jamais à la destination courante de la borne ; « Relancer » et « Mettre en file » gardent la
+  cible des envois existants. FK `ON DELETE RESTRICT` (une suppression physique ne peut pas en
+  faire des envois « canal »).
+- **Statut `suspendu`** (job et `enregistrements.statutPartage`) : cible désactivée, supprimée ou à
+  tester → rien n'est envoyé, aucune tentative, aucune notification ; **hors de la file du worker**
+  (qui ne lit que `en_attente` / `echec_temporaire`) : aucune place de cycle occupée, quel que soit
+  leur nombre. Désactiver une entreprise suspend aussitôt ses envois en file ; une capture sur une de
+  ses bornes naît suspendue ; le worker suspend aussi en défense. Catégorie à part dans les stats
+  (`byStatut.suspendu`, KPI « Suspendus », filtre), le tableau de bord (`suspendusCRM`) et la liste
+  des enregistrements — jamais dans les échecs.
+- **Reprise conditionnelle** : réactivation → reprise seulement si URL, clé et secret n'ont pas changé
+  dans la même requête ET si le dernier test des identifiants actuels a réussi (sinon « Testez
+  l'entreprise pour reprendre les envois ») ; un test réussi reprend les envois suspendus.
+- **Entreprise « À tester »** (`entreprises_icrm.verificationRequise`) : posée par un changement
+  d'URL ou de clé, levée par un test réussi ; ses envois sont suspendus d'ici là.
+- **Test de connexion sans course** : résultat enregistré par écriture conditionnelle (URL, clé et
+  secret identiques à ceux testés) ; sinon renvoyé avec `persiste: false` et un avertissement.
+- **Réaffectation explicite** : `PUT /api/bornes/:id` qui change l'entreprise garde par défaut la
+  cible des envois pas encore livrés (`envoisEnAttente.conserves`) ; `redirigerEnvoisEnAttente: true`
+  les envoie vers la nouvelle destination (« Aucune » = canaux). `GET /api/bornes/:id` renvoie
+  `envoisEnAttente { total, parEntreprise[] }` ; la fiche borne demande « Les garder pour
+  <ancienne> (recommandé) / Les envoyer vers <nouvelle> ».
+- **Suppression** : 409 aussi quand des envois ciblent encore l'entreprise ; avec `force`, les envois
+  restent suspendus (« entreprise supprimée ») sauf `redirigerEnvoisEnAttente=true` (→ canaux) ; le
+  back-office propose les deux choix.
+- **Traçabilité** : `enregistrements.crmDestination` (JSONB) = instantané de la destination à la
+  livraison (`entrepriseIcrmId`, `nom`, `nomIcrm`, `sousTypeIcrm`, `apiHost`, `apiKeyId`, jamais le
+  secret) ; affiché par la page Partage CRM pour les envois livrés (la cible pour les autres).
+- **Correctifs mineurs** : `/api/entreprises-icrm` en lecture réservé au SuperAdmin ; nouvel hôte
+  d'URL → secret à ressaisir (entreprises et canaux clé API) ; URL : `http://localhost` seulement
+  hors production, hôtes internes refusés en production (IP privées, bouclage, lien local, CGNAT,
+  IPv6 unique local — entreprises et canaux) ; choix de la borne verrouillé et jamais marqué
+  « désactivée » à tort pendant le chargement ou en cas d'erreur.
+- **Migration** (non publiée, donc modifiée en place) : `partage_jobs.entrepriseIcrmId` + index
+  `(entrepriseIcrmId, statut)`, `enregistrements.crmDestination`, index sur
+  `enregistrements.crmEntrepriseIcrmId`, `entreprises_icrm.verificationRequise` ; clés étrangères
+  `NOT VALID` puis `VALIDATE CONSTRAINT`.
+- **Tests** : backend 906 → 969 (équité de la file avec 300 envois suspendus, cible figée par chemin
+  de création, réaffectation avec / sans drapeau, reprise conditionnelle, test sans course,
+  suppression, garde d'URL en production, instantané) ; back-office 166 → 194 (fiche borne :
+  confirmation de réaffectation, verrou de chargement ; suppression à deux choix ; statuts).
+
+#### Modifié (décision de revue, 2026-09-27) — entreprise désactivée = envois suspendus *(remplacé ci-dessus)*
+- **Plus aucun repli** d'une borne affectée à une entreprise vers ses canaux ou l'environnement :
+  l'E2E montrait une borne CAE España livrant à LENA par son canal quand CAE était désactivée
+  (fuite de leads entre entreprises). Borne affectée à une entreprise **désactivée** (ou supprimée
+  sans avoir été désaffectée) : rien n'est envoyé ; le job reste `echec_temporaire`, **sans
+  tentative comptée** (jamais `echec_definitif` pour une pause), `prochainEssai` = +10 min, erreur
+  « Entreprise I-CRM « <nom> » désactivée — envoi suspendu » reprise par l'enregistrement ; aucune
+  notification Pusher d'échec ; journal « Job suspendu ». Borne sans entreprise : inchangé.
+- **Réactivation** (`PUT /api/entreprises-icrm/:id { actif: true }`) : les jobs suspendus de ses
+  bornes sont reprogrammés aussitôt (`jobsRepris` dans la réponse).
+- **`POST /api/partage/bornes/:id/lancer`** : entreprise désactivée → jobs mis en file quand même,
+  `destination.suspendu: true` et `avertissement` « … désactivée : les envois sont suspendus… ».
+- **Back-office** : badge « Envois suspendus (entreprise désactivée) » dans les listes de bornes et
+  la page Partage CRM (borne et jobs) ; avertissement « N borne(s) suspendue(s) tant que
+  l'entreprise est désactivée » dans la fenêtre de modification et le tableau des entreprises ;
+  toast « N envois suspendus relancés » à la réactivation ; toast d'avertissement au lancement.
+- **Tests** : +12 backend (pause du worker : aucun envoi ni repli canal / env / Azure, tentatives
+  inchangées, reprise à +10 min, jamais d'échec définitif, reprise après réactivation ;
+  reprogrammation à la réactivation ; avertissement du lancement ; motif de suspension) ; +8
+  back-office (badge, avertissements, toasts).
+
 ### 2026-09-26 — contrat I-CRM v1.1 : widget « Borne » → « Info borne »
 
 Même branche `feat/canal-icrm-cle-api`, **non mergée**. Côté I-CRM, l'addendum v1.1 crée dans

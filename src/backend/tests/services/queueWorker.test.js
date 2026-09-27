@@ -16,6 +16,9 @@ import { jest } from '@jest/globals'
 const mockPartageJob = {
   findMany: jest.fn(),
   update: jest.fn(),
+  // Prise atomique puis relecture du job (tests/helpers/priseJob.js)
+  updateMany: jest.fn(),
+  findUnique: jest.fn(),
 }
 
 const mockEnregistrement = {
@@ -26,6 +29,8 @@ const mockEnregistrement = {
 const mockPrisma = {
   partageJob: mockPartageJob,
   enregistrement: mockEnregistrement,
+  // Balayage des envois suspendus en début de cycle : aucune entreprise concernée
+  entrepriseIcrm: { findMany: jest.fn() },
   $transaction: jest.fn(),
 }
 
@@ -55,13 +60,15 @@ global.fetch = jest.fn()
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 const {
-  processJob,
+  processJob: processJobReel,
   processPendingJobs,
   MAX_TENTATIVES,
   computeNextRetry,
   mapReponsesToICRM,
   FIELD_ID_MAP,
 } = await import('../../src/services/queueWorker.js')
+const { installerPriseJob, prisesDeJob } = await import('../helpers/priseJob.js')
+let processJob = processJobReel
 
 // Liste canonique des 23 field IDs du formulaire V1 (docs/CONTEXT.md)
 const { VALID_CRM_FIELD_IDS } = await import('../../src/lib/crmFieldIds.js')
@@ -110,6 +117,8 @@ beforeEach(() => {
   mockEnregistrement.findUnique.mockResolvedValue(mockEnregistrementData)
   mockEnregistrement.update.mockResolvedValue({ ...mockEnregistrementData })
   mockPartageJob.update.mockResolvedValue({})
+  mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
+  processJob = installerPriseJob(mockPartageJob)(processJobReel)
   mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
   mockNotifySucces.mockResolvedValue(undefined)
   mockNotifyEchec.mockResolvedValue(undefined)
@@ -206,10 +215,7 @@ describe('queueWorker — concurrence (processPendingJobs)', () => {
 
     await processPendingJobs()
 
-    const enCoursCalls = mockPartageJob.update.mock.calls.filter(
-      (c) => c[0].data?.statut === 'en_cours'
-    )
-    expect(enCoursCalls.length).toBe(3)
+    expect(prisesDeJob(mockPartageJob).length).toBe(3)
   })
 
   it('un job en échec n\'empêche pas le traitement des autres jobs', async () => {
@@ -226,10 +232,7 @@ describe('queueWorker — concurrence (processPendingJobs)', () => {
 
     await processPendingJobs()
 
-    const enCoursCalls = mockPartageJob.update.mock.calls.filter(
-      (c) => c[0].data?.statut === 'en_cours'
-    )
-    expect(enCoursCalls.length).toBe(2)
+    expect(prisesDeJob(mockPartageJob).length).toBe(2)
   })
 
   it('ne traite pas de jobs si la liste est vide', async () => {
@@ -238,6 +241,7 @@ describe('queueWorker — concurrence (processPendingJobs)', () => {
     await processPendingJobs()
 
     expect(mockPartageJob.update).not.toHaveBeenCalled()
+    expect(mockPartageJob.updateMany).not.toHaveBeenCalled()
     expect(global.fetch).not.toHaveBeenCalled()
   })
 

@@ -2,13 +2,25 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
-import { ErrorBanner } from '../../components/ui.jsx'
+import { ErrorBanner, Toast } from '../../components/ui.jsx'
+import EntrepriseIcrmSelect from '../../components/forms/EntrepriseIcrmSelect.jsx'
+import ChoixModal from '../../components/ChoixModal.jsx'
+import {
+  envoisConcernesParChangement,
+  envoisHorsDestination,
+  resumeDestinations,
+  libelleDestination,
+} from '../../components/forms/entrepriseIcrmConfig.js'
+import { useAuth } from '../../context/AuthContext.jsx'
 import { COUNTRIES } from '../../utils/countries.js'
 
 export default function BorneFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const isEdit = !!id
+  const auth = useAuth()
+  // L'entreprise I-CRM destinataire est choisie par le SuperAdmin uniquement (le backend le vérifie aussi)
+  const estSuperAdmin = auth?.user?.role === 'SUPER_ADMIN'
 
   const [form, setForm] = useState({
     idBorne: '',
@@ -22,10 +34,26 @@ export default function BorneFormPage() {
     formulaireId: '',
     adminBorneId: '',
     ecranVeilleId: '',
+    entrepriseIcrmId: '',
   })
   const [formulaires, setFormulaires] = useState([])
   const [ecransVeille, setEcransVeille] = useState([])
   const [adminBornes, setAdminBornes] = useState([])
+  const [entreprisesIcrm, setEntreprisesIcrm] = useState([])
+  // Entreprise de la borne au chargement : affichée même inactive, et seul un
+  // changement réel est envoyé (un formulaire réémis ne la retire jamais par erreur)
+  const [entrepriseInitiale, setEntrepriseInitiale] = useState(null)
+  // Liste des entreprises : 'chargement' | 'pret' | 'erreur' (choix verrouillé tant qu'elle manque)
+  const [etatListeEntreprises, setEtatListeEntreprises] = useState('chargement')
+  const [borneChargee, setBorneChargee] = useState(!isEdit)
+  // Envois pas encore livrés de la borne, par cible (GET /api/bornes/:id)
+  const [envoisEnAttente, setEnvoisEnAttente] = useState(null)
+  // Changement de destination avec des envois en attente : choix explicite demandé
+  const [choixEnvois, setChoixEnvois] = useState(null)
+  // « Rediriger les envois » vers la destination actuelle : simulation à confirmer
+  const [redirection, setRedirection] = useState(null)
+  const [redirectionEnCours, setRedirectionEnCours] = useState(false)
+  const [toast, setToast] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [fieldErrors, setFieldErrors] = useState({})
@@ -36,10 +64,17 @@ export default function BorneFormPage() {
       api.get('/api/formulaires').catch(() => ({ data: [] })),
       api.get('/api/admin-bornes').catch(() => ({ data: [] })),
       api.get('/api/ecrans-veille').catch(() => ({ data: [] })),
-    ]).then(([fRes, aRes, eRes]) => {
+      api.get('/api/entreprises-icrm').catch(() => null),
+    ]).then(([fRes, aRes, eRes, iRes]) => {
       setFormulaires(fRes.data.formulaires || fRes.data.data || fRes.data || [])
       setAdminBornes(aRes.data.adminBornes || aRes.data.data || aRes.data || [])
       setEcransVeille(eRes.data.data || [])
+      if (iRes) {
+        setEntreprisesIcrm(iRes.data?.data || [])
+        setEtatListeEntreprises('pret')
+      } else {
+        setEtatListeEntreprises('erreur')
+      }
     })
 
     if (isEdit) {
@@ -58,26 +93,110 @@ export default function BorneFormPage() {
             formulaireId: b.formulaireId || '',
             adminBorneId: b.adminBorneId || '',
             ecranVeilleId: b.ecranVeilleId || '',
+            entrepriseIcrmId: b.entrepriseIcrmId || '',
           })
+          setEntrepriseInitiale(b.entrepriseIcrm || null)
+          setEnvoisEnAttente(b.envoisEnAttente || null)
+          setBorneChargee(true)
         })
         .catch(() => setError('Borne introuvable'))
     }
   }, [id, isEdit])
+
+  // Destination ENREGISTRÉE de la borne (pas la sélection en cours d'édition)
+  const destinationEnregistreeId = entrepriseInitiale?.id ?? null
+  const horsDestination = envoisHorsDestination(envoisEnAttente, destinationEnregistreeId)
+  const nbHorsDestination = horsDestination.reduce((s, d) => s + d.total, 0)
+  const selectionModifiee = (form.entrepriseIcrmId || null) !== destinationEnregistreeId
+
+  async function simulerRedirection() {
+    setError(null)
+    setRedirectionEnCours(true)
+    try {
+      const res = await api.post(`/api/bornes/${id}/rediriger-envois`, { vers: 'destination_actuelle' }, { params: { simulation: 'true' } })
+      const simulation = res.data?.data || {}
+      if (!simulation.total) {
+        setToast({ message: 'Aucun envoi à rediriger : tous visent déjà la destination actuelle.', type: 'success' })
+        return
+      }
+      setRedirection(simulation)
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la préparation de la redirection'))
+    } finally {
+      setRedirectionEnCours(false)
+    }
+  }
+
+  async function confirmerRedirection() {
+    setRedirectionEnCours(true)
+    try {
+      const res = await api.post(`/api/bornes/${id}/rediriger-envois`, { vers: 'destination_actuelle' })
+      const r = res.data?.data || {}
+      const suspendus = (r.destinations || []).reduce((s, d) => s + (d.suspendus || 0), 0)
+      setToast({
+        message: `${r.total || 0} envoi(s) redirigé(s) : ${resumeDestinations(r.destinations)}`
+          + (suspendus > 0 ? ` — ${suspendus} restent suspendus (destination indisponible).` : '.'),
+        type: suspendus > 0 ? 'error' : 'success',
+      })
+      // Décompte à jour
+      const detail = await api.get(`/api/bornes/${id}`)
+      const b = detail.data?.data || detail.data
+      setEnvoisEnAttente(b?.envoisEnAttente || null)
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la redirection des envois'))
+    } finally {
+      setRedirection(null)
+      setRedirectionEnCours(false)
+    }
+  }
 
   function handleChange(field, value) {
     setForm(prev => ({ ...prev, [field]: value }))
     setFieldErrors(prev => ({ ...prev, [field]: null }))
   }
 
-  async function handleSubmit(e) {
+  function construirePayload() {
+    // `idBorne` est généré côté backend : il n'est jamais envoyé.
+    const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
+    delete payload.idBorne
+    // Entreprise I-CRM : envoyée seulement si elle change (et par le SuperAdmin)
+    delete payload.entrepriseIcrmId
+    const entrepriseIcrmId = form.entrepriseIcrmId || null
+    if (estSuperAdmin && entrepriseIcrmId !== (entrepriseInitiale?.id ?? null)) {
+      payload.entrepriseIcrmId = entrepriseIcrmId
+    }
+    return payload
+  }
+
+  function handleSubmit(e) {
     e.preventDefault()
     setError(null)
     setFieldErrors({})
+    const payload = construirePayload()
+    // Changement de destination : les envois pas encore livrés GARDENT leur cible,
+    // sauf choix explicite de les rediriger (jamais implicitement).
+    if (isEdit && payload.entrepriseIcrmId !== undefined) {
+      const concernes = envoisConcernesParChangement(envoisEnAttente, entrepriseInitiale?.id ?? null)
+      if (concernes.total > 0) {
+        const nouvelle = entreprisesIcrm.find((x) => x.id === payload.entrepriseIcrmId)
+        setChoixEnvois({
+          payload,
+          concernes,
+          ancienne: entrepriseInitiale?.nom ? `l'entreprise « ${entrepriseInitiale.nom} »` : 'les canaux de la borne',
+          nouvelle: nouvelle ? `l'entreprise « ${nouvelle.nom} »` : 'les canaux de la borne',
+        })
+        return
+      }
+    }
+    enregistrer(payload)
+  }
+
+  async function enregistrer(payload) {
+    setChoixEnvois(null)
     setLoading(true)
     try {
-      // `idBorne` est généré côté backend : il n'est jamais envoyé.
-      const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
-      delete payload.idBorne
       if (isEdit) {
         await api.put(`/api/bornes/${id}`, payload)
       } else {
@@ -230,6 +349,41 @@ export default function BorneFormPage() {
             </div>
           </div>
 
+          <EntrepriseIcrmSelect
+            value={form.entrepriseIcrmId}
+            onChange={value => handleChange('entrepriseIcrmId', value)}
+            entreprises={entreprisesIcrm}
+            etat={borneChargee ? etatListeEntreprises : 'chargement'}
+            entrepriseActuelle={entrepriseInitiale}
+            disabled={!estSuperAdmin}
+            className={`${inputClass}${estSuperAdmin ? '' : ' bg-gray-50 text-gray-500 cursor-not-allowed'}`}
+            style={inputStyle}
+          />
+          {fieldErrors.entrepriseIcrmId && <p className="text-red-500 text-xs -mt-4">{fieldErrors.entrepriseIcrmId}</p>}
+
+          {isEdit && estSuperAdmin && nbHorsDestination > 0 && (
+            <div className="text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 -mt-2 space-y-2" role="status" data-testid="envois-hors-destination">
+              <p>
+                {nbHorsDestination} envoi(s) non livré(s) de cette borne visent une autre destination que sa destination
+                actuelle ({libelleDestination(entrepriseInitiale
+                  ? { type: 'entreprise_icrm', nom: entrepriseInitiale.nom }
+                  : { type: 'canal' })}) : {resumeDestinations(horsDestination)}.
+              </p>
+              <button
+                type="button"
+                onClick={simulerRedirection}
+                disabled={redirectionEnCours || selectionModifiee}
+                data-testid="rediriger-envois"
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-orange-300 text-orange-800 bg-white hover:bg-orange-100 disabled:opacity-50"
+                style={{ minHeight: '32px' }}
+                title={selectionModifiee ? "Enregistrez d'abord la nouvelle destination" : undefined}
+              >
+                {redirectionEnCours ? 'En cours…' : 'Rediriger vers la destination actuelle…'}
+              </button>
+              {selectionModifiee && <p className="text-orange-700">Enregistrez d'abord la borne : la redirection vise la destination enregistrée.</p>}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Canal de transmission I-CRM</label>
             <input
@@ -241,7 +395,9 @@ export default function BorneFormPage() {
               placeholder="ex: canal-principal (configurer les identifiants dans Partage)"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage.
+              {form.entrepriseIcrmId
+                ? "Non utilisé tant qu'une entreprise I-CRM est choisie ci-dessus (même désactivée : ses envois sont alors suspendus)."
+                : "Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage."}
             </p>
           </div>
 
@@ -316,6 +472,59 @@ export default function BorneFormPage() {
           </div>
         </form>
       </div>
+
+      {choixEnvois && (
+        <ChoixModal
+          titre="Envois en attente pour l'ancienne destination"
+          message={`${choixEnvois.concernes.total} envoi(s) non livré(s) pour ${choixEnvois.ancienne}`
+            + (choixEnvois.concernes.suspendus ? ` (dont ${choixEnvois.concernes.suspendus} suspendu(s))` : '')
+            + (choixEnvois.concernes.echecs ? ` (dont ${choixEnvois.concernes.echecs} en échec définitif)` : '')
+            + '. Les nouveaux enregistrements iront vers la nouvelle destination ; que faire de ceux-ci ?'}
+          choix={[
+            {
+              label: `Les garder pour ${choixEnvois.ancienne} (recommandé)`,
+              variante: 'recommande',
+              testId: 'envois-garder',
+              onClick: () => enregistrer(choixEnvois.payload),
+            },
+            {
+              label: `Les envoyer vers ${choixEnvois.nouvelle}`,
+              variante: 'secondaire',
+              testId: 'envois-rediriger',
+              onClick: () => enregistrer({ ...choixEnvois.payload, redirigerEnvoisEnAttente: true }),
+            },
+          ]}
+          onAnnuler={() => setChoixEnvois(null)}
+          saving={loading}
+        />
+      )}
+
+      {redirection && (
+        <ChoixModal
+          titre="Rediriger les envois vers la destination actuelle ?"
+          message={`${redirection.total} envoi(s) non livré(s) : ${resumeDestinations(redirection.depuis)} → `
+            + `${libelleDestination(redirection.destinationActuelle)}.`}
+          details={(
+            <div className="space-y-1" data-testid="redirection-repartition">
+              <p>À l'arrivée : {resumeDestinations(redirection.destinations)}.</p>
+              <p>
+                Les envois suspendus repartent en file si la destination peut recevoir ; les échecs définitifs changent
+                seulement de destination (relance ensuite depuis « Partage I-CRM »).
+              </p>
+            </div>
+          )}
+          choix={[{
+            label: `Rediriger ${redirection.total} envoi(s) vers ${libelleDestination(redirection.destinationActuelle)}`,
+            variante: 'recommande',
+            testId: 'redirection-confirmer',
+            onClick: confirmerRedirection,
+          }]}
+          onAnnuler={() => setRedirection(null)}
+          saving={redirectionEnCours}
+        />
+      )}
+
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </AppLayout>
   )
 }

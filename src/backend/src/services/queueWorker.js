@@ -14,7 +14,15 @@ import {
   formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
   CODE_REPONSE_NON_CONFORME,
+  CODE_URL_NON_AUTORISEE,
+  STATUT_JOB_SUSPENDU,
+  entrepriseIcrmEnvoyable,
+  messageEnvoiSuspendu,
+  instantaneDestinationEntreprise,
+  urlApiIcrmAcceptable,
+  messageUrlApiIcrmRefusee,
 } from '../lib/icrmApiKey.js'
+import { STATUTS_JOB_EN_FILE, reprendreEnvoisEntreprisesUtilisables } from './partageCibleService.js'
 import { validateEmail, validateTelephone, validateCodePostal } from '../lib/contactFormats.js'
 
 const POLL_INTERVAL = 30 * 1000
@@ -591,7 +599,9 @@ function erreurPartage(message, { definitif = false, httpStatus = null, code = n
 }
 
 /**
- * Envoie un enregistrement à I-CRM via un canal `icrm_api_key`.
+ * Envoie un enregistrement à I-CRM avec une clé API. Seul émetteur du contrat v1,
+ * partagé par les deux destinations « clé API » : un canal `icrm_api_key` et
+ * l'entreprise I-CRM de la borne (mêmes identifiants apiUrl / apiKey / token).
  * Aucun appel Azure (pas de getValidToken). Les redirections ne sont pas suivies
  * (le secret ne doit jamais partir vers un autre hôte).
  *
@@ -599,17 +609,33 @@ function erreurPartage(message, { definitif = false, httpStatus = null, code = n
  * 2xx (front en repli SPA, page de proxy, mauvaise URL de base) ne prouve pas que
  * l'opportunité existe et ne doit jamais marquer l'enregistrement « partagé ».
  *
+ * @param {{ apiUrl: string, apiKey: string, token: string, id?: string }} identifiants
+ *   canal icrm_api_key ou entreprise I-CRM
+ * @param {Object} enregistrement
+ * @param {Object} [contexteLog] champs de journalisation identifiant la destination :
+ *   `{ canalId }` (défaut) ou `{ entrepriseIcrmId }` — jamais de secret
  * @returns {{ crmProjetId: string, crmProjetRef: string|null, statutIcrm: string,
  *             httpStatus: number, warnings: Array }}
  * @throws Error avec `definitif=true` pour 401/403/404/413/422/3xx et 2xx non conforme
  *         (pas de réessai) ; sans `definitif` (backoff) pour un 2xx au corps illisible
  */
-async function envoyerViaCleApiIcrm(canal, enregistrement) {
-  if (!normaliserUrlApiIcrm(canal.apiUrl) || !canal.apiKey || !canal.token) {
+async function envoyerViaCleApiIcrm(identifiants, enregistrement, contexteLog = { canalId: identifiants?.id ?? null }) {
+  if (!normaliserUrlApiIcrm(identifiants.apiUrl) || !identifiants.apiKey || !identifiants.token) {
     throw erreurPartage(
-      'Canal I-CRM (clé API) incomplet : URL API, clé ou secret manquant — compléter le canal dans le back-office',
+      contexteLog.entrepriseIcrmId
+        ? "Entreprise I-CRM incomplète : URL API, clé ou secret manquant — compléter l'entreprise dans le back-office (menu Entreprises I-CRM)"
+        : 'Canal I-CRM (clé API) incomplet : URL API, clé ou secret manquant — compléter le canal dans le back-office',
       { definitif: true },
     )
+  }
+  // Hôte revérifié au moment de l'envoi (liste ICRM_API_HOSTS_AUTORISES) : le secret
+  // ne part jamais vers un hôte refusé, même enregistré avant un changement de liste.
+  const urlEnvoi = normaliserUrlApiIcrm(identifiants.apiUrl)
+  if (!urlApiIcrmAcceptable(urlEnvoi)) {
+    throw erreurPartage(`URL API refusée au moment de l'envoi : ${messageUrlApiIcrmRefusee(urlEnvoi)}`, {
+      definitif: true,
+      code: CODE_URL_NON_AUTORISEE,
+    })
   }
 
   const { payload, contactEcarte } = construirePayloadIcrm(enregistrement)
@@ -618,7 +644,7 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
     logger.warn({
       message: '[QUEUE] Valeurs retirées du bloc contact (format ou longueur refusés par I-CRM) — transmises dans reponses',
       enregistrementId: enregistrement.id,
-      canalId: canal.id ?? null,
+      ...contexteLog,
       contactEcarte,
     })
   }
@@ -629,9 +655,9 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
   let res
   let corps
   try {
-    res = await fetch(urlPointAccesIcrm(canal.apiUrl, '/enregistrements'), {
+    res = await fetch(urlPointAccesIcrm(identifiants.apiUrl, '/enregistrements'), {
       method: 'POST',
-      headers: enTetesCleApiIcrm(canal, {
+      headers: enTetesCleApiIcrm(identifiants, {
         'Content-Type': 'application/json',
         'Idempotency-Key': enregistrement.id,
       }),
@@ -680,6 +706,99 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
   })
 }
 
+// ─── Destination d'un job ─────────────────────────────────────────────────────
+
+// Valeur du champ `destination` des journaux du worker (jamais de secret)
+const DESTINATION_ENTREPRISE_ICRM = 'entreprise_icrm'
+const DESTINATION_CANAL = 'canal'
+const DESTINATION_ENV = 'env'
+
+// Colonnes de l'entreprise cible lues par le worker (identifiants compris, jamais journalisés)
+const SELECT_ENTREPRISE_CIBLE = Object.freeze({
+  id: true,
+  nom: true,
+  nomIcrm: true,
+  sousTypeIcrm: true,
+  apiUrl: true,
+  apiKey: true,
+  token: true,
+  actif: true,
+  deletedAt: true,
+  verificationRequise: true,
+})
+
+/**
+ * Envoi SUSPENDU : l'entreprise I-CRM CIBLE du job est désactivée, supprimée, à
+ * tester (nouvelle, URL ou clé modifiée) ou son hôte d'URL n'est plus autorisé
+ * (ICRM_API_HOSTS_AUTORISES). Rien n'est envoyé — ni à l'entreprise, ni à un
+ * canal, ni aux variables d'environnement : ce serait livrer les leads d'une
+ * entreprise à une autre. Le job passe au statut `suspendu`, HORS de la file du
+ * worker (pas de ré-examen périodique : aucune place de cycle occupée), sans
+ * tentative comptée (jamais d'échec définitif pour une pause) ; il est repris par
+ * la réactivation de l'entreprise, un test réussi, le balayage de début de cycle
+ * (entreprise redevenue envoyable) ou une redirection explicite
+ * (services/partageCibleService.js). Aucune notification Pusher.
+ * Normalement déjà fait par la route qui désactive l'entreprise : ici en défense
+ * (course entre la désactivation et un cycle en cours, job créé entre-temps).
+ */
+async function suspendreJob(job, entreprise, jobStart) {
+  // Ligne introuvable (cas anormal) : traitée comme une entreprise supprimée
+  const motif = messageEnvoiSuspendu(entreprise ?? { id: job.entrepriseIcrmId, deletedAt: new Date() })
+
+  if (!entreprise || entreprise.deletedAt) {
+    logger.warn({
+      message: '[QUEUE] Job ciblant une entreprise I-CRM supprimée — envoi suspendu',
+      entrepriseIcrmId: job.entrepriseIcrmId,
+      jobId: job.id,
+    })
+  }
+
+  await prisma.partageJob.update({
+    where: { id: job.id },
+    data: {
+      statut: STATUT_JOB_SUSPENDU,
+      erreur: motif,
+      prochainEssai: null,
+      updatedAt: new Date(),
+    },
+  })
+  await prisma.enregistrement.update({
+    where: { id: job.enregistrementId },
+    data: { statutPartage: STATUT_JOB_SUSPENDU, derniereErreur: motif },
+  })
+
+  logger.warn({
+    message: '[QUEUE] Job suspendu — entreprise I-CRM cible indisponible',
+    jobId: job.id,
+    enregistrementId: job.enregistrementId,
+    status: STATUT_JOB_SUSPENDU,
+    destination: DESTINATION_ENTREPRISE_ICRM,
+    entrepriseIcrmId: job.entrepriseIcrmId,
+    tentatives: job.tentatives,
+    duration: Date.now() - jobStart,
+  })
+}
+
+/**
+ * Canal actif de la borne : celui dont le label = canalTransmission, sinon le
+ * premier canal actif (le plus récent) ; undefined si la borne n'en a aucun.
+ */
+function choisirCanal(enregistrement, job) {
+  const canalLabel = enregistrement.borne?.canalTransmission
+  const matchedByLabel = canalLabel
+    ? enregistrement.borne?.canaux?.find(c => c.label === canalLabel)
+    : null
+  if (canalLabel && !matchedByLabel) {
+    logger.warn({
+      message: '[QUEUE] canalTransmission ne correspond à aucun canal actif — fallback sur premier canal',
+      canalLabel,
+      borneId: enregistrement.borne?.id,
+      jobId: job.id,
+    })
+  }
+  return matchedByLabel ?? enregistrement.borne?.canaux?.[0]
+}
+
 let workerInterval = null
 let isRunning = false
 
@@ -697,15 +816,36 @@ function computeNextRetry(tentatives) {
 /**
  * Traite un job de partage CRM.
  * Appelle l'API I-CRM externe et met à jour le statut du job.
+ *
+ * Prise ATOMIQUE : le job ne passe en_cours que s'il est encore en file
+ * (en_attente / echec_temporaire) — sinon il a été pris, relancé, suspendu ou
+ * redirigé entre la lecture du cycle et maintenant : il est ignoré. Après la
+ * prise, la cible COURANTE du job est relue : une redirection arrivée juste
+ * avant est respectée (jamais la cible lue au début du cycle).
  */
-async function processJob(job) {
+async function processJob(jobLu) {
   const jobStart = Date.now()
+  // Destination retenue (canal choisi, et champs de journalisation sans secret)
+  let canal = null
+  let destinationLog = null
 
-  // Marquer le job comme en cours
-  await prisma.partageJob.update({
-    where: { id: job.id },
-    data: { statut: 'en_cours' },
+  const prise = await prisma.partageJob.updateMany({
+    where: { id: jobLu.id, statut: { in: [...STATUTS_JOB_EN_FILE] } },
+    data: { statut: 'en_cours', updatedAt: new Date() },
   })
+  if (prise?.count !== 1) {
+    logger.info({ message: '[QUEUE] Job ignoré — déjà pris ou modifié depuis la lecture du cycle', jobId: jobLu.id })
+    return
+  }
+  const courant = await prisma.partageJob.findUnique({
+    where: { id: jobLu.id },
+    select: { enregistrementId: true, entrepriseIcrmId: true, tentatives: true },
+  })
+  if (!courant) {
+    logger.info({ message: '[QUEUE] Job ignoré — supprimé depuis sa prise', jobId: jobLu.id })
+    return
+  }
+  const job = { ...jobLu, ...courant }
 
   try {
     // Récupérer l'enregistrement avec ses réponses et le canal actif de la borne
@@ -769,27 +909,46 @@ async function processJob(job) {
       return
     }
 
-    // Sélectionner le canal par canalTransmission (label) si défini, sinon premier canal actif
-    const canalLabel = enregistrement.borne?.canalTransmission
-    const matchedByLabel = canalLabel
-      ? enregistrement.borne?.canaux?.find(c => c.label === canalLabel)
-      : null
-    if (canalLabel && !matchedByLabel) {
-      logger.warn({
-        message: '[QUEUE] canalTransmission ne correspond à aucun canal actif — fallback sur premier canal',
-        canalLabel,
-        borneId: enregistrement.borne?.id,
-        jobId: job.id,
+    // Destination = la CIBLE DU JOB, figée à sa création (jamais la destination
+    // courante de la borne : changer l'entreprise d'une borne ne déplace pas son
+    // arriéré, sauf redirection explicite) :
+    //   - cible = entreprise I-CRM → cette entreprise, et elle seule : utilisable →
+    //       envoi par clé API ; désactivée, supprimée ou à retester → SUSPENDU
+    //       (jamais de repli sur un canal ni sur l'environnement : pas de fuite
+    //       des leads d'une entreprise vers une autre) ;
+    //   - cible NULL → canal choisi par canalTransmission (label), sinon premier
+    //       canal actif, sinon variables d'environnement (inchangé).
+    const versEntreprise = Boolean(job.entrepriseIcrmId)
+    let entreprise = null
+    if (versEntreprise) {
+      entreprise = await prisma.entrepriseIcrm.findUnique({
+        where: { id: job.entrepriseIcrmId },
+        select: SELECT_ENTREPRISE_CIBLE,
       })
+      // Utilisable ET hôte d'URL toujours autorisé (sinon suspendu, motif explicite)
+      if (!entrepriseIcrmEnvoyable(entreprise)) {
+        await suspendreJob(job, entreprise, jobStart)
+        return
+      }
     }
-    const canal = matchedByLabel ?? enregistrement.borne?.canaux?.[0]
 
-    // Canal « Clé API I-CRM » : opportunité complète, sans Azure AD.
+    // Canaux consultés seulement pour un job sans entreprise cible
+    canal = versEntreprise ? null : choisirCanal(enregistrement, job)
+    destinationLog = versEntreprise
+      ? { destination: DESTINATION_ENTREPRISE_ICRM, entrepriseIcrmId: entreprise.id }
+      : canal
+        ? { destination: DESTINATION_CANAL, canalId: canal.id ?? null }
+        : { destination: DESTINATION_ENV }
+
+    // Entreprise I-CRM ou canal « Clé API I-CRM » : opportunité complète, sans
+    // Azure AD, par le même émetteur (envoyerViaCleApiIcrm).
     // Tout autre canal (azure_ad, ou lignes antérieures à la colonne `type`)
     // suit le chemin historique ci-dessous, inchangé.
     let envoiCleApi = null
-    if (canal && estCanalCleApi(canal)) {
-      envoiCleApi = await envoyerViaCleApiIcrm(canal, enregistrement)
+    if (versEntreprise) {
+      envoiCleApi = await envoyerViaCleApiIcrm(entreprise, enregistrement, { entrepriseIcrmId: entreprise.id })
+    } else if (canal && estCanalCleApi(canal)) {
+      envoiCleApi = await envoyerViaCleApiIcrm(canal, enregistrement, { canalId: canal.id ?? null })
     } else {
       const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
       const crmKey = canal
@@ -845,9 +1004,14 @@ async function processJob(job) {
         data: {
           statutPartage: 'partage',
           partageAt: new Date(),
-          // Traçabilité de l'opportunité créée (canal icrm_api_key uniquement)
+          // Traçabilité de l'opportunité créée (envoi par clé API uniquement)
           ...(envoiCleApi
             ? { crmProjetId: envoiCleApi.crmProjetId, crmProjetRef: envoiCleApi.crmProjetRef }
+            : {}),
+          // … et de l'entreprise I-CRM qui l'a reçue (envoi par entreprise uniquement),
+          // avec un instantané de la destination : l'entreprise reste modifiable
+          ...(versEntreprise
+            ? { crmEntrepriseIcrmId: entreprise.id, crmDestination: instantaneDestinationEntreprise(entreprise) }
             : {}),
         },
       }),
@@ -862,6 +1026,7 @@ async function processJob(job) {
         jobId: job.id,
         enregistrementId: job.enregistrementId,
         canalId: canal?.id ?? null,
+        ...destinationLog,
         crmProjetId: envoiCleApi.crmProjetId,
         nbWarnings: envoiCleApi.warnings.length,
         warnings: envoiCleApi.warnings.slice(0, 50).map((w) => ({
@@ -890,6 +1055,7 @@ async function processJob(job) {
       enregistrementId: job.enregistrementId,
       status: 'succes',
       duration: Date.now() - jobStart,
+      ...destinationLog,
       ...(envoiCleApi
         ? {
             canalType: CANAL_TYPE_ICRM_API_KEY,
@@ -948,6 +1114,7 @@ async function processJob(job) {
         status: 'echec_definitif',
         tentatives: newTentatives,
         duration: Date.now() - jobStart,
+        ...destinationLog,
         error: err.message,
         ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })
@@ -981,6 +1148,7 @@ async function processJob(job) {
         maxTentatives: MAX_TENTATIVES,
         duration: Date.now() - jobStart,
         prochainEssai: prochainEssai.toISOString(),
+        ...destinationLog,
         error: err.message,
         ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })
@@ -991,12 +1159,29 @@ async function processJob(job) {
 /**
  * Traite tous les jobs en attente ou prêts pour retry.
  * Task 30.4 — Process up to 10 jobs concurrently using Promise.allSettled()
+ *
+ * Équité : seuls en_attente et echec_temporaire échus sont lus. Les jobs
+ * `suspendu` (entreprise cible désactivée, supprimée ou à tester) sont hors de
+ * cette requête : quel que soit leur nombre, ils n'occupent jamais les 10 places
+ * d'un cycle et ne retardent pas les jobs des autres entreprises. Le balayage
+ * de début de cycle remet en file ceux dont l'entreprise est redevenue envoyable.
  */
 async function processPendingJobs() {
   if (isRunning) return
   isRunning = true
 
   try {
+    // Balayage : suspendus dont l'entreprise cible est de nouveau envoyable → en file
+    // (rattrape une reprise manquée ; une erreur ici n'empêche jamais le cycle)
+    try {
+      const { total, reprises } = await reprendreEnvoisEntreprisesUtilisables()
+      if (total > 0) {
+        logger.info({ message: '[QUEUE] Envois suspendus repris — entreprise I-CRM de nouveau utilisable', total, reprises })
+      }
+    } catch (err) {
+      logger.warn({ message: '[QUEUE] Balayage des envois suspendus impossible', error: err.message })
+    }
+
     const now = new Date()
     const jobs = await prisma.partageJob.findMany({
       where: {

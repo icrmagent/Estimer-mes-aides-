@@ -4,12 +4,33 @@ import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
 import logger from '../lib/logger.js'
+import { STATUT_JOB_SUSPENDU } from '../lib/icrmApiKey.js'
+import {
+  SELECT_ETAT_ENTREPRISE,
+  DESTINATION_CANAL,
+  statutPourCible,
+  etatsEntreprises,
+  descripteurCible,
+  repartitionParCible,
+  resumeRepartition,
+} from '../services/partageCibleService.js'
 
 export const partageRouter = Router()
 
 // ─── GET /api/partage/jobs ────────────────────────────────────────────────────
 
-const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif']
+// `suspendu` : entreprise I-CRM cible désactivée, supprimée ou à retester — catégorie
+// à part (ni en file, ni en échec).
+const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif', STATUT_JOB_SUSPENDU]
+
+/** Avertissement d'une destination entreprise suspendue (lancer / relancer). */
+function avertissementSuspension(entreprise) {
+  const etat = entreprise?.deletedAt ? 'supprimée'
+    : entreprise?.actif === false ? 'désactivée'
+      : 'à tester (identifiants non vérifiés)'
+  return `Entreprise I-CRM « ${entreprise?.nom ?? '?'} » ${etat} : les envois sont suspendus `
+    + "jusqu'à sa réactivation ou un test réussi (aucun envoi vers les canaux)"
+}
 
 const listQuerySchema = z.object({
   statut: z.enum(JOB_STATUTS).optional(),
@@ -53,9 +74,23 @@ partageRouter.get('/jobs', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
             borneId: true,
             statutPartage: true,
             createdAt: true,
-            borne: { select: { id: true, idBorne: true, adresse: true, canalTransmission: true } },
+            // Livraison par entreprise : entreprise qui l'a reçu + instantané de la destination
+            // (nom, entreprise / sous-type I-CRM, hôte, identifiant de clé — jamais le secret)
+            crmEntrepriseIcrm: { select: { id: true, nom: true } },
+            crmDestination: true,
+            borne: {
+              select: {
+                id: true,
+                idBorne: true,
+                adresse: true,
+                canalTransmission: true,
+                entrepriseIcrm: { select: { id: true, nom: true, actif: true } },
+              },
+            },
           },
         },
+        // Cible figée du job (NULL = canaux)
+        entrepriseIcrm: { select: { id: true, nom: true, actif: true, deletedAt: true, verificationRequise: true } },
       },
     }),
     prisma.partageJob.count({ where }),
@@ -159,11 +194,43 @@ partageRouter.put('/bornes/:borneId/canal', jwtAuthV2, requireRole('SUPER_ADMIN'
   }
 })
 
-// ─── POST /api/partage/bornes/:borneId/lancer ────────────────────────────────
-// Prépare ou relance les jobs des enregistrements non partagés d'une borne.
+// ─── POST /api/partage/bornes/:borneId/lancer[?simulation=true] ─────────────
+// Action EXPLICITE de l'opérateur : « envoyer les enregistrements non partagés de
+// cette borne vers sa destination actuelle » (son entreprise I-CRM, sinon ses
+// canaux). Cible de chaque job :
+//   - job CRÉÉ ici → destination actuelle de la borne ;
+//   - job existant sans cible (NULL : ère des canaux, aucune entreprise n'avait été
+//     choisie) sur une borne qui A une entreprise → cette entreprise (jamais les
+//     canaux ni l'environnement d'une borne affectée à une entreprise) ;
+//   - job existant ciblant une AUTRE entreprise → il la garde, sauf
+//     `redirigerEnvoisEnAttente: true` dans le corps (tout vers la destination
+//     actuelle, suspendus compris) ;
+//   - cible = entreprise inutilisable (désactivée, supprimée, à tester) → mis en
+//     file au statut `suspendu` + avertissement ; jamais de repli sur les canaux.
+// Réponse : répartition par destination (`destinations: [{ type, nom, total,
+// suspendus }]`) ; `destination` n'est renseignée que si UNE seule s'applique.
+// `?simulation=true` : même réponse, rien n'est écrit (confirmation du back-office).
+
+const lancerQuerySchema = z.object({
+  simulation: z.enum(['true', 'false']).optional(),
+})
+
+const lancerBodySchema = z.object({
+  redirigerEnvoisEnAttente: z.boolean().optional(),
+})
 
 partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const { borneId } = req.params
+  const query = lancerQuerySchema.safeParse(req.query)
+  const corps = lancerBodySchema.safeParse(req.body ?? {})
+  if (!query.success || !corps.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: (query.error ?? corps.error).issues[0].message },
+    })
+  }
+  const simulation = query.data.simulation === 'true'
+  const rediriger = corps.data.redirigerEnvoisEnAttente === true
 
   try {
     const borne = await prisma.borne.findUnique({
@@ -172,6 +239,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
         id: true,
         idBorne: true,
         canalTransmission: true,
+        entrepriseIcrmId: true,
         canaux: {
           where: { actif: true },
           select: { id: true, label: true },
@@ -186,7 +254,57 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       })
     }
 
-    if (!borne.canaux || borne.canaux.length === 0) {
+    const destinationActuelle = borne.entrepriseIcrmId ?? null
+
+    const enregistrements = await prisma.enregistrement.findMany({
+      where: {
+        borneId,
+        deletedAt: null,
+        // Suspendus : seulement sur redirection explicite (sinon ils attendent leur entreprise)
+        statutPartage: {
+          in: rediriger
+            ? ['en_attente', 'echec_temporaire', 'echec_definitif', STATUT_JOB_SUSPENDU]
+            : ['en_attente', 'echec_temporaire', 'echec_definitif'],
+        },
+      },
+      select: { id: true },
+    })
+
+    const enregistrementIds = enregistrements.map((enregistrement) => enregistrement.id)
+    const existingJobs = enregistrementIds.length > 0
+      ? await prisma.partageJob.findMany({
+          where: { enregistrementId: { in: enregistrementIds } },
+          orderBy: { createdAt: 'desc' },
+        })
+      : []
+
+    const latestJobByEnregistrement = new Map()
+    for (const job of existingJobs) {
+      if (!latestJobByEnregistrement.has(job.enregistrementId)) {
+        latestJobByEnregistrement.set(job.enregistrementId, job)
+      }
+    }
+
+    // Cible de chaque enregistrement (règles ci-dessus)
+    const cibleDe = (existant) => {
+      if (!existant) return destinationActuelle
+      const cible = existant.entrepriseIcrmId ?? null
+      if (cible === null || cible === destinationActuelle) return destinationActuelle
+      return rediriger ? destinationActuelle : cible
+    }
+    // Un job en cours d'envoi par le worker n'est pas touché : le remettre en file
+    // (et le recibler) pendant l'envoi fausserait la trace de sa destination.
+    const tous = enregistrements.map((enregistrement) => {
+      const existant = latestJobByEnregistrement.get(enregistrement.id) ?? null
+      return { enregistrement, existant, cible: cibleDe(existant) }
+    })
+    const plan = tous.filter((p) => p.existant?.statut !== 'en_cours')
+    const enCours = tous.length - plan.length
+
+    // Canaux requis seulement si des envois partent vers eux (ou s'il n'y a rien et
+    // que la borne n'a pas d'entreprise : message historique)
+    const versCanaux = plan.some((p) => p.cible === null) || (plan.length === 0 && destinationActuelle === null)
+    if (versCanaux && (!borne.canaux || borne.canaux.length === 0)) {
       return res.status(409).json({
         success: false,
         error: {
@@ -195,8 +313,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
         },
       })
     }
-
-    if (borne.canalTransmission && !borne.canaux.some((c) => c.label === borne.canalTransmission)) {
+    if (versCanaux && borne.canalTransmission && !borne.canaux.some((c) => c.label === borne.canalTransmission)) {
       return res.status(409).json({
         success: false,
         error: {
@@ -206,77 +323,110 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       })
     }
 
-    const enregistrements = await prisma.enregistrement.findMany({
-      where: {
-        borneId,
-        deletedAt: null,
-        statutPartage: { in: ['en_attente', 'echec_temporaire', 'echec_definitif'] },
-      },
-      select: { id: true },
-    })
+    const etats = await etatsEntreprises([destinationActuelle, ...plan.map((p) => p.cible)])
+    for (const p of plan) Object.assign(p, statutPourCible(p.cible, etats.get(p.cible)))
 
-    if (enregistrements.length === 0) {
-      return res.json({
-        success: true,
-        data: { borneId, canalTransmission: borne.canalTransmission, queued: 0, created: 0, relaunched: 0 },
-      })
+    const avecLabel = (d) => (d.type === DESTINATION_CANAL ? { ...d, label: borne.canalTransmission ?? null } : d)
+    const destinations = repartitionParCible(
+      plan.map((p) => ({ cible: p.cible, suspendu: p.statut === STATUT_JOB_SUSPENDU })),
+      etats,
+    ).map(avecLabel)
+    const destinationBorne = avecLabel(descripteurCible(destinationActuelle, etats))
+    // Une seule destination annoncée si, et seulement si, une seule s'applique
+    const destination = destinations.length === 1
+      ? destinations[0]
+      : destinations.length === 0 ? destinationBorne : null
+
+    const created = plan.filter((p) => !p.existant).length
+    const relaunched = plan.length - created
+    const suspendus = plan.filter((p) => p.statut === STATUT_JOB_SUSPENDU).length
+    const jobsRecibles = plan.filter((p) => p.existant && (p.existant.entrepriseIcrmId ?? null) !== p.cible).length
+    const autresCibles = plan.filter((p) => p.cible !== destinationActuelle).length
+
+    const avertissements = []
+    if (destinations.length > 1) avertissements.push(`Plusieurs destinations : ${resumeRepartition(destinations)}`)
+    for (const d of destinations.filter((x) => x.suspendus > 0)) {
+      avertissements.push(`${d.suspendus} envoi(s) resteront suspendus — ${avertissementSuspension(etats.get(d.entrepriseIcrmId) ?? { nom: d.nom, deletedAt: true })}`)
+    }
+    const avertissement = avertissements.length > 0 ? avertissements.join(' — ') : null
+
+    const reponse = {
+      borneId,
+      canalTransmission: borne.canalTransmission,
+      destinationActuelle: destinationBorne,
+      destination,
+      destinations,
+      ...(avertissement ? { avertissement } : {}),
+      queued: plan.length,
+      created,
+      relaunched,
+      suspendus,
+      jobsRecibles,
+      autresCibles,
+      ...(enCours > 0 ? { enCours } : {}),
+      ...(simulation ? { simulation: true } : {}),
     }
 
-    const enregistrementIds = enregistrements.map((enregistrement) => enregistrement.id)
-    const existingJobs = await prisma.partageJob.findMany({
-      where: { enregistrementId: { in: enregistrementIds } },
-      orderBy: { createdAt: 'desc' },
-    })
+    if (simulation || plan.length === 0) {
+      return res.json({ success: true, data: reponse })
+    }
 
-    const latestJobByEnregistrement = new Map()
-    for (const job of existingJobs) {
-      if (!latestJobByEnregistrement.has(job.enregistrementId)) {
-        latestJobByEnregistrement.set(job.enregistrementId, job)
+    const operations = []
+    const enAttente = []
+    const suspendusParMotif = new Map()
+    for (const p of plan) {
+      if (p.statut === STATUT_JOB_SUSPENDU) {
+        suspendusParMotif.set(p.erreur, [...(suspendusParMotif.get(p.erreur) ?? []), p.enregistrement.id])
+      } else {
+        enAttente.push(p.enregistrement.id)
       }
-    }
-
-    const operations = [
-      prisma.enregistrement.updateMany({
-        where: { id: { in: enregistrementIds } },
-        data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
-      }),
-    ]
-
-    let created = 0
-    let relaunched = 0
-    for (const enregistrement of enregistrements) {
-      const existingJob = latestJobByEnregistrement.get(enregistrement.id)
-      if (existingJob) {
-        relaunched += 1
+      if (p.existant) {
         operations.push(prisma.partageJob.update({
-          where: { id: existingJob.id },
+          where: { id: p.existant.id },
           data: {
-            statut: 'en_attente',
+            statut: p.statut,
             tentatives: 0,
-            erreur: null,
+            erreur: p.erreur,
             prochainEssai: null,
+            entrepriseIcrmId: p.cible,
           },
         }))
       } else {
-        created += 1
         operations.push(prisma.partageJob.create({
-          data: { enregistrementId: enregistrement.id },
+          data: {
+            enregistrementId: p.enregistrement.id,
+            ...(p.cible ? { entrepriseIcrmId: p.cible } : {}),
+            ...(p.statut === STATUT_JOB_SUSPENDU ? { statut: p.statut, erreur: p.erreur } : {}),
+          },
         }))
       }
+    }
+
+    if (enAttente.length > 0) {
+      operations.unshift(prisma.enregistrement.updateMany({
+        where: { id: { in: enAttente } },
+        data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
+      }))
+    }
+    for (const [motif, ids] of suspendusParMotif) {
+      operations.unshift(prisma.enregistrement.updateMany({
+        where: { id: { in: ids } },
+        data: { statutPartage: STATUT_JOB_SUSPENDU, derniereErreur: motif, tentatives: 0 },
+      }))
     }
 
     await prisma.$transaction(operations)
 
-    return res.json({
-      success: true,
-      data: {
-        borneId,
-        canalTransmission: borne.canalTransmission,
-        queued: enregistrements.length,
-        created,
-        relaunched,
-      },
+    logger.info({
+      message: '[PARTAGE] Transmission lancée',
+      borneId,
+      queued: plan.length,
+      suspendus,
+      jobsRecibles,
+      destinations: resumeRepartition(destinations),
     })
+
+    return res.json({ success: true, data: reponse })
   } catch (err) {
     logger.error({ message: '[PARTAGE] Erreur lancement borne', error: err.message, borneId })
     return res.status(500).json({
@@ -293,7 +443,13 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
   const { id } = req.params
 
   try {
-    const job = await prisma.partageJob.findUniqueOrThrow({ where: { id } })
+    const job = await prisma.partageJob.findUniqueOrThrow({
+      where: { id },
+      include: {
+        entrepriseIcrm: { select: SELECT_ETAT_ENTREPRISE },
+        enregistrement: { select: { borneId: true } },
+      },
+    })
 
     // Un job 'en_cours' peut être bloqué (crash worker). On l'autorise au relancer
     // s'il n'a pas été touché depuis 5 minutes.
@@ -303,7 +459,7 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
       && (Date.now() - new Date(job.updatedAt).getTime()) > STALE_EN_COURS_MS
 
     const isRelaunchable =
-      ['echec_definitif', 'echec_temporaire'].includes(job.statut) || isStale
+      ['echec_definitif', 'echec_temporaire', STATUT_JOB_SUSPENDU].includes(job.statut) || isStale
 
     if (!isRelaunchable) {
       return res.status(400).json({
@@ -315,24 +471,49 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
       })
     }
 
-    // Remettre en attente pour le prochain cycle du worker
+    // Le job garde SA cible (figée à sa création) : entreprise inutilisable → il reste
+    // (ou redevient) suspendu, jamais redirigé implicitement vers un canal.
+    const { statut, erreur } = statutPourCible(job.entrepriseIcrmId, job.entrepriseIcrm)
+    if (statut === STATUT_JOB_SUSPENDU && job.statut === STATUT_JOB_SUSPENDU) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'ENVOI_SUSPENDU',
+          message: `${avertissementSuspension(job.entrepriseIcrm)}. `
+            + "Réactivez ou testez l'entreprise, ou utilisez « Rediriger les envois » dans la fiche de la borne "
+            + '(vers sa destination actuelle).',
+          details: {
+            borneId: job.enregistrement?.borneId ?? null,
+            action: job.enregistrement?.borneId
+              ? `POST /api/bornes/${job.enregistrement.borneId}/rediriger-envois`
+              : null,
+          },
+        },
+      })
+    }
+
+    // Remettre en attente pour le prochain cycle du worker (ou suspendre)
     const updated = await prisma.partageJob.update({
       where: { id },
       data: {
-        statut: 'en_attente',
+        statut,
         tentatives: 0,
-        erreur: null,
+        erreur,
         prochainEssai: null,
       },
     })
 
-    // Remettre l'enregistrement en attente aussi
+    // Refléter sur l'enregistrement
     await prisma.enregistrement.update({
       where: { id: job.enregistrementId },
-      data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
+      data: { statutPartage: statut, derniereErreur: erreur, tentatives: 0 },
     })
 
-    return res.json({ success: true, data: updated })
+    return res.json({
+      success: true,
+      data: updated,
+      ...(statut === STATUT_JOB_SUSPENDU ? { avertissement: avertissementSuspension(job.entrepriseIcrm) } : {}),
+    })
   } catch (err) {
     if (err.code === 'P2025') {
       return res.status(404).json({

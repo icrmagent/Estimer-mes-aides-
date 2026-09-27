@@ -10,8 +10,17 @@ import {
 import { ConfirmModal, Toast, ErrorBanner, PRIMARY, SECONDARY } from '../../components/ui.jsx'
 import api from '../../services/api.js'
 import { subscribeToBorne } from '../../services/pusher.js'
+import { BadgeEnvoisSuspendus } from '../../components/DestinationBorne.jsx'
+import ChoixModal from '../../components/ChoixModal.jsx'
+import {
+  destinationJob,
+  libelleSuspension,
+  libelleDestination,
+  resumeDestinations,
+} from '../../components/forms/entrepriseIcrmConfig.js'
 
-const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif']
+// `suspendu` : entreprise I-CRM cible désactivée, supprimée ou à tester — ni en file, ni en échec
+const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif', 'suspendu']
 
 const STATUT_LABELS = {
   en_attente: 'En attente',
@@ -20,6 +29,7 @@ const STATUT_LABELS = {
   partage: 'Partagé',
   echec_temporaire: 'Échec temporaire',
   echec_definitif: 'Échec définitif',
+  suspendu: 'Suspendu',
 }
 
 /**
@@ -48,6 +58,7 @@ function StatutBadge({ statut }) {
     partage: 'bg-green-100 text-green-700',
     echec_temporaire: 'bg-orange-100 text-orange-700',
     echec_definitif: 'bg-red-100 text-red-700',
+    suspendu: 'bg-orange-100 text-orange-800',
   }
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${styles[statut] || 'bg-gray-100 text-gray-500'}`}>
@@ -136,6 +147,8 @@ export default function PartageJobsPage() {
   const [editingCanal, setEditingCanal] = useState(null)
   const [deletingCanalId, setDeletingCanalId] = useState(null)
   const [confirm, setConfirm] = useState(null) // { title, message, onConfirm, danger }
+  // Confirmation de « Mettre en file » : répartition par destination (simulations)
+  const [choixLancement, setChoixLancement] = useState(null) // { simulation, simulationRedirection? }
   const [testingCanalId, setTestingCanalId] = useState(null)
 
   const selectedBorne = useMemo(
@@ -166,6 +179,13 @@ export default function PartageJobsPage() {
     Boolean(selectedBorne?.canalTransmission)
     && canaux.length > 0
     && !canaux.some((c) => c.label === selectedBorne.canalTransmission)
+
+  // Entreprise I-CRM de la borne : si elle est affectée, c'est la SEULE destination
+  // (désactivée → envois suspendus, jamais de repli sur les canaux — même règle que le worker)
+  const entrepriseDestination = selectedBorne?.entrepriseIcrm || null
+  // Libellé de suspension si l'entreprise est désactivée ou à tester (null sinon)
+  const suspensionDestination = libelleSuspension(entrepriseDestination)
+  const envoisSuspendus = Boolean(suspensionDestination)
 
   const fetchBornes = useCallback(() => {
     // `loadingBornes` est initialisé à true : ce chargement a lieu au montage.
@@ -337,7 +357,7 @@ export default function PartageJobsPage() {
   const requestLancerTransmission = () => {
     if (!selectedBorneId) return
 
-    if (!hasActiveChannel) {
+    if (!entrepriseDestination && !hasActiveChannel) {
       setError(
         `Impossible de lancer la transmission : aucun canal I-CRM actif n'est configuré pour cette borne. `
         + `Créez et activez un canal avant de continuer.`,
@@ -345,7 +365,7 @@ export default function PartageJobsPage() {
       return
     }
 
-    if (channelLabelMismatch) {
+    if (!entrepriseDestination && channelLabelMismatch) {
       setError(
         `Le canal de transmission « ${selectedBorne.canalTransmission} » ne correspond à aucun canal actif. `
         + `Réaffectez un canal depuis le tableau ci-dessous.`,
@@ -353,40 +373,55 @@ export default function PartageJobsPage() {
       return
     }
 
-    const enAttenteEtErreur = stats
-      ? (stats.byStatut?.en_attente || 0)
-        + (stats.byStatut?.echec_temporaire || 0)
-        + (stats.byStatut?.echec_definitif || 0)
-      : null
-
-    const targetLabel = activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'
-
-    setConfirm({
-      title: 'Mettre en file d\'attente la transmission ?',
-      message:
-        enAttenteEtErreur != null
-          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers le canal « ${targetLabel} ». Le worker traite la file toutes les 30 secondes.`
-          : `Les enregistrements non encore partagés seront mis en file vers le canal « ${targetLabel} ». Le worker traite la file toutes les 30 secondes.`,
-      confirmLabel: 'Mettre en file',
-      danger: false,
-      onConfirm: doLancerTransmission,
-    })
+    // Répartition par destination demandée au serveur AVANT toute écriture
+    // (?simulation=true) : la confirmation annonce chaque destination, jamais une seule
+    // quand plusieurs s'appliquent (envois gardant leur entreprise d'origine, suspendus…).
+    simulerLancement()
   }
 
-  const doLancerTransmission = async () => {
+  const urlLancer = () => `/api/partage/bornes/${selectedBorneId}/lancer`
+
+  const simulerLancement = async () => {
     setLaunching(true)
     setError(null)
-    setConfirm(null)
     try {
-      const res = await api.post(`/api/partage/bornes/${selectedBorneId}/lancer`)
+      const res = await api.post(urlLancer(), {}, { params: { simulation: 'true' } })
+      const simulation = res.data?.data || {}
+      if (!simulation.queued) {
+        setToast({ message: 'Aucun enregistrement non partagé à mettre en file pour cette borne.', type: 'success' })
+        return
+      }
+      // Des envois gardent une autre entreprise : répartition de l'option « tout rediriger »
+      let simulationRedirection = null
+      if (simulation.autresCibles > 0) {
+        const r = await api.post(urlLancer(), { redirigerEnvoisEnAttente: true }, { params: { simulation: 'true' } })
+        simulationRedirection = r.data?.data || null
+      }
+      setChoixLancement({ simulation, simulationRedirection })
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la préparation de la transmission'))
+    } finally {
+      setLaunching(false)
+    }
+  }
+
+  const doLancerTransmission = async ({ rediriger = false } = {}) => {
+    setLaunching(true)
+    setError(null)
+    try {
+      const res = await api.post(urlLancer(), rediriger ? { redirigerEnvoisEnAttente: true } : {})
       const result = res.data?.data || {}
-      setToast({
-        message: `${result.queued || 0} enregistrement(s) mis en file. Worker actif toutes les 30s.`,
-        type: 'success',
-      })
+      const repartition = resumeDestinations(result.destinations)
+      const base = `${result.queued || 0} enregistrement(s) mis en file${repartition ? ` : ${repartition}` : ''}`
+      setToast(result.suspendus > 0
+        ? { message: `${base} — ${result.suspendus} envoi(s) suspendu(s) (entreprise désactivée, supprimée ou à tester).`, type: 'error' }
+        : { message: `${base}. Worker actif toutes les 30s.`, type: 'success' })
+      setChoixLancement(null)
       refreshAll()
     } catch (err) {
       const e = err.response?.data?.error
+      setChoixLancement(null)
       setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors du lancement de la transmission'))
     } finally {
       setLaunching(false)
@@ -423,7 +458,8 @@ export default function PartageJobsPage() {
 
   const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }
-  const canLaunch = Boolean(selectedBorneId) && !launching && hasActiveChannel && !channelLabelMismatch
+  const canLaunch = Boolean(selectedBorneId) && !launching
+    && (Boolean(entrepriseDestination) || (hasActiveChannel && !channelLabelMismatch))
 
   const canalLabelByLabel = useMemo(() => {
     const map = new Map()
@@ -484,18 +520,31 @@ export default function PartageJobsPage() {
             </div>
 
             <div className="min-w-[200px]">
-              <div className="block text-xs font-semibold text-gray-600 mb-1">2. Canal actif</div>
+              <div className="block text-xs font-semibold text-gray-600 mb-1">2. Destination</div>
               <div
                 className="px-3 py-2 text-sm rounded-xl border border-gray-200 bg-gray-50"
                 style={{ minHeight: '40px' }}
+                data-testid="partage-destination"
               >
                 {!selectedBorneId
                   ? <span className="text-gray-400">—</span>
-                  : channelLabelMismatch
-                    ? <span className="text-red-600 font-medium">⚠️ Canal "{selectedBorne.canalTransmission}" introuvable</span>
-                    : activeChannel
-                      ? <span className="font-medium text-gray-900">{activeChannel.label}</span>
-                      : <span className="text-orange-600">Aucun canal actif</span>
+                  : entrepriseDestination
+                    ? (
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span
+                          className={`font-medium ${envoisSuspendus ? 'text-gray-500' : 'text-purple-800'}`}
+                          title={entrepriseDestination.nomIcrm ? `I-CRM : ${entrepriseDestination.nomIcrm}` : 'Entreprise I-CRM non vérifiée'}
+                        >
+                          🏢 Entreprise I-CRM « {entrepriseDestination.nom} »
+                        </span>
+                        {envoisSuspendus && <BadgeEnvoisSuspendus libelle={suspensionDestination} />}
+                      </span>
+                    )
+                    : channelLabelMismatch
+                      ? <span className="text-red-600 font-medium">⚠️ Canal "{selectedBorne.canalTransmission}" introuvable</span>
+                      : activeChannel
+                        ? <span className="font-medium text-gray-900">Canal {activeChannel.label}</span>
+                        : <span className="text-orange-600">Aucun canal actif</span>
                 }
               </div>
             </div>
@@ -519,6 +568,8 @@ export default function PartageJobsPage() {
               style={{ background: SECONDARY, minHeight: '40px' }}
               title={
                 !selectedBorneId ? 'Sélectionnez une borne'
+                : envoisSuspendus ? `Mettre en file d'attente (${suspensionDestination.toLowerCase()})`
+                : entrepriseDestination ? 'Mettre en file d\'attente'
                 : !hasActiveChannel ? 'Aucun canal actif'
                 : channelLabelMismatch ? 'Canal incohérent'
                 : 'Mettre en file d\'attente'
@@ -528,16 +579,25 @@ export default function PartageJobsPage() {
             </button>
           </div>
 
-          {selectedBorneId && !loadingCanaux && !hasActiveChannel && (
+          {selectedBorneId && envoisSuspendus && (
+            <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2" role="status">
+              ⏸ {suspensionDestination} : l'entreprise I-CRM « {entrepriseDestination.nom} » de cette borne ne reçoit plus rien
+              (rien ne part, pas même vers les canaux ci-dessous). Les envois reprennent à sa réactivation si son dernier test a
+              réussi, ou après un test réussi — menu « Entreprises I-CRM ».
+            </div>
+          )}
+
+          {selectedBorneId && !entrepriseDestination && !loadingCanaux && !hasActiveChannel && (
             <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-              ⚠️ Aucun canal actif n'est configuré. La transmission est désactivée tant que vous n'aurez pas ajouté un canal.
+              ⚠️ Aucun canal actif n'est configuré. La transmission est désactivée tant que vous n'aurez pas ajouté un canal
+              ou choisi une entreprise I-CRM dans la fiche de la borne.
             </div>
           )}
         </div>
 
         {/* KPI Cards — supervision globale */}
         {selectedBorneId && stats && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <KpiCard label="En attente" value={stats.byStatut?.en_attente ?? 0} tone="info" />
             <KpiCard label="En cours" value={stats.byStatut?.en_cours ?? 0} tone="info" />
             <KpiCard label="Succès" value={stats.byStatut?.succes ?? 0} tone="success" />
@@ -546,6 +606,7 @@ export default function PartageJobsPage() {
               value={(stats.byStatut?.echec_temporaire ?? 0) + (stats.byStatut?.echec_definitif ?? 0)}
               tone="danger"
             />
+            <KpiCard label="Suspendus" value={stats.byStatut?.suspendu ?? 0} tone="warn" />
             <KpiCard
               label="Taux 24h"
               value={stats.tauxSucces24h == null ? '—' : `${stats.tauxSucces24h}%`}
@@ -590,6 +651,14 @@ export default function PartageJobsPage() {
               </p>
             </div>
           </div>
+          {entrepriseDestination && (
+            <div className="mx-4 mt-3 text-xs text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+              Les nouveaux enregistrements de cette borne partent vers l'entreprise I-CRM « {entrepriseDestination.nom} »
+              (menu « Entreprises I-CRM ») : ses canaux ne sont pas utilisés, même si l'entreprise est désactivée.
+              Chaque envoi garde la destination figée à sa création (colonne « Destination » des jobs).
+              Pour revenir aux canaux, choisir « Aucune » dans la fiche de la borne.
+            </div>
+          )}
           {loadingCanaux ? (
             <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
           ) : !selectedBorneId ? (
@@ -807,7 +876,7 @@ export default function PartageJobsPage() {
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50">
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Enregistrement</th>
-                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Canal</th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Destination</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Tentatives</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Erreur</th>
@@ -821,6 +890,8 @@ export default function PartageJobsPage() {
                         || enregistrementBorneCanalByEnregId.get(enregId)
                         || null
                       const canalForJob = labelFromJob ? canalLabelByLabel.get(labelFromJob) : null
+                      // Livré : instantané de la destination réelle ; sinon : CIBLE du job (figée à sa création)
+                      const destination = destinationJob(job, { canalParDefaut: labelFromJob })
                       const isStuckEnCours = job.statut === 'en_cours'
                         && job.updatedAt
                         && (now - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
@@ -829,14 +900,27 @@ export default function PartageJobsPage() {
                         <tr key={job.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-3"><CopyId id={enregId} /></td>
                           <td className="px-4 py-3 text-xs">
-                            {labelFromJob
+                            {destination.type === 'entreprise'
                               ? (
-                                <span className={canalForJob ? 'text-gray-700' : 'text-orange-600'}>
-                                  {labelFromJob}
-                                  {!canalForJob && <span title="Canal introuvable" className="ml-1">⚠</span>}
+                                <span className="inline-flex flex-col items-start gap-1" data-testid="job-destination">
+                                  <span
+                                    className={destination.suspendu ? 'text-gray-500' : 'text-purple-800'}
+                                    title={job.statut === 'succes' ? 'Entreprise I-CRM qui a reçu l’enregistrement (au moment de la livraison)' : 'Entreprise I-CRM cible de cet envoi'}
+                                  >
+                                    🏢 {destination.libelle}
+                                  </span>
+                                  {destination.detail && <span className="text-gray-400">{destination.detail}</span>}
+                                  {destination.suspendu && <BadgeEnvoisSuspendus libelle={destination.suspendu} />}
                                 </span>
                               )
-                              : <span className="text-gray-400">—</span>}
+                              : labelFromJob
+                                ? (
+                                  <span className={canalForJob ? 'text-gray-700' : 'text-orange-600'}>
+                                    {labelFromJob}
+                                    {!canalForJob && <span title="Canal introuvable" className="ml-1">⚠</span>}
+                                  </span>
+                                )
+                                : <span className="text-gray-400">—</span>}
                           </td>
                           <td className="px-4 py-3"><StatutBadge statut={job.statut} /></td>
                           <td className="px-4 py-3 text-gray-600">{job.tentatives ?? '—'}</td>
@@ -845,7 +929,7 @@ export default function PartageJobsPage() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex justify-end">
-                              {(['echec_definitif', 'echec_temporaire'].includes(job.statut) || isStuckEnCours) && (
+                              {(['echec_definitif', 'echec_temporaire', 'suspendu'].includes(job.statut) || isStuckEnCours) && (
                                 <button
                                   onClick={() => handleRelancer(job)}
                                   disabled={relancing === job.id}
@@ -880,6 +964,53 @@ export default function PartageJobsPage() {
           saving={launching || Boolean(relancing) || Boolean(deletingCanalId)}
         />
       )}
+
+      {choixLancement && (() => {
+        const { simulation, simulationRedirection } = choixLancement
+        const plusieurs = (simulation.destinations || []).length > 1
+        return (
+          <ChoixModal
+            titre="Mettre en file d'attente la transmission ?"
+            message={`${simulation.queued} enregistrement(s) non partagé(s) de cette borne, par destination : `
+              + `${resumeDestinations(simulation.destinations)}. Le worker traite la file toutes les 30 secondes.`}
+            details={(
+              <div className="space-y-1" data-testid="lancer-repartition">
+                <p>Destination actuelle de la borne : {libelleDestination(simulation.destinationActuelle)}.</p>
+                {plusieurs && (
+                  <p className="text-orange-700">
+                    ⚠️ Plusieurs destinations : {simulation.autresCibles} envoi(s) gardent l'entreprise choisie à leur création.
+                  </p>
+                )}
+                {simulation.suspendus > 0 && (
+                  <p className="text-orange-700">
+                    ⏸ {simulation.suspendus} envoi(s) seront mis en file au statut « Suspendu » (rien ne part, pas même vers
+                    les canaux) jusqu'à la réactivation ou un test réussi de leur entreprise.
+                  </p>
+                )}
+              </div>
+            )}
+            choix={[
+              {
+                label: `Mettre en file : ${resumeDestinations(simulation.destinations)}`,
+                variante: 'recommande',
+                testId: 'lancer-confirmer',
+                onClick: () => doLancerTransmission(),
+              },
+              ...(simulationRedirection
+                ? [{
+                    label: `Tout envoyer vers ${libelleDestination(simulation.destinationActuelle)} : `
+                      + `${resumeDestinations(simulationRedirection.destinations)}`,
+                    variante: 'secondaire',
+                    testId: 'lancer-rediriger',
+                    onClick: () => doLancerTransmission({ rediriger: true }),
+                  }]
+                : []),
+            ]}
+            onAnnuler={() => setChoixLancement(null)}
+            saving={launching}
+          />
+        )
+      })()}
 
       {toast && (
         <Toast

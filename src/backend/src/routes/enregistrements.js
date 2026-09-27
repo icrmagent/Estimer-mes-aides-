@@ -7,8 +7,25 @@ import { requireRole } from '../middleware/roleAuth.js'
 import { publishEvent } from '../services/pusherService.js'
 import { validateReponsesContact } from '../lib/contactFormats.js'
 import logger from '../lib/logger.js'
+import { STATUT_JOB_SUSPENDU } from '../lib/icrmApiKey.js'
+import { statutPourCible, SELECT_ETAT_ENTREPRISE } from '../services/partageCibleService.js'
 
 export const enregistrementsRouter = Router()
+
+/**
+ * Instantané de livraison (`crmDestination`) selon le rôle : le SuperAdmin le voit
+ * en entier (entreprise, hôte de l'API, identifiant de clé — jamais de secret) ;
+ * tout autre rôle (AdminBorne) n'en voit que l'entreprise : nom, entreprise et
+ * sous-type I-CRM — ni l'hôte de l'API ni l'identifiant de clé.
+ */
+export function projeterDestinationLivraison(enregistrement, role) {
+  if (!enregistrement || role === 'SUPER_ADMIN' || enregistrement.crmDestination === undefined) return enregistrement
+  const d = enregistrement.crmDestination
+  const crmDestination = d && typeof d === 'object' && !Array.isArray(d)
+    ? { nom: d.nom ?? null, nomIcrm: d.nomIcrm ?? null, sousTypeIcrm: d.sousTypeIcrm ?? null }
+    : null
+  return { ...enregistrement, crmDestination }
+}
 
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
@@ -43,7 +60,7 @@ const listQuerySchema = z.object({
   dateDebut: z.string().datetime({ offset: true }).optional(),
   dateFin: z.string().datetime({ offset: true }).optional(),
   statutPartage: z
-    .enum(['en_attente', 'en_cours', 'partage', 'echec_temporaire', 'echec_definitif'])
+    .enum(['en_attente', 'en_cours', 'partage', 'echec_temporaire', 'echec_definitif', 'suspendu'])
     .optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(500).default(50),
@@ -171,12 +188,25 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
       select: { version: true },
     })
 
+    // Cible du partage FIGÉE maintenant : l'entreprise I-CRM de la borne (NULL = canaux).
+    // Entreprise inutilisable (désactivée, supprimée, à retester) : le job naît suspendu,
+    // hors de la file du worker, sans jamais partir vers un canal.
+    const entrepriseIcrmId = borne.entrepriseIcrmId ?? null
+    const cible = entrepriseIcrmId
+      ? statutPourCible(entrepriseIcrmId, await prisma.entrepriseIcrm.findUnique({
+          where: { id: entrepriseIcrmId },
+          select: SELECT_ETAT_ENTREPRISE,
+        }))
+      : null
+    const suspendu = cible?.statut === STATUT_JOB_SUSPENDU
+
     const enregistrement = await prisma.enregistrement.create({
       data: {
         borneId,
         formulaireId,
         langueUtilisee,
         formulaireVersion: formulaire?.version ?? '1.0.0',
+        ...(suspendu ? { statutPartage: STATUT_JOB_SUSPENDU, derniereErreur: cible.erreur } : {}),
         reponses: {
           create: reponsesValidees.map(({ questionId, valeur }) => ({ questionId, valeur })),
         },
@@ -184,9 +214,13 @@ enregistrementsRouter.post('/', jwtAuthV2, requireRole('ADMIN_BORNE'), async (re
       include: { reponses: true },
     })
 
-    // Create a PartageJob with statut en_attente (R7.1 critère 1)
+    // Create a PartageJob with statut en_attente (R7.1 critère 1) — ou suspendu (voir ci-dessus)
     await prisma.partageJob.create({
-      data: { enregistrementId: enregistrement.id },
+      data: {
+        enregistrementId: enregistrement.id,
+        ...(entrepriseIcrmId ? { entrepriseIcrmId } : {}),
+        ...(suspendu ? { statut: STATUT_JOB_SUSPENDU, erreur: cible.erreur } : {}),
+      },
     })
 
     // Task 13b.1 — Publish Pusher event after successful creation (ADR-5)
@@ -398,7 +432,7 @@ enregistrementsRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORN
     }
 
     const enregistrementsWithContact = enregistrements.map((enregistrement) => ({
-      ...enregistrement,
+      ...projeterDestinationLivraison(enregistrement, req.user.role),
       reponses: reponsesByEnregistrement.get(enregistrement.id) || [],
     }))
 
@@ -438,7 +472,7 @@ enregistrementsRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_B
       })
     }
 
-    return res.json({ success: true, data: enregistrement })
+    return res.json({ success: true, data: projeterDestinationLivraison(enregistrement, req.user.role) })
   } catch (err) {
     return handlePrismaError(err, res)
   }

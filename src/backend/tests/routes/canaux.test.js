@@ -506,3 +506,67 @@ describe('POST /api/canaux/:id/test — azure_ad (comportement historique inchan
     expect(res.body).toMatchObject({ success: true, httpStatus: 401, authValid: false })
   })
 })
+
+// ─── Règles partagées avec les entreprises I-CRM ──────────────────────────────
+
+describe('Canal icrm_api_key — nouvel hôte d’URL et hôtes internes', () => {
+  it('nouvel hôte sans secret : refusé ; avec le secret : accepté ; même hôte : secret non requis', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+
+    const refus = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.es.ila26.com' })
+    expect(refus.status).toBe(400)
+    expect(refus.body.details).toEqual([expect.objectContaining({ path: ['token'], message: expect.stringMatching(/Nouvel hôte/) })])
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+
+    const avecSecret = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA)
+      .send({ apiUrl: 'https://icrm.api.es.ila26.com', token: 'N'.repeat(48) })
+    expect(avecSecret.status).toBe(200)
+
+    const memeHote = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.ila26.fr/api/' })
+    expect(memeHote.status).toBe(200)
+  })
+
+  it('canal azure_ad : changer d’hôte reste libre (comportement historique)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ type: 'azure_ad', apiUrl: 'https://legacy.example', apiKey: 'rt', token: 'at' }))
+    const res = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://autre.example' })
+    expect(res.status).toBe(200)
+  })
+
+  it('production : URL vers une IP interne refusée à la création (hors liste blanche)', async () => {
+    const avant = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const res = await request(app).post('/api/canaux').set(authSA).send(creationCleApi({ apiUrl: 'https://192.168.1.10' }))
+      expect(res.status).toBe(400)
+      expect(res.body.details[0]).toMatchObject({ path: ['apiUrl'], message: expect.stringMatching(/Hôte de l'URL API I-CRM non autorisé/) })
+    } finally {
+      process.env.NODE_ENV = avant
+    }
+    expect(mockPrisma.canal.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'https://localhost.',
+    'https://[::7f00:1]',
+    'https://127.0.0.1.nip.io',
+    'https://metadata.google.internal',
+    'https://icrm.autre-hebergeur.example',
+  ])('hôte hors liste blanche %s : refusé à la création comme à la modification (même hors production)', async (apiUrl) => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+    const creation = await request(app).post('/api/canaux').set(authSA).send(creationCleApi({ apiUrl }))
+    expect(creation.status).toBe(400)
+    expect(creation.body.details[0]).toMatchObject({ path: ['apiUrl'] })
+    const modif = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl, token: 'N'.repeat(48) })
+    expect(modif.status).toBe(400)
+    expect(mockPrisma.canal.create).not.toHaveBeenCalled()
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+  })
+
+  it('test d’un canal dont l’hôte n’est plus autorisé : échec url_non_autorisee, AUCUN appel réseau (secret non envoyé)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ apiUrl: 'https://metadata.google.internal' }))
+    const res = await request(app).post(`/api/canaux/${CANAL_ID}/test`).set(authSA)
+    expect(res.body).toMatchObject({ success: false, reachable: false, code: 'url_non_autorisee' })
+    expect(res.body.error).toMatch(/non autorisé/)
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+})

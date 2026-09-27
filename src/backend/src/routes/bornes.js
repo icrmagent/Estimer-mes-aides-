@@ -10,6 +10,13 @@ import logger from '../lib/logger.js'
 import { cacheService } from '../services/cacheService.js'
 import { publishEvent } from '../services/pusherService.js'
 import * as authService from '../services/authService.js'
+import {
+  STATUTS_JOB_NON_LIVRES,
+  envoisEnAttenteBorne,
+  redirigerEnvoisBorne,
+  redirigerVersDestinationActuelle,
+  resumeRepartition,
+} from '../services/partageCibleService.js'
 
 export const bornesRouter = Router()
 
@@ -32,9 +39,25 @@ const createBorneSchema = z.object({
   formulaireId: z.string().uuid().optional(),
   adminBorneId: z.string().uuid().optional(),
   ecranVeilleId: z.string().uuid().nullable().optional(),
+  // Entreprise I-CRM destinataire (null = canaux). Affectation réservée au SuperAdmin.
+  entrepriseIcrmId: z.string().uuid("Identifiant d'entreprise I-CRM invalide").nullable().optional(),
 })
 
-const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial()
+const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial().extend({
+  // Changement d'entreprise : true = rediriger vers la nouvelle destination les envois
+  // non livrés qui ciblaient l'ancienne (défaut : ils GARDENT leur cible).
+  redirigerEnvoisEnAttente: z.boolean().optional(),
+})
+
+// « Rediriger les envois » : seule cible possible, la destination actuelle de la borne
+const redirigerEnvoisSchema = z.object({
+  vers: z.literal('destination_actuelle', {
+    errorMap: () => ({ message: "« vers » doit valoir « destination_actuelle »" }),
+  }),
+})
+
+// Entreprise I-CRM exposée avec la borne : jamais l'URL, la clé ni le secret.
+const ENTREPRISE_ICRM_SELECT = { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true, verificationRequise: true }
 
 const updateStatutSchema = z.object({
   statut: z.enum(['actif', 'inactif']),
@@ -92,6 +115,25 @@ async function generateUniqueIdBorne() {
   return `BORNE-${randomUUID().toUpperCase()}`
 }
 
+/**
+ * Vérifie qu'une entreprise I-CRM peut devenir la destination d'une borne :
+ * existante, non supprimée et active.
+ * @returns {null|{ status: number, code: string, message: string }} null si utilisable
+ */
+async function refusEntrepriseIcrm(entrepriseIcrmId) {
+  const entreprise = await prisma.entrepriseIcrm.findFirst({
+    where: { id: entrepriseIcrmId, deletedAt: null },
+    select: { id: true, actif: true },
+  })
+  if (!entreprise) {
+    return { status: 400, code: 'ENTREPRISE_ICRM_NOT_FOUND', message: 'Entreprise I-CRM introuvable' }
+  }
+  if (!entreprise.actif) {
+    return { status: 400, code: 'ENTREPRISE_ICRM_INACTIVE', message: "L'entreprise I-CRM choisie est inactive" }
+  }
+  return null
+}
+
 // ─── GET /api/bornes ──────────────────────────────────────────────────────────
 
 bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
@@ -125,6 +167,7 @@ bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), asyn
           adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
           formulaire: { select: { id: true, label: true, version: true, statut: true } },
           ecranVeille: { select: { id: true, nom: true, actif: true } },
+          entrepriseIcrm: { select: ENTREPRISE_ICRM_SELECT },
         },
       }),
       prisma.borne.count({ where }),
@@ -164,6 +207,13 @@ bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =
     }
   }
 
+  if (parsed.data.entrepriseIcrmId) {
+    const refus = await refusEntrepriseIcrm(parsed.data.entrepriseIcrmId)
+    if (refus) {
+      return res.status(refus.status).json({ success: false, error: { code: refus.code, message: refus.message } })
+    }
+  }
+
   try {
     const data = {
       ...parsed.data,
@@ -188,10 +238,20 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
         adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
         formulaire: { select: { id: true, label: true, version: true, statut: true } },
         ecranVeille: { select: { id: true, nom: true, actif: true } },
+        entrepriseIcrm: { select: ENTREPRISE_ICRM_SELECT },
       },
     })
 
-    return res.json({ success: true, data: borne })
+    // Envois non livrés, par cible : confirmation d'un changement de destination et
+    // « Rediriger les envois » (horsDestination = ceux qui ne visent pas la destination actuelle)
+    let envoisEnAttente = null
+    try {
+      envoisEnAttente = await envoisEnAttenteBorne(id, { destinationActuelle: borne.entrepriseIcrmId ?? null })
+    } catch (err) {
+      logger.warn({ message: '[BORNES] Décompte des envois en attente impossible', borneId: id, error: err.message })
+    }
+
+    return res.json({ success: true, data: { ...borne, envoisEnAttente } })
   } catch (err) {
     return handlePrismaError(err, res)
   }
@@ -232,6 +292,54 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
     }
   }
 
+  // Entreprise I-CRM destinataire : choix réservé au SuperAdmin. Renvoyer la
+  // valeur actuelle (formulaire complet réémis) n'est pas un changement : accepté
+  // pour tous et sans revalidation (l'entreprise a pu être désactivée depuis).
+  // Changement : les envois non livrés GARDENT leur cible (ancienne
+  // destination), sauf `redirigerEnvoisEnAttente: true` (choix explicite).
+  const redirigerEnvois = parsed.data.redirigerEnvoisEnAttente === true
+  delete parsed.data.redirigerEnvoisEnAttente
+  let entrepriseIcrmModifiee = false
+  let ancienneEntrepriseId = null
+  if (parsed.data.entrepriseIcrmId !== undefined) {
+    try {
+      const demandee = parsed.data.entrepriseIcrmId ?? null
+      let actuelle
+      if (req.borne) {
+        actuelle = req.borne.entrepriseIcrmId ?? null
+      } else {
+        const courante = await prisma.borne.findFirst({
+          where: { id: req.params.id, deletedAt: null },
+          select: { entrepriseIcrmId: true },
+        })
+        if (!courante) {
+          return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Borne introuvable' } })
+        }
+        actuelle = courante.entrepriseIcrmId ?? null
+      }
+
+      ancienneEntrepriseId = actuelle
+      if (demandee === actuelle) {
+        delete parsed.data.entrepriseIcrmId
+      } else if (req.user.role !== 'SUPER_ADMIN') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: "Seul le SuperAdmin peut choisir l'entreprise I-CRM destinataire" },
+        })
+      } else {
+        if (demandee) {
+          const refus = await refusEntrepriseIcrm(demandee)
+          if (refus) {
+            return res.status(refus.status).json({ success: false, error: { code: refus.code, message: refus.message } })
+          }
+        }
+        entrepriseIcrmModifiee = true
+      }
+    } catch (err) {
+      return handlePrismaError(err, res)
+    }
+  }
+
   // Task 36.9 — If formulaireId is being set, verify the formulaire is published
   if (parsed.data.formulaireId) {
     const formulaire = await prisma.formulaire.findUnique({
@@ -262,7 +370,82 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       await publishEvent(`borne-${req.params.id}`, 'ecran-veille.maj', { ecranVeilleId: parsed.data.ecranVeilleId })
     }
 
-    return res.json({ success: true, data: borne })
+    let envois = null
+    if (entrepriseIcrmModifiee) {
+      const nouvelleId = parsed.data.entrepriseIcrmId ?? null
+      if (redirigerEnvois) {
+        const redirection = await redirigerEnvoisBorne(req.params.id, { ancienneId: ancienneEntrepriseId, nouvelleId })
+        envois = { rediriges: redirection.total, destinations: redirection.destinations }
+      } else {
+        envois = {
+          conserves: await prisma.partageJob.count({
+            where: {
+              statut: { in: [...STATUTS_JOB_NON_LIVRES] },
+              entrepriseIcrmId: ancienneEntrepriseId,
+              enregistrement: { borneId: req.params.id },
+            },
+          }),
+        }
+      }
+      logger.info({
+        message: '[BORNES] Entreprise I-CRM destinataire modifiée',
+        borneId: req.params.id,
+        ancienneEntrepriseIcrmId: ancienneEntrepriseId,
+        entrepriseIcrmId: nouvelleId,
+        ...(envois.conserves !== undefined ? { conserves: envois.conserves } : {}),
+        ...(envois.rediriges !== undefined
+          ? { rediriges: envois.rediriges, redirection: resumeRepartition(envois.destinations) }
+          : {}),
+      })
+    }
+
+    return res.json({ success: true, data: borne, ...(envois ? { envoisEnAttente: envois } : {}) })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── POST /api/bornes/:id/rediriger-envois[?simulation=true] ──────────────────
+// Action explicite du SuperAdmin : { vers: 'destination_actuelle' }. Les envois non
+// livrés de la borne (en attente, suspendus, échecs définitifs) dont la cible n'est
+// pas sa destination actuelle (son entreprise I-CRM, sinon ses canaux) sont
+// reciblés vers elle — ex. après la suppression forcée d'une entreprise, envois
+// restés suspendus « entreprise supprimée » sur une borne repassée aux canaux.
+// Statuts : suspendu → en file si la nouvelle cible est utilisable (sinon suspendu
+// avec son motif) ; échec définitif → cible changée, relance explicite ensuite.
+// `?simulation=true` : même réponse (répartition d'origine `depuis` et d'arrivée
+// `destinations`), rien n'est écrit.
+
+bornesRouter.post('/:id/rediriger-envois', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = redirigerEnvoisSchema.safeParse(req.body ?? {})
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message, details: parsed.error.flatten() },
+    })
+  }
+  const simulation = req.query.simulation === 'true'
+
+  try {
+    const borne = await prisma.borne.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      select: { id: true, idBorne: true, entrepriseIcrmId: true },
+    })
+    if (!borne) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Borne introuvable' } })
+    }
+
+    const resultat = await redirigerVersDestinationActuelle(borne, { simulation })
+    if (!simulation && resultat.total > 0) {
+      logger.info({
+        message: '[BORNES] Envois redirigés vers la destination actuelle',
+        borneId: borne.id,
+        total: resultat.total,
+        depuis: resumeRepartition(resultat.depuis),
+        vers: resumeRepartition(resultat.destinations),
+      })
+    }
+    return res.json({ success: true, data: { borneId: borne.id, ...(simulation ? { simulation: true } : {}), ...resultat } })
   } catch (err) {
     return handlePrismaError(err, res)
   }

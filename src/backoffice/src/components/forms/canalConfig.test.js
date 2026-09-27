@@ -11,6 +11,8 @@ import {
   libelleTypeCanal,
   typeInitialFormulaire,
   estNouvelleCleApi,
+  estNouvelHoteApi,
+  hoteUrlApi,
   validerSaisieCanal,
   construireRequeteCanal,
   resumeTestCanal,
@@ -175,5 +177,29 @@ describe('resumeTestCanal', () => {
       message: 'Connexion OK (405, 12ms) — token expiré !', type: 'error',
     })
     expect(resumeTestCanal({ success: true, httpStatus: 200, latencyMs: 12, tokenExpired: false }).type).toBe('success')
+  })
+})
+
+describe('validerSaisieCanal — nouvel hôte d’URL (règle partagée avec les entreprises)', () => {
+  const edition = {
+    isEdit: true, type: 'icrm_api_key', typeInitial: 'icrm_api_key', borneId: 'b1', label: 'lena',
+    apiKey: '', token: '', apiKeyInitiale: 'emak_A1b2C3d4E5f6G7h8I9j0K1l2', apiUrlInitiale: 'https://icrm.api.ila26.fr',
+  }
+
+  it('nouvel hôte sans secret : refusé ; avec secret : accepté ; même hôte : secret non requis', () => {
+    expect(validerSaisieCanal({ ...edition, apiUrl: 'https://icrm.api.es.ila26.com' })).toMatch(/Nouvel hôte/)
+    expect(validerSaisieCanal({ ...edition, apiUrl: 'https://icrm.api.es.ila26.com', token: 'N'.repeat(48) })).toBeNull()
+    expect(validerSaisieCanal({ ...edition, apiUrl: 'https://icrm.api.ila26.fr/api/' })).toBeNull()
+  })
+
+  it('hôtes comparés sans casse, sans /api final, port compris', () => {
+    expect(hoteUrlApi('https://ICRM.api.ila26.fr/api/')).toBe('icrm.api.ila26.fr')
+    expect(estNouvelHoteApi({ isEdit: true, apiUrl: 'https://icrm.api.ila26.fr:8443', apiUrlInitiale: 'https://icrm.api.ila26.fr' })).toBe(true)
+    expect(estNouvelHoteApi({ isEdit: false, apiUrl: 'https://autre.fr', apiUrlInitiale: 'https://icrm.api.ila26.fr' })).toBe(false)
+    expect(estNouvelHoteApi({ isEdit: true, apiUrl: 'pas une url', apiUrlInitiale: 'https://icrm.api.ila26.fr' })).toBe(false)
+  })
+
+  it('canal azure_ad : changer d’hôte reste libre', () => {
+    expect(validerSaisieCanal({ ...edition, type: 'azure_ad', typeInitial: 'azure_ad', apiUrl: 'https://autre.example' })).toBeNull()
   })
 })
