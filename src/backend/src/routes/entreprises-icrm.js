@@ -14,6 +14,9 @@
  * La projection publique expose `apiKeyId` (identifiant de clé, public par
  * construction) et `hasToken`.
  *
+ * Une entreprise NOUVELLE est « à tester » (verificationRequise) : elle ne reçoit
+ * rien avant un test réussi (les captures de ses bornes naissent suspendues).
+ *
  * Suspension / reprise des envois :
  * - désactivation, ou changement d'URL / de clé (entreprise à retester) → ses jobs
  *   en file passent au statut `suspendu` (hors de la file du worker) ;
@@ -43,9 +46,14 @@ import {
 } from '../lib/icrmApiKey.js'
 import { pingerIcrm, resultatEchecReseauPing } from '../services/icrmPingService.js'
 import {
-  STATUTS_JOB_EN_ATTENTE,
+  STATUTS_JOB_NON_LIVRES,
   suspendreEnvoisEntreprise,
   reprendreEnvoisEntreprise,
+  etatsEntreprises,
+  planifierRedirection,
+  appliquerRedirection,
+  repartitionPlan,
+  resumeRepartition,
 } from '../services/partageCibleService.js'
 
 export const entreprisesIcrmRouter = Router()
@@ -235,11 +243,16 @@ entreprisesIcrmRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (re
   try {
     if (await nomDejaPris(parsed.data.nom)) return doublonNom(res)
 
+    // Nouvelle entreprise = identifiants jamais vérifiés : à tester avant tout envoi
     const entreprise = await prisma.entrepriseIcrm.create({
-      data: { ...parsed.data, apiUrl: normaliserUrlApiIcrm(parsed.data.apiUrl) },
+      data: { ...parsed.data, apiUrl: normaliserUrlApiIcrm(parsed.data.apiUrl), verificationRequise: true },
     })
     logger.info({ message: '[ENTREPRISES-ICRM] Entreprise créée', entrepriseIcrmId: entreprise.id, nom: entreprise.nom })
-    return res.status(201).json({ success: true, data: versEntreprisePublique(entreprise) })
+    return res.status(201).json({
+      success: true,
+      data: versEntreprisePublique(entreprise),
+      avertissement: "Testez l'entreprise : elle ne recevra aucun enregistrement avant un test de connexion réussi.",
+    })
   } catch (err) {
     return erreurServeur(res, err, 'Création')
   }
@@ -334,13 +347,45 @@ entreprisesIcrmRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
 })
 
 // ─── DELETE /api/entreprises-icrm/:id[?force=true[&redirigerEnvoisEnAttente=true]] ─
-// Suppression logique. Si des bornes l'ont pour destination OU si des envois pas
-// encore livrés la ciblent : 409 avec la liste des bornes et le nombre d'envois,
-// sauf `?force=true`. Avec force : les bornes sont désaffectées (elles repassent
-// sur leurs canaux pour les NOUVEAUX enregistrements) et les envois qui ciblaient
-// l'entreprise restent SUSPENDUS (« entreprise supprimée ») — sauf
-// `redirigerEnvoisEnAttente=true`, choix explicite qui les renvoie vers la
-// nouvelle destination de leurs bornes : les canaux.
+// Suppression logique. Si des bornes l'ont pour destination OU si des envois non
+// livrés la ciblent (en attente, suspendus, échecs définitifs) : 409 avec la liste
+// des bornes, le nombre d'envois et la répartition qu'aurait une redirection
+// (`details.redirection`, ex. « 3 → LENA, 1 → canaux »), sauf `?force=true`.
+// Avec force : les bornes sont désaffectées (elles repassent sur leurs canaux pour
+// les NOUVEAUX enregistrements) et les envois qui ciblaient l'entreprise restent
+// SUSPENDUS (« entreprise supprimée ») — sauf `redirigerEnvoisEnAttente=true`,
+// choix explicite qui envoie CHAQUE envoi vers la destination ACTUELLE de SA
+// borne : son entreprise I-CRM si la borne a été réaffectée entre-temps, sinon
+// ses canaux. Jamais vers les canaux d'une borne qui a une autre entreprise.
+
+// Envois non livrés d'une entreprise, avec la destination actuelle de leur borne
+function envoisNonLivresEntreprise(id) {
+  return prisma.partageJob.findMany({
+    where: { entrepriseIcrmId: id, statut: { in: [...STATUTS_JOB_NON_LIVRES] } },
+    select: {
+      id: true,
+      enregistrementId: true,
+      statut: true,
+      entrepriseIcrmId: true,
+      enregistrement: { select: { borne: { select: { entrepriseIcrmId: true } } } },
+    },
+  })
+}
+
+/**
+ * Plan de redirection des envois d'une entreprise supprimée : chaque envoi va vers
+ * la destination actuelle de sa borne (les bornes encore affectées à l'entreprise
+ * supprimée repassent sur leurs canaux : NULL).
+ */
+async function planRedirectionSuppression(id, jobs) {
+  const cibleDe = (job) => {
+    const cible = job.enregistrement?.borne?.entrepriseIcrmId ?? null
+    return cible === id ? null : cible
+  }
+  const etats = await etatsEntreprises(jobs.map(cibleDe))
+  const plan = planifierRedirection(jobs, cibleDe, etats)
+  return { plan, destinations: repartitionPlan(plan, etats) }
+}
 
 entreprisesIcrmRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const { id } = req.params
@@ -358,21 +403,22 @@ entreprisesIcrmRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), asyn
     })
     if (!existante) return introuvable(res)
 
-    const envoisEnAttente = await prisma.partageJob.count({
-      where: { entrepriseIcrmId: id, statut: { in: [...STATUTS_JOB_EN_ATTENTE] } },
-    })
+    const envois = await envoisNonLivresEntreprise(id)
+    const envoisEnAttente = envois.length
 
     if ((existante.bornes.length > 0 || envoisEnAttente > 0) && !force) {
       const n = existante.bornes.length
+      const { destinations: redirection } = await planRedirectionSuppression(id, envois)
       return res.status(409).json({
         success: false,
         error: {
           code: 'ENTREPRISE_ICRM_EN_USAGE',
           message: `L'entreprise « ${existante.nom} » est la destination de ${n} borne${n > 1 ? 's' : ''}`
-            + ` et de ${envoisEnAttente} envoi${envoisEnAttente > 1 ? 's' : ''} pas encore livré${envoisEnAttente > 1 ? 's' : ''}. `
+            + ` et de ${envoisEnAttente} envoi${envoisEnAttente > 1 ? 's' : ''} non livré${envoisEnAttente > 1 ? 's' : ''}. `
             + 'Confirmez la suppression : les bornes repasseront sur leurs canaux ; choisissez de garder '
-            + 'les envois suspendus ou de les rediriger vers les canaux.',
-          details: { bornes: existante.bornes, envoisEnAttente },
+            + 'les envois suspendus ou de les rediriger vers la destination actuelle de leur borne'
+            + (redirection.length > 0 ? ` (${resumeRepartition(redirection)}).` : '.'),
+          details: { bornes: existante.bornes, envoisEnAttente, redirection },
         },
       })
     }
@@ -385,26 +431,14 @@ entreprisesIcrmRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), asyn
 
     let envoisRediriges = 0
     let envoisSuspendus = 0
+    let destinations = []
     if (envoisEnAttente > 0) {
       if (rediriger) {
-        // Choix explicite : cible → canaux (NULL), les suspendus repartent en file
-        const jobs = await prisma.partageJob.findMany({
-          where: { entrepriseIcrmId: id, statut: { in: [...STATUTS_JOB_EN_ATTENTE] } },
-          select: { id: true, enregistrementId: true, statut: true },
-        })
-        const suspendus = jobs.filter((j) => j.statut === STATUT_JOB_SUSPENDU)
-        await prisma.$transaction([
-          prisma.partageJob.updateMany({ where: { id: { in: jobs.map((j) => j.id) } }, data: { entrepriseIcrmId: null } }),
-          prisma.partageJob.updateMany({
-            where: { id: { in: suspendus.map((j) => j.id) } },
-            data: { statut: 'en_attente', erreur: null, prochainEssai: null },
-          }),
-          prisma.enregistrement.updateMany({
-            where: { id: { in: suspendus.map((j) => j.enregistrementId) }, statutPartage: STATUT_JOB_SUSPENDU },
-            data: { statutPartage: 'en_attente', derniereErreur: null },
-          }),
-        ])
-        envoisRediriges = jobs.length
+        // Choix explicite : chaque envoi → destination ACTUELLE de sa borne (relue
+        // après la désaffectation) ; statuts selon cette cible (planifierRedirection)
+        const { plan, destinations: repartition } = await planRedirectionSuppression(id, await envoisNonLivresEntreprise(id))
+        envoisRediriges = await appliquerRedirection(plan)
+        destinations = repartition
       } else {
         envoisSuspendus = await suspendreEnvoisEntreprise(
           { id, nom: existante.nom, actif: false, deletedAt: maintenant },
@@ -419,10 +453,17 @@ entreprisesIcrmRouter.delete('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), asyn
       bornesDesaffectees: desaffectation?.count ?? 0,
       envoisRediriges,
       envoisSuspendus,
+      ...(destinations.length > 0 ? { redirection: resumeRepartition(destinations) } : {}),
     })
     return res.json({
       success: true,
-      data: { id, bornesDesaffectees: desaffectation?.count ?? 0, envoisRediriges, envoisSuspendus },
+      data: {
+        id,
+        bornesDesaffectees: desaffectation?.count ?? 0,
+        envoisRediriges,
+        envoisSuspendus,
+        ...(rediriger ? { destinations } : {}),
+      },
     })
   } catch (err) {
     return erreurServeur(res, err, 'Suppression')

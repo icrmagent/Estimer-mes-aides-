@@ -5,6 +5,8 @@
  * celui d'une entreprise I-CRM (POST /api/entreprises-icrm/:id/test) : mêmes
  * en-têtes, même délai, redirections non suivies, même contrôle du contrat.
  *
+ * Hôte de l'URL revérifié avant tout appel (liste blanche, lib/icrmApiKey.js) :
+ * refusé → échec `url_non_autorisee` sans requête réseau.
  * Succès UNIQUEMENT sur un 2xx au corps du contrat (`ok: true` + `api_version`) ;
  * renvoie alors l'entreprise, le sous-type et le client I-CRM liés à la clé.
  * Le secret n'apparaît jamais dans le résultat.
@@ -12,11 +14,15 @@
 import {
   CANAL_TYPE_ICRM_API_KEY,
   urlPointAccesIcrm,
+  normaliserUrlApiIcrm,
   enTetesCleApiIcrm,
   lireCorpsJsonIcrm,
   estPingIcrmConforme,
   codeErreurIcrm,
   CODE_REPONSE_NON_CONFORME,
+  CODE_URL_NON_AUTORISEE,
+  urlApiIcrmAcceptable,
+  messageUrlApiIcrmRefusee,
 } from '../lib/icrmApiKey.js'
 
 export const DELAI_PING_ICRM_MS = 10 * 1000
@@ -55,6 +61,22 @@ function messageEchecPing(status, code) {
  *   `client`, `apiVersion` ; en échec `code`, `requestId`, `error` (message FR).
  */
 export async function pingerIcrm(identifiants) {
+  // Hôte revérifié au moment du test (liste ICRM_API_HOSTS_AUTORISES) : le secret
+  // ne part jamais vers un hôte refusé, même enregistré avant un changement de liste.
+  if (!urlApiIcrmAcceptable(normaliserUrlApiIcrm(identifiants.apiUrl))) {
+    return {
+      type: CANAL_TYPE_ICRM_API_KEY,
+      success: false,
+      reachable: false,
+      httpStatus: null,
+      latencyMs: 0,
+      authValid: null,
+      code: CODE_URL_NON_AUTORISEE,
+      requestId: null,
+      error: messageUrlApiIcrmRefusee(normaliserUrlApiIcrm(identifiants.apiUrl)),
+    }
+  }
+
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), DELAI_PING_ICRM_MS)
   const startedAt = Date.now()

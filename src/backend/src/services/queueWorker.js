@@ -14,11 +14,15 @@ import {
   formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
   CODE_REPONSE_NON_CONFORME,
+  CODE_URL_NON_AUTORISEE,
   STATUT_JOB_SUSPENDU,
-  entrepriseIcrmUtilisable,
+  entrepriseIcrmEnvoyable,
   messageEnvoiSuspendu,
   instantaneDestinationEntreprise,
+  urlApiIcrmAcceptable,
+  messageUrlApiIcrmRefusee,
 } from '../lib/icrmApiKey.js'
+import { STATUTS_JOB_EN_FILE, reprendreEnvoisEntreprisesUtilisables } from './partageCibleService.js'
 import { validateEmail, validateTelephone, validateCodePostal } from '../lib/contactFormats.js'
 
 const POLL_INTERVAL = 30 * 1000
@@ -624,6 +628,15 @@ async function envoyerViaCleApiIcrm(identifiants, enregistrement, contexteLog = 
       { definitif: true },
     )
   }
+  // Hôte revérifié au moment de l'envoi (liste ICRM_API_HOSTS_AUTORISES) : le secret
+  // ne part jamais vers un hôte refusé, même enregistré avant un changement de liste.
+  const urlEnvoi = normaliserUrlApiIcrm(identifiants.apiUrl)
+  if (!urlApiIcrmAcceptable(urlEnvoi)) {
+    throw erreurPartage(`URL API refusée au moment de l'envoi : ${messageUrlApiIcrmRefusee(urlEnvoi)}`, {
+      definitif: true,
+      code: CODE_URL_NON_AUTORISEE,
+    })
+  }
 
   const { payload, contactEcarte } = construirePayloadIcrm(enregistrement)
   if (contactEcarte.length > 0) {
@@ -715,13 +728,15 @@ const SELECT_ENTREPRISE_CIBLE = Object.freeze({
 })
 
 /**
- * Envoi SUSPENDU : l'entreprise I-CRM CIBLE du job est désactivée, supprimée ou à
- * retester (URL ou clé modifiée). Rien n'est envoyé — ni à l'entreprise, ni à un
+ * Envoi SUSPENDU : l'entreprise I-CRM CIBLE du job est désactivée, supprimée, à
+ * tester (nouvelle, URL ou clé modifiée) ou son hôte d'URL n'est plus autorisé
+ * (ICRM_API_HOSTS_AUTORISES). Rien n'est envoyé — ni à l'entreprise, ni à un
  * canal, ni aux variables d'environnement : ce serait livrer les leads d'une
  * entreprise à une autre. Le job passe au statut `suspendu`, HORS de la file du
  * worker (pas de ré-examen périodique : aucune place de cycle occupée), sans
  * tentative comptée (jamais d'échec définitif pour une pause) ; il est repris par
- * la réactivation de l'entreprise, un test réussi ou une redirection explicite
+ * la réactivation de l'entreprise, un test réussi, le balayage de début de cycle
+ * (entreprise redevenue envoyable) ou une redirection explicite
  * (services/partageCibleService.js). Aucune notification Pusher.
  * Normalement déjà fait par la route qui désactive l'entreprise : ici en défense
  * (course entre la désactivation et un cycle en cours, job créé entre-temps).
@@ -801,18 +816,36 @@ function computeNextRetry(tentatives) {
 /**
  * Traite un job de partage CRM.
  * Appelle l'API I-CRM externe et met à jour le statut du job.
+ *
+ * Prise ATOMIQUE : le job ne passe en_cours que s'il est encore en file
+ * (en_attente / echec_temporaire) — sinon il a été pris, relancé, suspendu ou
+ * redirigé entre la lecture du cycle et maintenant : il est ignoré. Après la
+ * prise, la cible COURANTE du job est relue : une redirection arrivée juste
+ * avant est respectée (jamais la cible lue au début du cycle).
  */
-async function processJob(job) {
+async function processJob(jobLu) {
   const jobStart = Date.now()
   // Destination retenue (canal choisi, et champs de journalisation sans secret)
   let canal = null
   let destinationLog = null
 
-  // Marquer le job comme en cours
-  await prisma.partageJob.update({
-    where: { id: job.id },
-    data: { statut: 'en_cours' },
+  const prise = await prisma.partageJob.updateMany({
+    where: { id: jobLu.id, statut: { in: [...STATUTS_JOB_EN_FILE] } },
+    data: { statut: 'en_cours', updatedAt: new Date() },
   })
+  if (prise?.count !== 1) {
+    logger.info({ message: '[QUEUE] Job ignoré — déjà pris ou modifié depuis la lecture du cycle', jobId: jobLu.id })
+    return
+  }
+  const courant = await prisma.partageJob.findUnique({
+    where: { id: jobLu.id },
+    select: { enregistrementId: true, entrepriseIcrmId: true, tentatives: true },
+  })
+  if (!courant) {
+    logger.info({ message: '[QUEUE] Job ignoré — supprimé depuis sa prise', jobId: jobLu.id })
+    return
+  }
+  const job = { ...jobLu, ...courant }
 
   try {
     // Récupérer l'enregistrement avec ses réponses et le canal actif de la borne
@@ -892,7 +925,8 @@ async function processJob(job) {
         where: { id: job.entrepriseIcrmId },
         select: SELECT_ENTREPRISE_CIBLE,
       })
-      if (!entrepriseIcrmUtilisable(entreprise)) {
+      // Utilisable ET hôte d'URL toujours autorisé (sinon suspendu, motif explicite)
+      if (!entrepriseIcrmEnvoyable(entreprise)) {
         await suspendreJob(job, entreprise, jobStart)
         return
       }
@@ -1127,15 +1161,27 @@ async function processJob(job) {
  * Task 30.4 — Process up to 10 jobs concurrently using Promise.allSettled()
  *
  * Équité : seuls en_attente et echec_temporaire échus sont lus. Les jobs
- * `suspendu` (entreprise cible désactivée, supprimée ou à retester) sont hors de
+ * `suspendu` (entreprise cible désactivée, supprimée ou à tester) sont hors de
  * cette requête : quel que soit leur nombre, ils n'occupent jamais les 10 places
- * d'un cycle et ne retardent pas les jobs des autres entreprises.
+ * d'un cycle et ne retardent pas les jobs des autres entreprises. Le balayage
+ * de début de cycle remet en file ceux dont l'entreprise est redevenue envoyable.
  */
 async function processPendingJobs() {
   if (isRunning) return
   isRunning = true
 
   try {
+    // Balayage : suspendus dont l'entreprise cible est de nouveau envoyable → en file
+    // (rattrape une reprise manquée ; une erreur ici n'empêche jamais le cycle)
+    try {
+      const { total, reprises } = await reprendreEnvoisEntreprisesUtilisables()
+      if (total > 0) {
+        logger.info({ message: '[QUEUE] Envois suspendus repris — entreprise I-CRM de nouveau utilisable', total, reprises })
+      }
+    } catch (err) {
+      logger.warn({ message: '[QUEUE] Balayage des envois suspendus impossible', error: err.message })
+    }
+
     const now = new Date()
     const jobs = await prisma.partageJob.findMany({
       where: {

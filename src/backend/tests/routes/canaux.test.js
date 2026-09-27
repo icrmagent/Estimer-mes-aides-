@@ -532,16 +532,41 @@ describe('Canal icrm_api_key — nouvel hôte d’URL et hôtes internes', () =>
     expect(res.status).toBe(200)
   })
 
-  it('production : URL vers une adresse interne refusée à la création', async () => {
+  it('production : URL vers une IP interne refusée à la création (hors liste blanche)', async () => {
     const avant = process.env.NODE_ENV
     process.env.NODE_ENV = 'production'
     try {
       const res = await request(app).post('/api/canaux').set(authSA).send(creationCleApi({ apiUrl: 'https://192.168.1.10' }))
       expect(res.status).toBe(400)
-      expect(res.body.details[0]).toMatchObject({ path: ['apiUrl'], message: expect.stringMatching(/adresse interne/) })
+      expect(res.body.details[0]).toMatchObject({ path: ['apiUrl'], message: expect.stringMatching(/Hôte de l'URL API I-CRM non autorisé/) })
     } finally {
       process.env.NODE_ENV = avant
     }
     expect(mockPrisma.canal.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'https://localhost.',
+    'https://[::7f00:1]',
+    'https://127.0.0.1.nip.io',
+    'https://metadata.google.internal',
+    'https://icrm.autre-hebergeur.example',
+  ])('hôte hors liste blanche %s : refusé à la création comme à la modification (même hors production)', async (apiUrl) => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+    const creation = await request(app).post('/api/canaux').set(authSA).send(creationCleApi({ apiUrl }))
+    expect(creation.status).toBe(400)
+    expect(creation.body.details[0]).toMatchObject({ path: ['apiUrl'] })
+    const modif = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl, token: 'N'.repeat(48) })
+    expect(modif.status).toBe(400)
+    expect(mockPrisma.canal.create).not.toHaveBeenCalled()
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+  })
+
+  it('test d’un canal dont l’hôte n’est plus autorisé : échec url_non_autorisee, AUCUN appel réseau (secret non envoyé)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ apiUrl: 'https://metadata.google.internal' }))
+    const res = await request(app).post(`/api/canaux/${CANAL_ID}/test`).set(authSA)
+    expect(res.body).toMatchObject({ success: false, reachable: false, code: 'url_non_autorisee' })
+    expect(res.body.error).toMatch(/non autorisé/)
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 })

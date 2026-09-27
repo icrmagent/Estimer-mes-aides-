@@ -5,8 +5,11 @@ import { jest } from '@jest/globals'
 const mockPrisma = {
   partageJob: {
     findMany: jest.fn(),
+    findUnique: jest.fn(),
     findUniqueOrThrow: jest.fn(),
     update: jest.fn(),
+    // Prise atomique du job (en_attente / echec_temporaire → en_cours)
+    updateMany: jest.fn(),
   },
   enregistrement: {
     findUnique: jest.fn(),
@@ -31,7 +34,18 @@ global.fetch = jest.fn()
 
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
-const { processJob, MAX_TENTATIVES, computeNextRetry } = await import('../src/services/queueWorker.js')
+const { processJob: processJobReel, MAX_TENTATIVES, computeNextRetry } = await import('../src/services/queueWorker.js')
+
+// Le worker relit le job après l'avoir pris (cible et tentatives courantes) : la
+// relecture renvoie ici l'état du job passé au test.
+const processJob = (job) => {
+  mockPrisma.partageJob.findUnique.mockResolvedValueOnce({
+    enregistrementId: job.enregistrementId,
+    entrepriseIcrmId: job.entrepriseIcrmId ?? null,
+    tentatives: job.tentatives,
+  })
+  return processJobReel(job)
+}
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 
@@ -70,6 +84,7 @@ beforeEach(() => {
   mockPrisma.enregistrement.findUnique.mockResolvedValue(mockEnregistrement)
   mockPrisma.enregistrement.update.mockResolvedValue({ ...mockEnregistrement })
   mockPrisma.partageJob.update.mockResolvedValue({})
+  mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 1 })
   mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
   mockNotifySucces.mockResolvedValue(undefined)
   mockNotifyEchec.mockResolvedValue(undefined)
@@ -86,9 +101,12 @@ describe('queueWorker — processJob', () => {
       const job = makeJob()
       await processJob(job)
 
-      // Doit d'abord marquer en_cours
-      expect(mockPrisma.partageJob.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ statut: 'en_cours' }) })
+      // Doit d'abord prendre le job (en_cours), atomiquement : seulement s'il est encore en file
+      expect(mockPrisma.partageJob.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'job-uuid-1', statut: { in: ['en_attente', 'echec_temporaire'] } },
+          data: expect.objectContaining({ statut: 'en_cours' }),
+        })
       )
 
       // Doit appeler $transaction avec succes + partage

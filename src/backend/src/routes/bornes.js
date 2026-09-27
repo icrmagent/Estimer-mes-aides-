@@ -11,10 +11,11 @@ import { cacheService } from '../services/cacheService.js'
 import { publishEvent } from '../services/pusherService.js'
 import * as authService from '../services/authService.js'
 import {
-  STATUTS_JOB_EN_ATTENTE,
-  SELECT_ETAT_ENTREPRISE,
+  STATUTS_JOB_NON_LIVRES,
   envoisEnAttenteBorne,
   redirigerEnvoisBorne,
+  redirigerVersDestinationActuelle,
+  resumeRepartition,
 } from '../services/partageCibleService.js'
 
 export const bornesRouter = Router()
@@ -44,8 +45,15 @@ const createBorneSchema = z.object({
 
 const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial().extend({
   // Changement d'entreprise : true = rediriger vers la nouvelle destination les envois
-  // pas encore livrés qui ciblaient l'ancienne (défaut : ils GARDENT leur cible).
+  // non livrés qui ciblaient l'ancienne (défaut : ils GARDENT leur cible).
   redirigerEnvoisEnAttente: z.boolean().optional(),
+})
+
+// « Rediriger les envois » : seule cible possible, la destination actuelle de la borne
+const redirigerEnvoisSchema = z.object({
+  vers: z.literal('destination_actuelle', {
+    errorMap: () => ({ message: "« vers » doit valoir « destination_actuelle »" }),
+  }),
 })
 
 // Entreprise I-CRM exposée avec la borne : jamais l'URL, la clé ni le secret.
@@ -234,10 +242,11 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       },
     })
 
-    // Envois pas encore livrés, par cible : sert à confirmer un changement de destination
+    // Envois non livrés, par cible : confirmation d'un changement de destination et
+    // « Rediriger les envois » (horsDestination = ceux qui ne visent pas la destination actuelle)
     let envoisEnAttente = null
     try {
-      envoisEnAttente = await envoisEnAttenteBorne(id)
+      envoisEnAttente = await envoisEnAttenteBorne(id, { destinationActuelle: borne.entrepriseIcrmId ?? null })
     } catch (err) {
       logger.warn({ message: '[BORNES] Décompte des envois en attente impossible', borneId: id, error: err.message })
     }
@@ -286,7 +295,7 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
   // Entreprise I-CRM destinataire : choix réservé au SuperAdmin. Renvoyer la
   // valeur actuelle (formulaire complet réémis) n'est pas un changement : accepté
   // pour tous et sans revalidation (l'entreprise a pu être désactivée depuis).
-  // Changement : les envois pas encore livrés GARDENT leur cible (ancienne
+  // Changement : les envois non livrés GARDENT leur cible (ancienne
   // destination), sauf `redirigerEnvoisEnAttente: true` (choix explicite).
   const redirigerEnvois = parsed.data.redirigerEnvoisEnAttente === true
   delete parsed.data.redirigerEnvoisEnAttente
@@ -365,17 +374,13 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
     if (entrepriseIcrmModifiee) {
       const nouvelleId = parsed.data.entrepriseIcrmId ?? null
       if (redirigerEnvois) {
-        const nouvelle = nouvelleId
-          ? await prisma.entrepriseIcrm.findFirst({ where: { id: nouvelleId }, select: SELECT_ETAT_ENTREPRISE })
-          : null
-        envois = {
-          rediriges: await redirigerEnvoisBorne(req.params.id, { ancienneId: ancienneEntrepriseId, nouvelleId, nouvelle }),
-        }
+        const redirection = await redirigerEnvoisBorne(req.params.id, { ancienneId: ancienneEntrepriseId, nouvelleId })
+        envois = { rediriges: redirection.total, destinations: redirection.destinations }
       } else {
         envois = {
           conserves: await prisma.partageJob.count({
             where: {
-              statut: { in: [...STATUTS_JOB_EN_ATTENTE] },
+              statut: { in: [...STATUTS_JOB_NON_LIVRES] },
               entrepriseIcrmId: ancienneEntrepriseId,
               enregistrement: { borneId: req.params.id },
             },
@@ -387,11 +392,60 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
         borneId: req.params.id,
         ancienneEntrepriseIcrmId: ancienneEntrepriseId,
         entrepriseIcrmId: nouvelleId,
-        ...envois,
+        ...(envois.conserves !== undefined ? { conserves: envois.conserves } : {}),
+        ...(envois.rediriges !== undefined
+          ? { rediriges: envois.rediriges, redirection: resumeRepartition(envois.destinations) }
+          : {}),
       })
     }
 
     return res.json({ success: true, data: borne, ...(envois ? { envoisEnAttente: envois } : {}) })
+  } catch (err) {
+    return handlePrismaError(err, res)
+  }
+})
+
+// ─── POST /api/bornes/:id/rediriger-envois[?simulation=true] ──────────────────
+// Action explicite du SuperAdmin : { vers: 'destination_actuelle' }. Les envois non
+// livrés de la borne (en attente, suspendus, échecs définitifs) dont la cible n'est
+// pas sa destination actuelle (son entreprise I-CRM, sinon ses canaux) sont
+// reciblés vers elle — ex. après la suppression forcée d'une entreprise, envois
+// restés suspendus « entreprise supprimée » sur une borne repassée aux canaux.
+// Statuts : suspendu → en file si la nouvelle cible est utilisable (sinon suspendu
+// avec son motif) ; échec définitif → cible changée, relance explicite ensuite.
+// `?simulation=true` : même réponse (répartition d'origine `depuis` et d'arrivée
+// `destinations`), rien n'est écrit.
+
+bornesRouter.post('/:id/rediriger-envois', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
+  const parsed = redirigerEnvoisSchema.safeParse(req.body ?? {})
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message, details: parsed.error.flatten() },
+    })
+  }
+  const simulation = req.query.simulation === 'true'
+
+  try {
+    const borne = await prisma.borne.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+      select: { id: true, idBorne: true, entrepriseIcrmId: true },
+    })
+    if (!borne) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Borne introuvable' } })
+    }
+
+    const resultat = await redirigerVersDestinationActuelle(borne, { simulation })
+    if (!simulation && resultat.total > 0) {
+      logger.info({
+        message: '[BORNES] Envois redirigés vers la destination actuelle',
+        borneId: borne.id,
+        total: resultat.total,
+        depuis: resumeRepartition(resultat.depuis),
+        vers: resumeRepartition(resultat.destinations),
+      })
+    }
+    return res.json({ success: true, data: { borneId: borne.id, ...(simulation ? { simulation: true } : {}), ...resultat } })
   } catch (err) {
     return handlePrismaError(err, res)
   }

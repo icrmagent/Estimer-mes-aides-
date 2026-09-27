@@ -355,8 +355,9 @@ model EntrepriseIcrm {
   apiKey               String
   token                String
   actif                Boolean          @default(true)
-  // true après un changement d'URL ou de clé : envois suspendus jusqu'au prochain test réussi
-  verificationRequise  Boolean          @default(false)
+  // true pour une NOUVELLE entreprise et après un changement d'URL ou de clé :
+  // envois suspendus jusqu'au prochain test réussi
+  verificationRequise  Boolean          @default(true)
   derniereVerification DateTime?
   dernierStatut        String?
   createdAt            DateTime         @default(now())

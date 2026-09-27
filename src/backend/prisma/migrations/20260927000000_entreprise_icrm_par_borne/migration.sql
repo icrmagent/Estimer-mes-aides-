@@ -1,12 +1,14 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Migration : entreprise (tenant) I-CRM destinataire, choisie borne par borne
--- Date : 2026-09-27 (révisée après revue le même jour, avant toute mise en production)
+-- Date : 2026-09-27 (révisée après deux revues le même jour ; jamais appliquée sur une
+--        base partagée — seulement sur des bases locales jetables — d'où la modification en place)
 -- Pourquoi : chaque entreprise I-CRM (LENA, CAE España…) est enregistrée UNE fois
 --            dans le back-office avec sa clé API ; chaque borne choisit ensuite
 --            l'entreprise qui reçoit ses enregistrements.
 --   entreprises_icrm                     entreprise I-CRM : URL API, clé « emak_… », secret,
 --                                        entreprise / sous-type renvoyés par le ping I-CRM,
---                                        verificationRequise (URL ou clé changée, à retester)
+--                                        verificationRequise (à tester : nouvelle entreprise,
+--                                        URL ou clé changée ; DEFAULT true)
 --   bornes.entrepriseIcrmId              entreprise destinataire de la borne (NULL = canaux)
 --   partage_jobs.entrepriseIcrmId        cible FIGÉE à la création du job (NULL = canaux) :
 --                                        un job n'est envoyé qu'à cette cible
@@ -15,9 +17,18 @@
 -- Additive et IDEMPOTENTE (rejouable) : aucune colonne existante modifiée, aucun
 -- DROP. Les lignes existantes ont les nouvelles colonnes à NULL => comportement
 -- inchangé (canaux puis variables d'environnement, comme avant).
--- Clés étrangères posées NOT VALID puis validées : pas de verrou long sur les
--- tables existantes pendant la vérification (toutes les valeurs sont NULL).
+-- Verrous : Prisma exécute ce fichier en UNE transaction ; chaque ALTER TABLE y
+-- prend un verrou ACCESS EXCLUSIVE sur bornes / enregistrements / partage_jobs,
+-- gardé jusqu'au COMMIT (NOT VALID puis VALIDATE n'y change donc rien : la
+-- validation est instantanée, toutes les nouvelles colonnes étant NULL). Le
+-- lock_timeout ci-dessous borne l'ATTENTE de ces verrous : si une transaction
+-- longue tient l'une de ces tables, la migration échoue au bout de 5 s (rien
+-- n'est appliqué, `prisma migrate deploy` peut être relancé) au lieu de bloquer
+-- toutes les requêtes de l'application derrière elle. SET LOCAL : limité à la
+-- transaction de la migration.
 -- ─────────────────────────────────────────────────────────────────────────────
+
+SET LOCAL lock_timeout = '5s';
 
 -- CreateTable
 CREATE TABLE IF NOT EXISTS "entreprises_icrm" (
@@ -29,7 +40,7 @@ CREATE TABLE IF NOT EXISTS "entreprises_icrm" (
     "apiKey" TEXT NOT NULL,
     "token" TEXT NOT NULL,
     "actif" BOOLEAN NOT NULL DEFAULT true,
-    "verificationRequise" BOOLEAN NOT NULL DEFAULT false,
+    "verificationRequise" BOOLEAN NOT NULL DEFAULT true,
     "derniereVerification" TIMESTAMP(3),
     "dernierStatut" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -62,7 +73,9 @@ CREATE INDEX IF NOT EXISTS "enregistrements_crmEntrepriseIcrmId_idx" ON "enregis
 CREATE INDEX IF NOT EXISTS "partage_jobs_entrepriseIcrmId_statut_idx" ON "partage_jobs"("entrepriseIcrmId", "statut");
 
 -- AddForeignKey — PostgreSQL n'a pas de ADD CONSTRAINT IF NOT EXISTS : garde explicite.
--- NOT VALID (aucun parcours de la table), puis VALIDATE (verrou léger SHARE UPDATE EXCLUSIVE).
+-- NOT VALID puis VALIDATE : gardé pour un rejeu manuel hors transaction (psql), où la
+-- validation ne prend qu'un verrou SHARE UPDATE EXCLUSIVE ; sous Prisma (une seule
+-- transaction), voir l'en-tête : aucun gain, lock_timeout borne l'attente.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'bornes_entrepriseIcrmId_fkey') THEN

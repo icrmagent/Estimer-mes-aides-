@@ -17,7 +17,10 @@
  *    no-op quand elles manquent ; bloquer le démarrage sur une dépendance
  *    optionnelle par conception empêcherait un déploiement volontairement livré
  *    sans temps réel (cf. render.yaml : « sans ces valeurs, le temps reel est desactive »)
+ *  - ICRM_API_HOSTS_AUTORISES is optional — liste blanche des hôtes d'API I-CRM
+ *    (lib/icrmApiKey.js) ; entrées invalides ou liste vide signalées au démarrage
  */
+import { analyserHotesApiIcrm, VARIABLE_HOTES_API_ICRM } from './icrmApiKey.js'
 
 /** Required environment variables — absence causes process.exit(1) */
 const REQUIRED_VARS = [
@@ -123,6 +126,26 @@ export function validateEnv(env = process.env) {
   for (const { name, hint } of OPTIONAL_VARS) {
     if (isBlank(env, name)) {
       console.warn(`[validateEnv] WARNING: Optional variable ${name} is not set. ${hint}`)
+    }
+  }
+
+  // Liste blanche des hôtes d'API I-CRM : une liste personnalisée REMPLACE la liste
+  // par défaut (sauf mot « defaut ») — une erreur ici suspendrait tous les envois
+  // des entreprises I-CRM : elle est donc toujours signalée.
+  const hotesIcrm = analyserHotesApiIcrm(env[VARIABLE_HOTES_API_ICRM])
+  if (hotesIcrm.personnalisee) {
+    if (hotesIcrm.invalides.length > 0) {
+      console.warn(
+        `[validateEnv] WARNING: ${VARIABLE_HOTES_API_ICRM} : entrées ignorées (invalides) : ${hotesIcrm.invalides.join(', ')}.`
+      )
+    }
+    if (hotesIcrm.hotes.length === 0) {
+      console.warn(
+        `[validateEnv] WARNING: ${VARIABLE_HOTES_API_ICRM} ne contient aucun hôte valide : ` +
+          `aucune URL API I-CRM n'est acceptée (envois des entreprises I-CRM suspendus).`
+      )
+    } else {
+      console.warn(`[validateEnv] ${VARIABLE_HOTES_API_ICRM} : hôtes d'API I-CRM autorisés = ${hotesIcrm.hotes.join(', ')}.`)
     }
   }
 }

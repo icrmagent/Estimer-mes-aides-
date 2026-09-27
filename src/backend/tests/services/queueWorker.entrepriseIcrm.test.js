@@ -9,15 +9,18 @@
  *     (hors file, aucune tentative, aucune notification), jamais de canal ni d'env ;
  * - job.entrepriseIcrmId NULL → chemin des canaux inchangé (clé API, azure_ad, env) ;
  * - la destination COURANTE de la borne n'est jamais lue ;
- * - équité : des centaines de jobs suspendus n'occupent aucune place d'un cycle.
+ * - équité : des centaines de jobs suspendus n'occupent aucune place d'un cycle ;
+ * - prise atomique du job + relecture de sa cible COURANTE après la prise ;
+ * - balayage de début de cycle : suspendus d'une entreprise redevenue envoyable → en file ;
+ * - hôte de l'URL revérifié au moment de l'envoi (liste ICRM_API_HOSTS_AUTORISES).
  */
 
 import { jest } from '@jest/globals'
 
 const mockPrisma = {
-  partageJob: { findMany: jest.fn(), update: jest.fn() },
-  enregistrement: { findUnique: jest.fn(), update: jest.fn() },
-  entrepriseIcrm: { findUnique: jest.fn() },
+  partageJob: { findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUnique: jest.fn() },
+  enregistrement: { findUnique: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+  entrepriseIcrm: { findUnique: jest.fn(), findMany: jest.fn() },
   canal: { update: jest.fn() },
   $transaction: jest.fn(),
 }
@@ -38,11 +41,13 @@ jest.unstable_mockModule('../../src/lib/logger.js', () => ({ default: mockLogger
 global.fetch = jest.fn()
 
 const {
-  processJob,
+  processJob: processJobReel,
   processPendingJobs,
   buildIcrmEnregistrementPayload,
   MAX_TENTATIVES,
 } = await import('../../src/services/queueWorker.js')
+const { installerPriseJob, prisesDeJob } = await import('../helpers/priseJob.js')
+let processJob = processJobReel
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +60,7 @@ const ENT_ID = '66666666-6666-4666-8666-666666666666'
 const LENA_ID = '77777777-7777-4777-8777-777777777777'
 const URL_ENTREPRISE = 'https://icrm.api.es.ila26.com/api/external/estimer-mes-aides/v1/enregistrements'
 const URL_LENA = 'https://icrm.api.ila26.fr/api/external/estimer-mes-aides/v1/enregistrements'
-const URL_CANAL = 'https://canal.example.fr/api/external/estimer-mes-aides/v1/enregistrements'
+const URL_CANAL = 'https://icrm-canal.azurewebsites.net/api/external/estimer-mes-aides/v1/enregistrements'
 
 const ENTREPRISE = {
   id: ENT_ID,
@@ -75,7 +80,7 @@ const LENA = {
 
 const CANAL_CLE_API = {
   id: 'canal-cle-api', label: 'icrm-canal', type: 'icrm_api_key',
-  apiUrl: 'https://canal.example.fr', apiKey: CLE_CANAL, token: SECRET_CANAL, actif: true,
+  apiUrl: 'https://icrm-canal.azurewebsites.net', apiKey: CLE_CANAL, token: SECRET_CANAL, actif: true,
 }
 
 const q = (crm, fr, typeOption = 'texte_court') => ({
@@ -158,10 +163,13 @@ beforeEach(() => {
     where.id === ENT_ID ? { ...ENTREPRISE } : where.id === LENA_ID ? { ...LENA } : null
   ))
   mockPrisma.partageJob.update.mockResolvedValue({})
+  mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
+  processJob = installerPriseJob(mockPrisma.partageJob)(processJobReel)
   mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
   mockNotifySucces.mockResolvedValue(undefined)
   mockNotifyEchec.mockResolvedValue(undefined)
   global.fetch.mockResolvedValue(reponseHttp(201, CREATED))
+  delete process.env.ICRM_API_HOSTS_AUTORISES
 })
 
 // ─── Cible entreprise utilisable ──────────────────────────────────────────────
@@ -263,8 +271,10 @@ describe('processJob — cible inutilisable : statut `suspendu`, jamais de repli
   it.each([
     ['désactivée', { ...ENTREPRISE, actif: false }, 'Entreprise I-CRM « CAE España » désactivée — envoi suspendu'],
     ['supprimée', { ...ENTREPRISE, actif: false, deletedAt: new Date('2026-09-26T00:00:00Z') }, 'Entreprise I-CRM « CAE España » supprimée — envoi suspendu'],
-    ['à retester (URL ou clé modifiée)', { ...ENTREPRISE, verificationRequise: true, nomIcrm: null },
-      "Entreprise I-CRM « CAE España » : URL ou clé modifiée, testez l'entreprise pour reprendre les envois — envoi suspendu"],
+    ['à tester (nouvelle, URL ou clé modifiée)', { ...ENTREPRISE, verificationRequise: true, nomIcrm: null },
+      "Entreprise I-CRM « CAE España » : identifiants non vérifiés (nouvelle entreprise, URL ou clé modifiée), testez l'entreprise pour reprendre les envois — envoi suspendu"],
+    ['hôte d’URL hors liste autorisée', { ...ENTREPRISE, apiUrl: 'https://icrm.autre-hebergeur.example' },
+      "Entreprise I-CRM « CAE España » : hôte de l'URL API non autorisé (ICRM_API_HOSTS_AUTORISES) — envoi suspendu"],
   ])('entreprise %s : aucun envoi (ni entreprise, ni canal, ni env), job suspendu hors file', async (_cas, etat, motif) => {
     mockPrisma.entrepriseIcrm.findUnique.mockResolvedValue(etat)
 
@@ -431,6 +441,16 @@ describe('processPendingJobs — équité : les jobs suspendus n’occupent aucu
       if (ligne) Object.assign(ligne, data)
       return ligne
     })
+    // Prise atomique : seulement si le statut est encore dans where.statut.in
+    mockPrisma.partageJob.updateMany.mockImplementation(async ({ where, data }) => {
+      const ligne = table.find((j) => j.id === where.id && (!where.statut?.in || where.statut.in.includes(j.statut)))
+      if (ligne) Object.assign(ligne, data)
+      return { count: ligne ? 1 : 0 }
+    })
+    mockPrisma.partageJob.findUnique.mockImplementation(async ({ where }) => {
+      const ligne = table.find((j) => j.id === where.id)
+      return ligne ? { enregistrementId: ligne.enregistrementId, entrepriseIcrmId: ligne.entrepriseIcrmId ?? null, tentatives: ligne.tentatives } : null
+    })
     mockPrisma.enregistrement.findUnique.mockImplementation(async ({ where }) => makeEnregistrement({ id: where.id }))
     return table
   }
@@ -478,7 +498,7 @@ describe('processPendingJobs — équité : les jobs suspendus n’occupent aucu
 
     expect(cycles).toBe(31) // ⌈301 / 10⌉ : borné, puis plus jamais repris
     expect(table.filter((j) => j.statut === 'suspendu')).toHaveLength(300)
-    const visites = mockPrisma.partageJob.update.mock.calls.filter((c) => c[0].data.statut === 'en_cours').map((c) => c[0].where.id)
+    const visites = prisesDeJob(mockPrisma.partageJob).map((arg) => arg.where.id)
     expect(new Set(visites).size).toBe(visites.length) // aucun job visité deux fois
     expect(global.fetch).toHaveBeenCalledTimes(1)
 
@@ -486,5 +506,173 @@ describe('processPendingJobs — équité : les jobs suspendus n’occupent aucu
     mockPrisma.partageJob.findMany.mockClear()
     await processPendingJobs()
     expect(await mockPrisma.partageJob.findMany.mock.results[0].value).toEqual([])
+  })
+})
+
+// ─── Prise atomique et relecture de la cible ──────────────────────────────────
+
+describe('processJob — prise atomique, cible COURANTE relue après la prise', () => {
+  it('prise refusée (job déjà pris, relancé, suspendu ou redirigé) : rien n’est lu, rien n’est envoyé', async () => {
+    mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 0 })
+
+    await processJob(makeJob())
+
+    expect(mockPrisma.partageJob.updateMany).toHaveBeenCalledWith({
+      where: { id: 'job-uuid-1', statut: { in: ['en_attente', 'echec_temporaire'] } },
+      data: { statut: 'en_cours', updatedAt: expect.any(Date) },
+    })
+    expect(mockPrisma.partageJob.findUnique).not.toHaveBeenCalled()
+    expect(mockPrisma.enregistrement.findUnique).not.toHaveBeenCalled()
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(mockPrisma.partageJob.update).not.toHaveBeenCalled()
+    expect(mockLogger.info.mock.calls.some((c) => /Job ignoré — déjà pris ou modifié/.test(c[0].message))).toBe(true)
+  })
+
+  it('job supprimé entre la prise et la relecture : ignoré', async () => {
+    mockPrisma.partageJob.findUnique.mockResolvedValue(null)
+    await processJobReel(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(mockPrisma.enregistrement.findUnique).not.toHaveBeenCalled()
+  })
+
+  it('redirection arrivée juste avant la prise (cible lue CAE, cible courante LENA) : envoi à LENA seulement', async () => {
+    mockPrisma.partageJob.findUnique.mockResolvedValue({ enregistrementId: ENR_ID, entrepriseIcrmId: LENA_ID, tentatives: 0 })
+
+    await processJobReel(makeJob({ entrepriseIcrmId: ENT_ID }))
+
+    expect(mockPrisma.entrepriseIcrm.findUnique).toHaveBeenCalledTimes(1)
+    expect(mockPrisma.entrepriseIcrm.findUnique.mock.calls[0][0].where).toEqual({ id: LENA_ID })
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_LENA)
+    expect(majPartage().data).toMatchObject({ crmEntrepriseIcrmId: LENA_ID, crmDestination: expect.objectContaining({ nom: 'LENA (France)' }) })
+  })
+
+  it('redirigé vers les canaux juste avant la prise (cible courante NULL) : chemin des canaux, aucune entreprise lue', async () => {
+    mockPrisma.partageJob.findUnique.mockResolvedValue({ enregistrementId: ENR_ID, entrepriseIcrmId: null, tentatives: 0 })
+    await processJobReel(makeJob({ entrepriseIcrmId: ENT_ID }))
+    expect(mockPrisma.entrepriseIcrm.findUnique).not.toHaveBeenCalled()
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_CANAL)
+  })
+
+  it('tentatives relues : un job relancé (0) entre la lecture (4) et la prise ne passe pas en échec définitif', async () => {
+    mockPrisma.partageJob.findUnique.mockResolvedValue({ enregistrementId: ENR_ID, entrepriseIcrmId: ENT_ID, tentatives: 0 })
+    global.fetch.mockResolvedValue(reponseHttp(503, { error: { code: 'internal_error' } }))
+    await processJobReel(makeJob({ tentatives: MAX_TENTATIVES - 1 }))
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    expect(appelsUpdateJob('echec_temporaire')[0][0].data.tentatives).toBe(1)
+  })
+})
+
+// ─── Balayage des suspendus en début de cycle ─────────────────────────────────
+
+describe('processPendingJobs — balayage : suspendus d’une entreprise redevenue envoyable → en file', () => {
+  it('reprend les suspendus des entreprises utilisables à l’hôte autorisé, pas les autres', async () => {
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([
+      { id: ENT_ID, apiUrl: 'https://icrm.api.es.ila26.com' },
+      { id: LENA_ID, apiUrl: 'https://icrm.autre-hebergeur.example' },
+    ])
+    mockPrisma.partageJob.findMany.mockImplementation(async ({ where }) => (
+      where.statut === 'suspendu' && where.entrepriseIcrmId === ENT_ID
+        ? [{ id: 'S1', enregistrementId: 'enr-S1' }, { id: 'S2', enregistrementId: 'enr-S2' }]
+        : []
+    ))
+
+    await processPendingJobs()
+
+    expect(mockPrisma.entrepriseIcrm.findMany).toHaveBeenCalledWith({
+      where: { actif: true, deletedAt: null, verificationRequise: false, partageJobs: { some: { statut: 'suspendu' } } },
+      select: { id: true, apiUrl: true },
+    })
+    // Seule l'entreprise à l'hôte autorisé est lue puis reprise
+    const lecturesSuspendus = mockPrisma.partageJob.findMany.mock.calls.map((c) => c[0].where).filter((w) => w.statut === 'suspendu')
+    expect(lecturesSuspendus).toEqual([{ entrepriseIcrmId: ENT_ID, statut: 'suspendu' }])
+    expect(mockPrisma.partageJob.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['S1', 'S2'] }, statut: 'suspendu' },
+      data: { statut: 'en_attente', erreur: null, prochainEssai: null },
+    })
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['enr-S1', 'enr-S2'] }, statutPartage: 'suspendu' },
+      data: { statutPartage: 'en_attente', derniereErreur: null },
+    })
+    const log = mockLogger.info.mock.calls.map((c) => c[0]).find((l) => /Envois suspendus repris/.test(l.message))
+    expect(log).toMatchObject({ total: 2, reprises: [{ entrepriseIcrmId: ENT_ID, jobs: 2 }] })
+  })
+
+  it('aucune entreprise concernée : aucune écriture', async () => {
+    mockPrisma.partageJob.findMany.mockResolvedValue([])
+    await processPendingJobs()
+    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it('une erreur du balayage n’empêche jamais le cycle', async () => {
+    mockPrisma.entrepriseIcrm.findMany.mockRejectedValue(new Error('base indisponible'))
+    mockPrisma.partageJob.findMany.mockResolvedValue([makeJob()])
+    await processPendingJobs()
+    expect(mockLogger.warn.mock.calls.some((c) => /Balayage des envois suspendus impossible/.test(c[0].message))).toBe(true)
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('en mémoire : suspendu d’une entreprise réactivée repris puis envoyé DANS le même cycle', async () => {
+    const table = [
+      { id: 'S1', enregistrementId: 'enr-S1', statut: 'suspendu', tentatives: 2, prochainEssai: null, entrepriseIcrmId: ENT_ID, createdAt: new Date('2026-09-01') },
+    ]
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([{ id: ENT_ID, apiUrl: ENTREPRISE.apiUrl }])
+    mockPrisma.partageJob.findMany.mockImplementation(async ({ where }) => {
+      if (where.statut === 'suspendu') return table.filter((j) => j.statut === 'suspendu' && j.entrepriseIcrmId === where.entrepriseIcrmId)
+      return table.filter((j) => j.statut === 'en_attente').map((j) => ({ ...j }))
+    })
+    mockPrisma.partageJob.updateMany.mockImplementation(async ({ where, data }) => {
+      const ids = typeof where.id === 'string' ? [where.id] : where.id.in
+      const statutOk = (s) => (typeof where.statut === 'string' ? where.statut === s : where.statut.in.includes(s))
+      const lignes = table.filter((j) => ids.includes(j.id) && statutOk(j.statut))
+      lignes.forEach((l) => Object.assign(l, data))
+      return { count: lignes.length }
+    })
+    mockPrisma.partageJob.findUnique.mockImplementation(async ({ where }) => {
+      const l = table.find((j) => j.id === where.id)
+      return { enregistrementId: l.enregistrementId, entrepriseIcrmId: l.entrepriseIcrmId, tentatives: l.tentatives }
+    })
+    mockPrisma.partageJob.update.mockImplementation(async ({ where, data }) => Object.assign(table.find((j) => j.id === where.id), data))
+
+    await processPendingJobs()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_ENTREPRISE)
+    expect(table[0].statut).toBe('succes')
+  })
+})
+
+// ─── Hôte revérifié au moment de l'envoi ──────────────────────────────────────
+
+describe('envoi — hôte de l’URL revérifié au moment de l’envoi (liste blanche)', () => {
+  it('liste ICRM_API_HOSTS_AUTORISES changée depuis l’enregistrement : entreprise suspendue (motif URL), aucun appel', async () => {
+    process.env.ICRM_API_HOSTS_AUTORISES = 'icrm.autre-client.example.org'
+    await processJob(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(appelsUpdateJob('suspendu')[0][0].data.erreur).toMatch(/hôte de l'URL API non autorisé \(ICRM_API_HOSTS_AUTORISES\) — envoi suspendu/)
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+  })
+
+  it('« defaut » dans la variable : la liste par défaut reste valable', async () => {
+    process.env.ICRM_API_HOSTS_AUTORISES = 'defaut,icrm.autre-client.example.org'
+    await processJob(makeJob())
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_ENTREPRISE)
+  })
+
+  it.each([
+    'https://169.254.169.254',
+    'https://metadata.google.internal',
+    'https://127.0.0.1.nip.io',
+    'https://[::7f00:1]',
+  ])('canal clé API vers %s : échec définitif sans appel réseau (le secret ne part pas)', async (apiUrl) => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({
+      canaux: [{ ...CANAL_CLE_API, apiUrl }],
+    }))
+    await processJob(makeJob({ entrepriseIcrmId: null }))
+    expect(global.fetch).not.toHaveBeenCalled()
+    const echec = appelsUpdateJob('echec_definitif')[0][0].data
+    expect(echec.erreur).toMatch(/URL API refusée au moment de l'envoi/)
+    expect(tousLesLogs()).not.toContain(SECRET_CANAL)
   })
 })

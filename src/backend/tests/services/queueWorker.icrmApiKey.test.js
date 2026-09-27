@@ -24,8 +24,9 @@ import { jest } from '@jest/globals'
 // ─── Mocks (must be before any imports) ──────────────────────────────────────
 
 const mockPrisma = {
-  partageJob: { findMany: jest.fn(), update: jest.fn() },
+  partageJob: { findMany: jest.fn(), update: jest.fn(), updateMany: jest.fn(), findUnique: jest.fn() },
   enregistrement: { findUnique: jest.fn(), update: jest.fn() },
+  entrepriseIcrm: { findMany: jest.fn() },
   canal: { update: jest.fn() },
   $transaction: jest.fn(),
 }
@@ -50,10 +51,12 @@ global.fetch = jest.fn()
 // ─── Imports (after mocks) ────────────────────────────────────────────────────
 
 const {
-  processJob,
+  processJob: processJobReel,
   MAX_TENTATIVES,
   buildIcrmEnregistrementPayload,
 } = await import('../../src/services/queueWorker.js')
+const { installerPriseJob } = await import('../helpers/priseJob.js')
+let processJob = processJobReel
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -202,6 +205,8 @@ beforeEach(() => {
   mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement())
   mockPrisma.enregistrement.update.mockResolvedValue({})
   mockPrisma.partageJob.update.mockResolvedValue({})
+  mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
+  processJob = installerPriseJob(mockPrisma.partageJob)(processJobReel)
   mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
   mockNotifySucces.mockResolvedValue(undefined)
   mockNotifyEchec.mockResolvedValue(undefined)

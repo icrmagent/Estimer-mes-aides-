@@ -12,6 +12,21 @@ import { statutPourCible, SELECT_ETAT_ENTREPRISE } from '../services/partageCibl
 
 export const enregistrementsRouter = Router()
 
+/**
+ * Instantané de livraison (`crmDestination`) selon le rôle : le SuperAdmin le voit
+ * en entier (entreprise, hôte de l'API, identifiant de clé — jamais de secret) ;
+ * tout autre rôle (AdminBorne) n'en voit que l'entreprise : nom, entreprise et
+ * sous-type I-CRM — ni l'hôte de l'API ni l'identifiant de clé.
+ */
+export function projeterDestinationLivraison(enregistrement, role) {
+  if (!enregistrement || role === 'SUPER_ADMIN' || enregistrement.crmDestination === undefined) return enregistrement
+  const d = enregistrement.crmDestination
+  const crmDestination = d && typeof d === 'object' && !Array.isArray(d)
+    ? { nom: d.nom ?? null, nomIcrm: d.nomIcrm ?? null, sousTypeIcrm: d.sousTypeIcrm ?? null }
+    : null
+  return { ...enregistrement, crmDestination }
+}
+
 // ─── Zod schemas ─────────────────────────────────────────────────────────────
 
 const createEnregistrementSchema = z.object({
@@ -417,7 +432,7 @@ enregistrementsRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORN
     }
 
     const enregistrementsWithContact = enregistrements.map((enregistrement) => ({
-      ...enregistrement,
+      ...projeterDestinationLivraison(enregistrement, req.user.role),
       reponses: reponsesByEnregistrement.get(enregistrement.id) || [],
     }))
 
@@ -457,7 +472,7 @@ enregistrementsRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_B
       })
     }
 
-    return res.json({ success: true, data: enregistrement })
+    return res.json({ success: true, data: projeterDestinationLivraison(enregistrement, req.user.role) })
   } catch (err) {
     return handlePrismaError(err, res)
   }

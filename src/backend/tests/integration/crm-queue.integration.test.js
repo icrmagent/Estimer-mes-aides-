@@ -24,6 +24,8 @@ jest.unstable_mockModule('../../src/services/pusherService.js', () => ({
 
 // Prisma mock with all methods needed by queueWorker
 const mockPartageJobUpdate = jest.fn()
+const mockPartageJobUpdateMany = jest.fn()
+const mockPartageJobFindUnique = jest.fn()
 const mockEnregistrementFindUnique = jest.fn()
 const mockEnregistrementUpdate = jest.fn()
 const mockTransaction = jest.fn()
@@ -32,6 +34,9 @@ jest.unstable_mockModule('../../src/lib/prisma.js', () => ({
   prisma: {
     partageJob: {
       update: mockPartageJobUpdate,
+      // Prise atomique puis relecture du job par le worker
+      updateMany: mockPartageJobUpdateMany,
+      findUnique: mockPartageJobFindUnique,
       findMany: jest.fn(),
     },
     enregistrement: {
@@ -44,7 +49,18 @@ jest.unstable_mockModule('../../src/lib/prisma.js', () => ({
 
 // ─── Dynamic imports (after mocks) ───────────────────────────────────────────
 
-const { processJob, MAX_TENTATIVES, computeNextRetry } = await import('../../src/services/queueWorker.js')
+const { processJob: processJobReel, MAX_TENTATIVES, computeNextRetry } = await import('../../src/services/queueWorker.js')
+
+// Prise atomique (updateMany → count 1) puis relecture de la cible et des tentatives
+const processJob = (job) => {
+  mockPartageJobUpdateMany.mockResolvedValue({ count: 1 })
+  mockPartageJobFindUnique.mockResolvedValueOnce({
+    enregistrementId: job.enregistrementId,
+    entrepriseIcrmId: job.entrepriseIcrmId ?? null,
+    tentatives: job.tentatives,
+  })
+  return processJobReel(job)
+}
 
 // ─── Environment setup ────────────────────────────────────────────────────────
 
@@ -117,11 +133,11 @@ describe('Integration — CRM Queue Worker: processJob', () => {
       const job = makeJob()
       await processJob(job)
 
-      // Verify job was first marked en_cours
-      expect(mockPartageJobUpdate).toHaveBeenCalledWith(
+      // Verify job was first claimed (en_cours) — atomically, only if still queued
+      expect(mockPartageJobUpdateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: JOB_ID },
-          data: { statut: 'en_cours' },
+          where: { id: JOB_ID, statut: { in: ['en_attente', 'echec_temporaire'] } },
+          data: expect.objectContaining({ statut: 'en_cours' }),
         })
       )
 

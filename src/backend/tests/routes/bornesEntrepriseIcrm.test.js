@@ -5,7 +5,9 @@
  * entreprise existante, active, non supprimée), choix réservé au SuperAdmin
  * (AdminBorne : 403 si la valeur change, accepté si elle est renvoyée inchangée),
  * valeur inchangée non revalidée (entreprise désactivée depuis), `null` = retour
- * aux canaux, liste et détail avec l'entreprise (jamais l'URL, la clé ni le secret).
+ * aux canaux, liste et détail avec l'entreprise (jamais l'URL, la clé ni le secret),
+ * envois non livrés (échecs définitifs compris) gardés ou redirigés au changement
+ * de destination, « Rediriger les envois » vers la destination actuelle (simulation).
  */
 
 import { jest } from '@jest/globals'
@@ -270,14 +272,17 @@ describe('GET /api/bornes — entreprise I-CRM de la borne', () => {
 
 // ─── Changement de destination : envois pas encore livrés ─────────────────────
 
-describe('PUT /api/bornes/:id — changement d’entreprise et envois en attente', () => {
+describe('PUT /api/bornes/:id — changement d’entreprise et envois non livrés', () => {
+  const NON_LIVRES = ['en_attente', 'echec_temporaire', 'suspendu', 'echec_definitif']
   const JOBS_CAE = [
-    { id: 'j1', enregistrementId: 'e1', statut: 'suspendu' },
-    { id: 'j2', enregistrementId: 'e2', statut: 'en_attente' },
+    { id: 'j1', enregistrementId: 'e1', statut: 'suspendu', entrepriseIcrmId: ENT_CAE },
+    { id: 'j2', enregistrementId: 'e2', statut: 'en_attente', entrepriseIcrmId: ENT_CAE },
+    { id: 'j3', enregistrementId: 'e3', statut: 'echec_definitif', entrepriseIcrmId: ENT_CAE },
   ]
+  const LENA_ETAT = { id: ENT_LENA, nom: 'LENA', actif: true, deletedAt: null, verificationRequise: false }
   const appelsMajJobs = () => mockPrisma.partageJob.updateMany.mock.calls.map((c) => c[0])
 
-  it('par défaut, les envois GARDENT leur cible (ancienne entreprise) : rien n’est redirigé, nombre renvoyé', async () => {
+  it('par défaut, les envois GARDENT leur cible (ancienne entreprise) : rien n’est redirigé, nombre renvoyé (échecs définitifs compris)', async () => {
     mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
     mockPrisma.partageJob.count.mockResolvedValue(5)
 
@@ -286,33 +291,34 @@ describe('PUT /api/bornes/:id — changement d’entreprise et envois en attente
     expect(res.status).toBe(200)
     expect(res.body.envoisEnAttente).toEqual({ conserves: 5 })
     expect(mockPrisma.partageJob.count).toHaveBeenCalledWith({
-      where: {
-        statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] },
-        entrepriseIcrmId: ENT_CAE,
-        enregistrement: { borneId: BORNE_ID },
-      },
+      where: { statut: { in: NON_LIVRES }, entrepriseIcrmId: ENT_CAE, enregistrement: { borneId: BORNE_ID } },
     })
     expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
     expect(mockPrisma.borne.update).toHaveBeenCalledWith({ where: { id: BORNE_ID }, data: { entrepriseIcrmId: ENT_LENA } })
   })
 
-  it('redirigerEnvoisEnAttente: true → cible = nouvelle entreprise, suspendus remis en file', async () => {
+  it('redirigerEnvoisEnAttente: true → cible = nouvelle entreprise ; suspendus remis en file, échecs définitifs reciblés seulement', async () => {
     mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
     mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([LENA_ETAT])
 
     const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA)
       .send({ entrepriseIcrmId: ENT_LENA, redirigerEnvoisEnAttente: true })
 
     expect(res.status).toBe(200)
-    expect(res.body.envoisEnAttente).toEqual({ rediriges: 2 })
+    expect(res.body.envoisEnAttente).toEqual({
+      rediriges: 3,
+      destinations: [{ type: 'entreprise_icrm', entrepriseIcrmId: ENT_LENA, nom: 'LENA', actif: true, supprimee: false, total: 3, suspendus: 0, echecs: 1 }],
+    })
     expect(mockPrisma.partageJob.findMany.mock.calls[0][0].where).toEqual({
-      statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] },
+      statut: { in: NON_LIVRES },
       enregistrement: { borneId: BORNE_ID },
       OR: [{ entrepriseIcrmId: ENT_CAE }, { entrepriseIcrm: { is: { deletedAt: { not: null } } } }],
     })
     expect(appelsMajJobs()).toEqual([
-      { where: { id: { in: ['j1', 'j2'] } }, data: { entrepriseIcrmId: ENT_LENA } },
-      { where: { id: { in: ['j1'] } }, data: { statut: 'en_attente', erreur: null, prochainEssai: null } },
+      { where: { id: { in: ['j1'] }, statut: 'suspendu' }, data: { entrepriseIcrmId: ENT_LENA, statut: 'en_attente', erreur: null, prochainEssai: null } },
+      { where: { id: { in: ['j2'] }, statut: 'en_attente' }, data: { entrepriseIcrmId: ENT_LENA } },
+      { where: { id: { in: ['j3'] }, statut: 'echec_definitif' }, data: { entrepriseIcrmId: ENT_LENA } },
     ])
     expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ['e1'] }, statutPartage: 'suspendu' },
@@ -324,26 +330,31 @@ describe('PUT /api/bornes/:id — changement d’entreprise et envois en attente
 
   it('redirection vers « Aucune » (null) : cible = canaux (NULL), suspendus remis en file', async () => {
     mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
-    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE.slice(0, 2))
 
     const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA)
       .send({ entrepriseIcrmId: null, redirigerEnvoisEnAttente: true })
 
-    expect(res.body.envoisEnAttente).toEqual({ rediriges: 2 })
-    expect(appelsMajJobs()[0]).toEqual({ where: { id: { in: ['j1', 'j2'] } }, data: { entrepriseIcrmId: null } })
+    expect(res.body.envoisEnAttente).toMatchObject({ rediriges: 2, destinations: [{ type: 'canal', total: 2 }] })
+    expect(appelsMajJobs()).toEqual([
+      { where: { id: { in: ['j1'] }, statut: 'suspendu' }, data: { entrepriseIcrmId: null, statut: 'en_attente', erreur: null, prochainEssai: null } },
+      { where: { id: { in: ['j2'] }, statut: 'en_attente' }, data: { entrepriseIcrmId: null } },
+    ])
   })
 
-  it('redirection vers une entreprise à retester : envois redirigés mais SUSPENDUS avec son motif', async () => {
+  it('redirection vers une entreprise à tester : envois redirigés mais SUSPENDUS avec son motif', async () => {
     mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_LENA, nom: 'LENA', actif: true, deletedAt: null, verificationRequise: true })
-    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([{ ...LENA_ETAT, verificationRequise: true }])
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE.slice(0, 2))
 
-    await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA).send({ entrepriseIcrmId: ENT_LENA, redirigerEnvoisEnAttente: true })
+    const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA).send({ entrepriseIcrmId: ENT_LENA, redirigerEnvoisEnAttente: true })
 
-    expect(appelsMajJobs()[1]).toEqual({
-      where: { id: { in: ['j1', 'j2'] } },
-      data: { statut: 'suspendu', erreur: expect.stringMatching(/LENA.*testez l'entreprise/), prochainEssai: null },
-    })
+    expect(res.body.envoisEnAttente.destinations[0]).toMatchObject({ total: 2, suspendus: 2 })
+    const motif = expect.stringMatching(/LENA.*identifiants non vérifiés.*testez l'entreprise/)
+    expect(appelsMajJobs()).toEqual([
+      { where: { id: { in: ['j1'] }, statut: 'suspendu' }, data: { entrepriseIcrmId: ENT_LENA, statut: 'suspendu', erreur: motif, prochainEssai: null } },
+      { where: { id: { in: ['j2'] }, statut: 'en_attente' }, data: { entrepriseIcrmId: ENT_LENA, statut: 'suspendu', erreur: motif, prochainEssai: null } },
+    ])
   })
 
   it('drapeau sans changement de destination : ignoré', async () => {
@@ -357,29 +368,37 @@ describe('PUT /api/bornes/:id — changement d’entreprise et envois en attente
   })
 })
 
-describe('GET /api/bornes/:id — envois en attente par cible', () => {
-  it('décompte par entreprise cible (nom, état, suspendus) et par canaux', async () => {
+describe('GET /api/bornes/:id — envois non livrés par cible', () => {
+  it('décompte par entreprise cible (nom, état, suspendus, échecs définitifs), par canaux, et hors destination actuelle', async () => {
     mockPrisma.borne.findUniqueOrThrow.mockResolvedValue({ id: BORNE_ID, entrepriseIcrmId: ENT_LENA, entrepriseIcrm: null })
     mockPrisma.partageJob.groupBy.mockResolvedValue([
       { entrepriseIcrmId: ENT_CAE, statut: 'suspendu', _count: { _all: 4 } },
       { entrepriseIcrmId: ENT_CAE, statut: 'en_attente', _count: { _all: 1 } },
       { entrepriseIcrmId: null, statut: 'echec_temporaire', _count: { _all: 2 } },
+      { entrepriseIcrmId: null, statut: 'echec_definitif', _count: { _all: 3 } },
+      { entrepriseIcrmId: ENT_LENA, statut: 'en_attente', _count: { _all: 6 } },
     ])
-    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([{ id: ENT_CAE, nom: 'CAE España', actif: false, deletedAt: null }])
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([
+      { id: ENT_CAE, nom: 'CAE España', actif: false, deletedAt: null },
+      { id: ENT_LENA, nom: 'LENA', actif: true, deletedAt: null },
+    ])
 
     const res = await request(app).get(`/api/bornes/${BORNE_ID}`).set(authSA)
 
     expect(res.status).toBe(200)
     expect(res.body.data.envoisEnAttente).toEqual({
-      total: 7,
+      total: 16,
+      // 16 - 6 envois qui visent déjà LENA (destination actuelle)
+      horsDestination: 10,
       parEntreprise: [
-        { entrepriseIcrmId: ENT_CAE, nom: 'CAE España', actif: false, supprimee: false, total: 5, suspendus: 4 },
-        { entrepriseIcrmId: null, nom: null, actif: null, supprimee: false, total: 2, suspendus: 0 },
+        { entrepriseIcrmId: ENT_CAE, nom: 'CAE España', actif: false, supprimee: false, total: 5, suspendus: 4, echecs: 0 },
+        { entrepriseIcrmId: null, nom: null, actif: null, supprimee: false, total: 5, suspendus: 0, echecs: 3 },
+        { entrepriseIcrmId: ENT_LENA, nom: 'LENA', actif: true, supprimee: false, total: 6, suspendus: 0, echecs: 0 },
       ],
     })
     expect(mockPrisma.partageJob.groupBy).toHaveBeenCalledWith({
       by: ['entrepriseIcrmId', 'statut'],
-      where: { statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] }, enregistrement: { borneId: BORNE_ID, deletedAt: null } },
+      where: { statut: { in: ['en_attente', 'echec_temporaire', 'suspendu', 'echec_definitif'] }, enregistrement: { borneId: BORNE_ID, deletedAt: null } },
       _count: { _all: true },
     })
   })
@@ -390,5 +409,128 @@ describe('GET /api/bornes/:id — envois en attente par cible', () => {
     const res = await request(app).get(`/api/bornes/${BORNE_ID}`).set(authSA)
     expect(res.status).toBe(200)
     expect(res.body.data.envoisEnAttente).toBeNull()
+  })
+})
+
+describe('POST /api/bornes/:id/rediriger-envois — vers la destination actuelle', () => {
+  const NON_LIVRES = ['en_attente', 'echec_temporaire', 'suspendu', 'echec_definitif']
+  const appelsMajJobs = () => mockPrisma.partageJob.updateMany.mock.calls.map((c) => c[0])
+  const rediriger = (query = '', corps = { vers: 'destination_actuelle' }, auth = authSA) =>
+    request(app).post(`/api/bornes/${BORNE_ID}/rediriger-envois${query}`).set(auth).send(corps)
+  // Après une suppression forcée : envois restés suspendus « CAE supprimée » sur une borne repassée aux canaux
+  const ORPHELINS = [
+    { id: 'j1', enregistrementId: 'e1', statut: 'suspendu', entrepriseIcrmId: ENT_CAE },
+    { id: 'j2', enregistrementId: 'e2', statut: 'suspendu', entrepriseIcrmId: ENT_CAE },
+  ]
+  const CAE_SUPPRIMEE = { id: ENT_CAE, nom: 'CAE', actif: false, deletedAt: new Date('2026-09-27T10:00:00Z'), verificationRequise: false }
+
+  it('?simulation=true : répartition d’origine et d’arrivée, RIEN n’est écrit', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ id: BORNE_ID, idBorne: 'B', entrepriseIcrmId: null })
+    mockPrisma.partageJob.findMany.mockResolvedValue(ORPHELINS)
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([CAE_SUPPRIMEE])
+
+    const res = await rediriger('?simulation=true')
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toEqual({
+      borneId: BORNE_ID,
+      simulation: true,
+      destinationActuelle: { type: 'canal', entrepriseIcrmId: null, nom: null },
+      total: 2,
+      depuis: [{ type: 'entreprise_icrm', entrepriseIcrmId: ENT_CAE, nom: 'CAE', actif: false, supprimee: true, total: 2, suspendus: 2, echecs: 0 }],
+      destinations: [{ type: 'canal', entrepriseIcrmId: null, nom: null, total: 2, suspendus: 0, echecs: 0 }],
+    })
+    expect(mockPrisma.partageJob.findMany.mock.calls[0][0].where).toEqual({
+      statut: { in: NON_LIVRES },
+      enregistrement: { borneId: BORNE_ID, deletedAt: null },
+      entrepriseIcrmId: { not: null },
+    })
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+  })
+
+  it('impasse après suppression forcée : les suspendus « supprimée » repartent vers les canaux de la borne', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ id: BORNE_ID, idBorne: 'B', entrepriseIcrmId: null })
+    mockPrisma.partageJob.findMany.mockResolvedValue(ORPHELINS)
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([CAE_SUPPRIMEE])
+
+    const res = await rediriger()
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ total: 2, destinations: [{ type: 'canal', total: 2 }] })
+    expect(res.body.data).not.toHaveProperty('simulation')
+    expect(appelsMajJobs()).toEqual([
+      { where: { id: { in: ['j1', 'j2'] }, statut: 'suspendu' }, data: { entrepriseIcrmId: null, statut: 'en_attente', erreur: null, prochainEssai: null } },
+    ])
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['e1', 'e2'] }, statutPartage: 'suspendu' },
+      data: { statutPartage: 'en_attente', derniereErreur: null },
+    })
+  })
+
+  it('borne affectée à LENA : envois NULL (canaux) et d’une autre entreprise → LENA ; « différent de » inclut explicitement NULL', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ id: BORNE_ID, idBorne: 'B', entrepriseIcrmId: ENT_LENA })
+    mockPrisma.partageJob.findMany.mockResolvedValue([
+      { id: 'j5', enregistrementId: 'e5', statut: 'echec_definitif', entrepriseIcrmId: null },
+      { id: 'j6', enregistrementId: 'e6', statut: 'suspendu', entrepriseIcrmId: ENT_CAE },
+    ])
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([
+      { id: ENT_LENA, nom: 'LENA', actif: true, deletedAt: null, verificationRequise: false },
+      { id: ENT_CAE, nom: 'CAE', actif: false, deletedAt: null, verificationRequise: false },
+    ])
+
+    const res = await rediriger()
+
+    expect(mockPrisma.partageJob.findMany.mock.calls[0][0].where).toEqual({
+      statut: { in: NON_LIVRES },
+      enregistrement: { borneId: BORNE_ID, deletedAt: null },
+      OR: [{ entrepriseIcrmId: null }, { entrepriseIcrmId: { not: ENT_LENA } }],
+    })
+    expect(res.body.data.destinations).toEqual([expect.objectContaining({ entrepriseIcrmId: ENT_LENA, total: 2, echecs: 1, suspendus: 0 })])
+    expect(res.body.data.depuis).toEqual([
+      expect.objectContaining({ entrepriseIcrmId: ENT_CAE, total: 1, suspendus: 1 }),
+      expect.objectContaining({ type: 'canal', total: 1, echecs: 1 }),
+    ])
+    expect(appelsMajJobs()).toEqual(expect.arrayContaining([
+      { where: { id: { in: ['j5'] }, statut: 'echec_definitif' }, data: { entrepriseIcrmId: ENT_LENA } },
+      { where: { id: { in: ['j6'] }, statut: 'suspendu' }, data: { entrepriseIcrmId: ENT_LENA, statut: 'en_attente', erreur: null, prochainEssai: null } },
+    ]))
+  })
+
+  it('destination actuelle inutilisable (LENA désactivée) : reciblés mais SUSPENDUS avec son motif', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ id: BORNE_ID, idBorne: 'B', entrepriseIcrmId: ENT_LENA })
+    mockPrisma.partageJob.findMany.mockResolvedValue([ORPHELINS[0]])
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([{ id: ENT_LENA, nom: 'LENA', actif: false, deletedAt: null, verificationRequise: false }, CAE_SUPPRIMEE])
+
+    const res = await rediriger()
+
+    expect(res.body.data.destinations[0]).toMatchObject({ entrepriseIcrmId: ENT_LENA, total: 1, suspendus: 1 })
+    expect(appelsMajJobs()).toEqual([{
+      where: { id: { in: ['j1'] }, statut: 'suspendu' },
+      data: { entrepriseIcrmId: ENT_LENA, statut: 'suspendu', erreur: 'Entreprise I-CRM « LENA » désactivée — envoi suspendu', prochainEssai: null },
+    }])
+  })
+
+  it('rien à rediriger : total 0, aucune écriture', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ id: BORNE_ID, idBorne: 'B', entrepriseIcrmId: ENT_LENA })
+    const res = await rediriger()
+    expect(res.body.data).toMatchObject({ total: 0, depuis: [], destinations: [] })
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [{}, 'vers absent'],
+    [{ vers: 'canaux' }, 'autre valeur'],
+  ])('corps invalide (%s) : 400', async (corps) => {
+    const res = await rediriger('', corps)
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/destination_actuelle/)
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
+  })
+
+  it('AdminBorne : 403 ; borne inconnue : 404', async () => {
+    expect((await rediriger('', { vers: 'destination_actuelle' }, authAB)).status).toBe(403)
+    mockPrisma.borne.findFirst.mockResolvedValue(null)
+    expect((await rediriger()).status).toBe(404)
   })
 })
