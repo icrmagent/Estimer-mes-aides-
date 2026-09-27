@@ -8,6 +8,9 @@ import {
   statutVerification,
   destinationBorne,
   messageBornesSuspendues,
+  libelleSuspension,
+  envoisConcernesParChangement,
+  destinationJob,
 } from './entrepriseIcrmConfig.js'
 
 const CLE = 'emak_A1b2C3d4E5f6G7h8I9j0K1l2'
@@ -138,6 +141,65 @@ describe('destinationBorne (même règle que le worker)', () => {
 
   it('entreprise désactivée : toujours l’entreprise (jamais le canal), envois suspendus', () => {
     expect(destinationBorne({ canalTransmission: 'icrm-lena', entrepriseIcrm: { nom: 'LENA', actif: false } }))
-      .toEqual({ type: 'entreprise', libelle: 'LENA', suspendu: true })
+      .toEqual({ type: 'entreprise', libelle: 'LENA', suspendu: 'Envois suspendus (entreprise désactivée)' })
+  })
+
+  it('entreprise à tester (URL ou clé modifiée) : envois suspendus', () => {
+    expect(destinationBorne({ entrepriseIcrm: { nom: 'LENA', actif: true, verificationRequise: true } }))
+      .toEqual({ type: 'entreprise', libelle: 'LENA', suspendu: 'Envois suspendus (entreprise à tester)' })
+    expect(libelleSuspension({ actif: true, verificationRequise: false })).toBeNull()
+    expect(libelleSuspension(null)).toBeNull()
+  })
+})
+
+describe('règles de la revue (hôte, chargement, envois en attente, destination d’un job)', () => {
+  it('nouvel hôte d’URL en édition : le secret est exigé ; même hôte : non', () => {
+    const base = { isEdit: true, nom: 'LENA', apiKey: CLE, apiKeyInitiale: CLE, token: '', apiUrlInitiale: 'https://icrm.api.ila26.fr' }
+    expect(validerSaisieEntreprise({ ...base, apiUrl: 'https://icrm.api.es.ila26.com' })).toMatch(/Nouvel hôte/)
+    expect(validerSaisieEntreprise({ ...base, apiUrl: 'https://icrm.api.es.ila26.com', token: SECRET })).toBeNull()
+    expect(validerSaisieEntreprise({ ...base, apiUrl: 'https://icrm.api.ila26.fr/api/' })).toBeNull()
+  })
+
+  it('liste pas encore chargée : l’entreprise actuelle ACTIVE n’est jamais marquée « désactivée »', () => {
+    const actuelle = { id: 'e1', nom: 'LENA', nomIcrm: 'LENA', sousTypeIcrm: null, actif: true }
+    expect(optionsEntreprisesIcrm([], actuelle)).toEqual([{ value: 'e1', label: 'LENA — LENA' }])
+    expect(optionsEntreprisesIcrm([], { ...actuelle, actif: undefined })[0].label).not.toMatch(/désactivée/)
+    expect(optionsEntreprisesIcrm([], { ...actuelle, actif: false })[0].label).toMatch(/— désactivée$/)
+  })
+
+  it('statut « À tester » quand l’URL ou la clé a changé', () => {
+    expect(statutVerification({ verificationRequise: true, dernierStatut: null })).toEqual({ texte: 'À tester (URL ou clé modifiée)', ton: 'erreur' })
+  })
+
+  it('envois concernés par un changement : ceux de l’ancienne cible + ceux d’entreprises supprimées', () => {
+    const envois = {
+      total: 10,
+      parEntreprise: [
+        { entrepriseIcrmId: 'cae', total: 5, suspendus: 4, supprimee: false },
+        { entrepriseIcrmId: null, total: 2, suspendus: 0, supprimee: false },
+        { entrepriseIcrmId: 'vieille', total: 3, suspendus: 3, supprimee: true },
+      ],
+    }
+    expect(envoisConcernesParChangement(envois, 'cae')).toEqual({ total: 8, suspendus: 7 })
+    expect(envoisConcernesParChangement(envois, null)).toEqual({ total: 5, suspendus: 3 })
+    expect(envoisConcernesParChangement(null, 'cae')).toEqual({ total: 0, suspendus: 0 })
+  })
+
+  it('destination d’un job livré = instantané ; pas encore livré = cible du job (suspendue si besoin) ; sinon canal', () => {
+    const livre = {
+      statut: 'succes',
+      entrepriseIcrm: { nom: 'LENA', actif: true }, // cible actuelle de la ligne, ignorée pour un job livré
+      enregistrement: { crmDestination: { nom: 'CAE España', nomIcrm: 'CAE España', sousTypeIcrm: 'BORNE TACTILE', apiHost: 'icrm.api.es.ila26.com' } },
+    }
+    expect(destinationJob(livre)).toEqual({ type: 'entreprise', libelle: 'CAE España', detail: 'CAE España · BORNE TACTILE · icrm.api.es.ila26.com' })
+    expect(destinationJob({ statut: 'succes', enregistrement: { borne: { canalTransmission: 'icrm-lena' } } }))
+      .toEqual({ type: 'canal', libelle: 'icrm-lena' })
+    expect(destinationJob({ statut: 'suspendu', entrepriseIcrm: { nom: 'CAE', actif: false } }))
+      .toEqual({ type: 'entreprise', libelle: 'CAE', suspendu: 'Envois suspendus (entreprise désactivée)' })
+    expect(destinationJob({ statut: 'en_attente', entrepriseIcrm: { nom: 'LENA', actif: true } }))
+      .toEqual({ type: 'entreprise', libelle: 'LENA' })
+    expect(destinationJob({ statut: 'en_attente', entrepriseIcrm: null }, { canalParDefaut: 'canal-x' }))
+      .toEqual({ type: 'canal', libelle: 'canal-x' })
+    expect(destinationJob({ statut: 'en_attente' })).toEqual({ type: 'aucune', libelle: '—' })
   })
 })

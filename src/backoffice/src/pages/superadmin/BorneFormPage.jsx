@@ -4,6 +4,8 @@ import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import { ErrorBanner } from '../../components/ui.jsx'
 import EntrepriseIcrmSelect from '../../components/forms/EntrepriseIcrmSelect.jsx'
+import ChoixModal from '../../components/ChoixModal.jsx'
+import { envoisConcernesParChangement } from '../../components/forms/entrepriseIcrmConfig.js'
 import { useAuth } from '../../context/AuthContext.jsx'
 import { COUNTRIES } from '../../utils/countries.js'
 
@@ -36,6 +38,13 @@ export default function BorneFormPage() {
   // Entreprise de la borne au chargement : affichée même inactive, et seul un
   // changement réel est envoyé (un formulaire réémis ne la retire jamais par erreur)
   const [entrepriseInitiale, setEntrepriseInitiale] = useState(null)
+  // Liste des entreprises : 'chargement' | 'pret' | 'erreur' (choix verrouillé tant qu'elle manque)
+  const [etatListeEntreprises, setEtatListeEntreprises] = useState('chargement')
+  const [borneChargee, setBorneChargee] = useState(!isEdit)
+  // Envois pas encore livrés de la borne, par cible (GET /api/bornes/:id)
+  const [envoisEnAttente, setEnvoisEnAttente] = useState(null)
+  // Changement de destination avec des envois en attente : choix explicite demandé
+  const [choixEnvois, setChoixEnvois] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [fieldErrors, setFieldErrors] = useState({})
@@ -46,12 +55,17 @@ export default function BorneFormPage() {
       api.get('/api/formulaires').catch(() => ({ data: [] })),
       api.get('/api/admin-bornes').catch(() => ({ data: [] })),
       api.get('/api/ecrans-veille').catch(() => ({ data: [] })),
-      api.get('/api/entreprises-icrm').catch(() => ({ data: [] })),
+      api.get('/api/entreprises-icrm').catch(() => null),
     ]).then(([fRes, aRes, eRes, iRes]) => {
       setFormulaires(fRes.data.formulaires || fRes.data.data || fRes.data || [])
       setAdminBornes(aRes.data.adminBornes || aRes.data.data || aRes.data || [])
       setEcransVeille(eRes.data.data || [])
-      setEntreprisesIcrm(iRes.data.data || [])
+      if (iRes) {
+        setEntreprisesIcrm(iRes.data?.data || [])
+        setEtatListeEntreprises('pret')
+      } else {
+        setEtatListeEntreprises('erreur')
+      }
     })
 
     if (isEdit) {
@@ -73,6 +87,8 @@ export default function BorneFormPage() {
             entrepriseIcrmId: b.entrepriseIcrmId || '',
           })
           setEntrepriseInitiale(b.entrepriseIcrm || null)
+          setEnvoisEnAttente(b.envoisEnAttente || null)
+          setBorneChargee(true)
         })
         .catch(() => setError('Borne introuvable'))
     }
@@ -83,21 +99,46 @@ export default function BorneFormPage() {
     setFieldErrors(prev => ({ ...prev, [field]: null }))
   }
 
-  async function handleSubmit(e) {
+  function construirePayload() {
+    // `idBorne` est généré côté backend : il n'est jamais envoyé.
+    const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
+    delete payload.idBorne
+    // Entreprise I-CRM : envoyée seulement si elle change (et par le SuperAdmin)
+    delete payload.entrepriseIcrmId
+    const entrepriseIcrmId = form.entrepriseIcrmId || null
+    if (estSuperAdmin && entrepriseIcrmId !== (entrepriseInitiale?.id ?? null)) {
+      payload.entrepriseIcrmId = entrepriseIcrmId
+    }
+    return payload
+  }
+
+  function handleSubmit(e) {
     e.preventDefault()
     setError(null)
     setFieldErrors({})
+    const payload = construirePayload()
+    // Changement de destination : les envois pas encore livrés GARDENT leur cible,
+    // sauf choix explicite de les rediriger (jamais implicitement).
+    if (isEdit && payload.entrepriseIcrmId !== undefined) {
+      const concernes = envoisConcernesParChangement(envoisEnAttente, entrepriseInitiale?.id ?? null)
+      if (concernes.total > 0) {
+        const nouvelle = entreprisesIcrm.find((x) => x.id === payload.entrepriseIcrmId)
+        setChoixEnvois({
+          payload,
+          concernes,
+          ancienne: entrepriseInitiale?.nom ? `l'entreprise « ${entrepriseInitiale.nom} »` : 'les canaux de la borne',
+          nouvelle: nouvelle ? `l'entreprise « ${nouvelle.nom} »` : 'les canaux de la borne',
+        })
+        return
+      }
+    }
+    enregistrer(payload)
+  }
+
+  async function enregistrer(payload) {
+    setChoixEnvois(null)
     setLoading(true)
     try {
-      // `idBorne` est généré côté backend : il n'est jamais envoyé.
-      const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
-      delete payload.idBorne
-      // Entreprise I-CRM : envoyée seulement si elle change (et par le SuperAdmin)
-      delete payload.entrepriseIcrmId
-      const entrepriseIcrmId = form.entrepriseIcrmId || null
-      if (estSuperAdmin && entrepriseIcrmId !== (entrepriseInitiale?.id ?? null)) {
-        payload.entrepriseIcrmId = entrepriseIcrmId
-      }
       if (isEdit) {
         await api.put(`/api/bornes/${id}`, payload)
       } else {
@@ -254,6 +295,7 @@ export default function BorneFormPage() {
             value={form.entrepriseIcrmId}
             onChange={value => handleChange('entrepriseIcrmId', value)}
             entreprises={entreprisesIcrm}
+            etat={borneChargee ? etatListeEntreprises : 'chargement'}
             entrepriseActuelle={entrepriseInitiale}
             disabled={!estSuperAdmin}
             className={`${inputClass}${estSuperAdmin ? '' : ' bg-gray-50 text-gray-500 cursor-not-allowed'}`}
@@ -349,6 +391,31 @@ export default function BorneFormPage() {
           </div>
         </form>
       </div>
+
+      {choixEnvois && (
+        <ChoixModal
+          titre="Envois en attente pour l'ancienne destination"
+          message={`${choixEnvois.concernes.total} envoi(s) en attente pour ${choixEnvois.ancienne}`
+            + (choixEnvois.concernes.suspendus ? ` (dont ${choixEnvois.concernes.suspendus} suspendu(s))` : '')
+            + '. Les nouveaux enregistrements iront vers la nouvelle destination ; que faire de ceux-ci ?'}
+          choix={[
+            {
+              label: `Les garder pour ${choixEnvois.ancienne} (recommandé)`,
+              variante: 'recommande',
+              testId: 'envois-garder',
+              onClick: () => enregistrer(choixEnvois.payload),
+            },
+            {
+              label: `Les envoyer vers ${choixEnvois.nouvelle}`,
+              variante: 'secondaire',
+              testId: 'envois-rediriger',
+              onClick: () => enregistrer({ ...choixEnvois.payload, redirigerEnvoisEnAttente: true }),
+            },
+          ]}
+          onAnnuler={() => setChoixEnvois(null)}
+          saving={loading}
+        />
+      )}
     </AppLayout>
   )
 }

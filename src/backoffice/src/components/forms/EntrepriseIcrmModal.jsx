@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import api from '../../services/api.js'
-import { URL_API_ICRM_FR, URL_API_ICRM_ES } from './canalConfig.js'
+import { URL_API_ICRM_FR, URL_API_ICRM_ES, estNouvelHoteApi, hoteUrlApi } from './canalConfig.js'
 import {
   NOM_ENTREPRISE_MAX,
   estNouvelleCleEntreprise,
@@ -41,8 +41,14 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
 
+  const apiUrlInitiale = initialEntreprise?.apiUrl || ''
   const nouvelleCle = estNouvelleCleEntreprise({ isEdit, apiKey, apiKeyInitiale })
-  const secretFacultatif = isEdit && !nouvelleCle
+  // Nouvel hôte d'URL : secret requis (il ne part jamais vers un hôte non confirmé)
+  const nouvelHote = estNouvelHoteApi({ isEdit, apiUrl, apiUrlInitiale })
+  const secretFacultatif = isEdit && !nouvelleCle && !nouvelHote
+  // Nouvelle URL ou nouvelle clé : peut-être un autre tenant → à retester, envois suspendus d'ici là
+  const urlNormalisee = (u) => (u || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '').replace(/\/+$/, '')
+  const identiteModifiee = isEdit && (nouvelleCle || (hoteUrlApi(apiUrl) !== null && urlNormalisee(apiUrl) !== urlNormalisee(apiUrlInitiale)))
   // Désactiver une entreprise qui a des bornes suspend leurs envois (jamais de repli sur les canaux)
   const bornesSuspendues = isEdit && !actif ? messageBornesSuspendues(initialEntreprise?.nbBornes) : null
 
@@ -50,7 +56,7 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
     e.preventDefault()
     setError(null)
 
-    const erreurSaisie = validerSaisieEntreprise({ isEdit, nom, apiUrl, apiKey, token, apiKeyInitiale })
+    const erreurSaisie = validerSaisieEntreprise({ isEdit, nom, apiUrl, apiKey, token, apiKeyInitiale, apiUrlInitiale })
     if (erreurSaisie) { setError(erreurSaisie); return }
 
     setLoading(true)
@@ -183,6 +189,11 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
                 {showToken ? '🙈' : '👁'}
               </button>
             </div>
+            {nouvelHote && !nouvelleCle && (
+              <p className="text-xs text-orange-600 mt-1" data-testid="entreprise-secret-nouvel-hote">
+                Nouvel hôte d'URL : saisissez le secret (il n'est jamais envoyé à un hôte non confirmé).
+              </p>
+            )}
             {nouvelleCle && (
               <p className="text-xs text-orange-600 mt-1" data-testid="entreprise-secret-nouvelle-cle">
                 Nouvelle clé : saisissez le secret émis avec elle par I-CRM (l'ancien secret ne fonctionne pas avec une autre clé).
@@ -192,6 +203,13 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
               Affiché une seule fois par I-CRM à la création de la clé. Il n'est jamais réaffiché ici.
             </p>
           </div>
+
+          {identiteModifiee && (
+            <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2" role="status" data-testid="entreprise-identite-modifiee">
+              URL ou clé modifiée : il peut s'agir d'une autre entreprise I-CRM. Après l'enregistrement, ses envois
+              sont suspendus jusqu'à un test réussi (bouton « Tester »).
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <input
@@ -210,8 +228,8 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
             <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 -mt-2" role="status" data-testid="entreprise-desactivation">
               {bornesSuspendues && <p className="font-semibold">⚠️ {bornesSuspendues}.</p>}
               <p>
-                Désactivée, l'entreprise ne reçoit plus rien : les envois de ses bornes sont suspendus
-                (aucun envoi vers leurs canaux) et reprennent à sa réactivation.
+                Désactivée, l'entreprise ne reçoit plus rien : les envois qui la ciblent sont suspendus
+                (aucun envoi vers les canaux) et reprennent à sa réactivation, si son dernier test a réussi.
               </p>
             </div>
           )}

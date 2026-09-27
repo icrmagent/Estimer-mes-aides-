@@ -9,6 +9,7 @@ function StatutBadge({ statut }) {
     partage: 'bg-green-100 text-green-700',
     echec_temporaire: 'bg-orange-100 text-orange-700',
     echec_definitif: 'bg-red-100 text-red-700',
+    suspendu: 'bg-orange-100 text-orange-800',
   }
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${styles[statut] || 'bg-gray-100 text-gray-500'}`}>
@@ -386,6 +387,7 @@ export default function EnregistrementsListPage() {
                 <option value="partage">Partagé</option>
                 <option value="echec_temporaire">Échec temporaire</option>
                 <option value="echec_definitif">Échec définitif</option>
+                <option value="suspendu">Suspendu (entreprise I-CRM désactivée)</option>
               </select>
             </div>
             <button

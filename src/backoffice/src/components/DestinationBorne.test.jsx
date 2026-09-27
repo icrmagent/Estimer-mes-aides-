@@ -52,3 +52,10 @@ describe('DestinationBorne', () => {
     expect(badge()).toBeNull()
   })
 })
+
+describe('DestinationBorne — entreprise à tester', () => {
+  it('badge « Envois suspendus (entreprise à tester) »', async () => {
+    await rendre({ entrepriseIcrm: { id: 'e1', nom: 'LENA', actif: true, verificationRequise: true } })
+    expect(badge().textContent).toContain('Envois suspendus (entreprise à tester)')
+  })
+})

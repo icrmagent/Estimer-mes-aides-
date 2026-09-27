@@ -71,3 +71,33 @@ describe('EntrepriseIcrmSelect', () => {
     expect(container.textContent).toContain('Choisie par le Super Administrateur')
   })
 })
+
+describe('EntrepriseIcrmSelect — liste en chargement ou en erreur', () => {
+  it('chargement : verrouillé sur la valeur actuelle, jamais « désactivée » à tort', async () => {
+    await act(async () => {
+      root.render(<EntrepriseIcrmSelect value="e1" entreprises={[]} etat="chargement" entrepriseActuelle={LENA} />)
+    })
+    const select = container.querySelector('#borne-entreprise-icrm')
+    expect(select.disabled).toBe(true)
+    expect(select.value).toBe('e1')
+    expect(select.options[select.selectedIndex].textContent).toBe('LENA (France) — LENA (BORNE TACTILE)')
+    expect(container.textContent).toContain('Chargement des entreprises I-CRM')
+  })
+
+  it('erreur de chargement : verrouillé + message, la destination actuelle est conservée', async () => {
+    await act(async () => {
+      root.render(<EntrepriseIcrmSelect value="e1" entreprises={[]} etat="erreur" entrepriseActuelle={LENA} />)
+    })
+    const select = container.querySelector('#borne-entreprise-icrm')
+    expect(select.disabled).toBe(true)
+    expect(container.querySelector('[role="alert"]').textContent).toMatch(/Impossible de charger les entreprises I-CRM/)
+    expect(select.options[select.selectedIndex].textContent).not.toMatch(/désactivée/)
+  })
+
+  it('entreprise actuelle à tester : avertissement « suspendus jusqu’à un test réussi »', async () => {
+    await act(async () => {
+      root.render(<EntrepriseIcrmSelect value="e1" entreprises={[{ ...LENA, verificationRequise: true }]} entrepriseActuelle={{ ...LENA, verificationRequise: true }} />)
+    })
+    expect(container.querySelector('[role="status"]').textContent).toMatch(/suspendus jusqu'à un test réussi/)
+  })
+})

@@ -11,8 +11,10 @@ import { ConfirmModal, Toast, ErrorBanner, PRIMARY, SECONDARY } from '../../comp
 import api from '../../services/api.js'
 import { subscribeToBorne } from '../../services/pusher.js'
 import { BadgeEnvoisSuspendus } from '../../components/DestinationBorne.jsx'
+import { destinationJob, libelleSuspension } from '../../components/forms/entrepriseIcrmConfig.js'
 
-const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif']
+// `suspendu` : entreprise I-CRM cible désactivée, supprimée ou à tester — ni en file, ni en échec
+const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif', 'suspendu']
 
 const STATUT_LABELS = {
   en_attente: 'En attente',
@@ -21,6 +23,7 @@ const STATUT_LABELS = {
   partage: 'Partagé',
   echec_temporaire: 'Échec temporaire',
   echec_definitif: 'Échec définitif',
+  suspendu: 'Suspendu',
 }
 
 /**
@@ -49,6 +52,7 @@ function StatutBadge({ statut }) {
     partage: 'bg-green-100 text-green-700',
     echec_temporaire: 'bg-orange-100 text-orange-700',
     echec_definitif: 'bg-red-100 text-red-700',
+    suspendu: 'bg-orange-100 text-orange-800',
   }
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${styles[statut] || 'bg-gray-100 text-gray-500'}`}>
@@ -171,7 +175,9 @@ export default function PartageJobsPage() {
   // Entreprise I-CRM de la borne : si elle est affectée, c'est la SEULE destination
   // (désactivée → envois suspendus, jamais de repli sur les canaux — même règle que le worker)
   const entrepriseDestination = selectedBorne?.entrepriseIcrm || null
-  const envoisSuspendus = Boolean(entrepriseDestination) && entrepriseDestination.actif === false
+  // Libellé de suspension si l'entreprise est désactivée ou à tester (null sinon)
+  const suspensionDestination = libelleSuspension(entrepriseDestination)
+  const envoisSuspendus = Boolean(suspensionDestination)
 
   const fetchBornes = useCallback(() => {
     // `loadingBornes` est initialisé à true : ce chargement a lieu au montage.
@@ -369,7 +375,7 @@ export default function PartageJobsPage() {
       ? `l'entreprise I-CRM « ${entrepriseDestination.nom} »`
       : `le canal « ${activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'} »`
     const suspension = envoisSuspendus
-      ? ` ⚠️ Cette entreprise est désactivée : les envois restent suspendus (rien ne part, pas même vers les canaux) jusqu'à sa réactivation.`
+      ? ` ⚠️ ${suspensionDestination} : ces envois seront mis en file au statut « Suspendu » (rien ne part, pas même vers les canaux) jusqu'à la réactivation de l'entreprise ou un test réussi.`
       : ''
 
     setConfirm({
@@ -512,7 +518,7 @@ export default function PartageJobsPage() {
                         >
                           🏢 Entreprise I-CRM « {entrepriseDestination.nom} »
                         </span>
-                        {envoisSuspendus && <BadgeEnvoisSuspendus />}
+                        {envoisSuspendus && <BadgeEnvoisSuspendus libelle={suspensionDestination} />}
                       </span>
                     )
                     : channelLabelMismatch
@@ -543,7 +549,7 @@ export default function PartageJobsPage() {
               style={{ background: SECONDARY, minHeight: '40px' }}
               title={
                 !selectedBorneId ? 'Sélectionnez une borne'
-                : envoisSuspendus ? 'Mettre en file d\'attente (envois suspendus : entreprise désactivée)'
+                : envoisSuspendus ? `Mettre en file d'attente (${suspensionDestination.toLowerCase()})`
                 : entrepriseDestination ? 'Mettre en file d\'attente'
                 : !hasActiveChannel ? 'Aucun canal actif'
                 : channelLabelMismatch ? 'Canal incohérent'
@@ -556,8 +562,9 @@ export default function PartageJobsPage() {
 
           {selectedBorneId && envoisSuspendus && (
             <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2" role="status">
-              ⏸ L'entreprise I-CRM « {entrepriseDestination.nom} » de cette borne est désactivée : les envois sont suspendus
-              (rien ne part, pas même vers les canaux ci-dessous) et reprennent à sa réactivation — menu « Entreprises I-CRM ».
+              ⏸ {suspensionDestination} : l'entreprise I-CRM « {entrepriseDestination.nom} » de cette borne ne reçoit plus rien
+              (rien ne part, pas même vers les canaux ci-dessous). Les envois reprennent à sa réactivation si son dernier test a
+              réussi, ou après un test réussi — menu « Entreprises I-CRM ».
             </div>
           )}
 
@@ -571,7 +578,7 @@ export default function PartageJobsPage() {
 
         {/* KPI Cards — supervision globale */}
         {selectedBorneId && stats && (
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <KpiCard label="En attente" value={stats.byStatut?.en_attente ?? 0} tone="info" />
             <KpiCard label="En cours" value={stats.byStatut?.en_cours ?? 0} tone="info" />
             <KpiCard label="Succès" value={stats.byStatut?.succes ?? 0} tone="success" />
@@ -580,6 +587,7 @@ export default function PartageJobsPage() {
               value={(stats.byStatut?.echec_temporaire ?? 0) + (stats.byStatut?.echec_definitif ?? 0)}
               tone="danger"
             />
+            <KpiCard label="Suspendus" value={stats.byStatut?.suspendu ?? 0} tone="warn" />
             <KpiCard
               label="Taux 24h"
               value={stats.tauxSucces24h == null ? '—' : `${stats.tauxSucces24h}%`}
@@ -626,8 +634,9 @@ export default function PartageJobsPage() {
           </div>
           {entrepriseDestination && (
             <div className="mx-4 mt-3 text-xs text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
-              Cette borne envoie ses enregistrements à l'entreprise I-CRM « {entrepriseDestination.nom} »
+              Les nouveaux enregistrements de cette borne partent vers l'entreprise I-CRM « {entrepriseDestination.nom} »
               (menu « Entreprises I-CRM ») : ses canaux ne sont pas utilisés, même si l'entreprise est désactivée.
+              Chaque envoi garde la destination figée à sa création (colonne « Destination » des jobs).
               Pour revenir aux canaux, choisir « Aucune » dans la fiche de la borne.
             </div>
           )}
@@ -862,11 +871,8 @@ export default function PartageJobsPage() {
                         || enregistrementBorneCanalByEnregId.get(enregId)
                         || null
                       const canalForJob = labelFromJob ? canalLabelByLabel.get(labelFromJob) : null
-                      // Entreprise qui a reçu l'enregistrement, sinon celle de la borne (suspendue si désactivée)
-                      const entrepriseRecue = job.enregistrement?.crmEntrepriseIcrm
-                      const entrepriseBorne = job.enregistrement?.borne?.entrepriseIcrm
-                      const entrepriseJob = entrepriseRecue || entrepriseBorne || null
-                      const jobSuspendu = !entrepriseRecue && entrepriseBorne?.actif === false
+                      // Livré : instantané de la destination réelle ; sinon : CIBLE du job (figée à sa création)
+                      const destination = destinationJob(job, { canalParDefaut: labelFromJob })
                       const isStuckEnCours = job.statut === 'en_cours'
                         && job.updatedAt
                         && (now - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
@@ -875,13 +881,17 @@ export default function PartageJobsPage() {
                         <tr key={job.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-3"><CopyId id={enregId} /></td>
                           <td className="px-4 py-3 text-xs">
-                            {entrepriseJob
+                            {destination.type === 'entreprise'
                               ? (
-                                <span className="inline-flex flex-col items-start gap-1">
-                                  <span className={jobSuspendu ? 'text-gray-500' : 'text-purple-800'} title={entrepriseRecue ? 'Entreprise I-CRM qui a reçu l’enregistrement' : 'Entreprise I-CRM de la borne'}>
-                                    🏢 {entrepriseJob.nom}
+                                <span className="inline-flex flex-col items-start gap-1" data-testid="job-destination">
+                                  <span
+                                    className={destination.suspendu ? 'text-gray-500' : 'text-purple-800'}
+                                    title={job.statut === 'succes' ? 'Entreprise I-CRM qui a reçu l’enregistrement (au moment de la livraison)' : 'Entreprise I-CRM cible de cet envoi'}
+                                  >
+                                    🏢 {destination.libelle}
                                   </span>
-                                  {jobSuspendu && <BadgeEnvoisSuspendus />}
+                                  {destination.detail && <span className="text-gray-400">{destination.detail}</span>}
+                                  {destination.suspendu && <BadgeEnvoisSuspendus libelle={destination.suspendu} />}
                                 </span>
                               )
                               : labelFromJob
@@ -900,7 +910,7 @@ export default function PartageJobsPage() {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex justify-end">
-                              {(['echec_definitif', 'echec_temporaire'].includes(job.statut) || isStuckEnCours) && (
+                              {(['echec_definitif', 'echec_temporaire', 'suspendu'].includes(job.statut) || isStuckEnCours) && (
                                 <button
                                   onClick={() => handleRelancer(job)}
                                   disabled={relancing === job.id}

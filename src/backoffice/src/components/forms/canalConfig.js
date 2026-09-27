@@ -21,6 +21,28 @@ export const SECRET_API_REGEX = /^[A-Za-z0-9]{48}$/
 export const URL_API_ICRM_FR = 'https://icrm.api.ila26.fr'
 export const URL_API_ICRM_ES = 'https://icrm.api.es.ila26.com'
 
+export const MESSAGE_SECRET_NOUVEL_HOTE = "Nouvel hôte de l'URL API : saisissez aussi le secret (il n'est jamais envoyé à un hôte non confirmé)"
+
+/** Hôte (nom + port) d'une URL API I-CRM, en minuscules, sans /api final ; null si illisible. */
+export function hoteUrlApi(apiUrl) {
+  try {
+    const normalisee = String(apiUrl || '').trim().replace(/\/+$/, '').replace(/\/api$/i, '')
+    return new URL(normalisee).host.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * true si une édition change l'hôte de l'URL API : le secret doit être ressaisi
+ * (même règle que le backend, lib/icrmApiKey.js : changementHoteApiIcrm).
+ */
+export function estNouvelHoteApi({ isEdit, apiUrl, apiUrlInitiale = '' }) {
+  if (!isEdit || !apiUrlInitiale) return false
+  const nouvel = hoteUrlApi(apiUrl)
+  return nouvel !== null && nouvel !== hoteUrlApi(apiUrlInitiale)
+}
+
 /** Type effectif d'un canal renvoyé par l'API (les anciens canaux n'ont pas de type). */
 export function typeDuCanal(canal) {
   return canal?.type || CANAL_TYPE_AZURE_AD
@@ -62,8 +84,9 @@ export function estNouvelleCleApi({ isEdit, type, typeInitial = null, apiKey, ap
  * @param {string} saisie.apiKey      clé (icrm_api_key) ou refresh token (azure_ad)
  * @param {string} saisie.token       secret (icrm_api_key) ou access token (azure_ad)
  * @param {string} [saisie.apiKeyInitiale] identifiant de clé du canal édité (icrm_api_key)
+ * @param {string} [saisie.apiUrlInitiale] URL du canal édité (nouvel hôte → secret requis)
  */
-export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, label, apiUrl, apiKey, token, apiKeyInitiale = '' }) {
+export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, label, apiUrl, apiKey, token, apiKeyInitiale = '', apiUrlInitiale = '' }) {
   const cle = (apiKey || '').trim()
   const secret = (token || '').trim()
   const url = (apiUrl || '').trim()
@@ -84,6 +107,10 @@ export function validerSaisieCanal({ isEdit, type, typeInitial = null, borneId, 
     if (secretsObligatoires && !secret) return 'Le secret API I-CRM est requis'
     if (estNouvelleCleApi({ isEdit, type, typeInitial, apiKey: cle, apiKeyInitiale }) && !secret) {
       return 'Nouvelle clé API : saisissez aussi le secret émis avec cette clé par I-CRM'
+    }
+    if (!secretsObligatoires && typeInitial === CANAL_TYPE_ICRM_API_KEY
+      && estNouvelHoteApi({ isEdit, apiUrl: url, apiUrlInitiale }) && !secret) {
+      return MESSAGE_SECRET_NOUVEL_HOTE
     }
     if (cle && !CLE_API_REGEX.test(cle)) {
       return 'Clé API invalide : « emak_ » suivi de 24 caractères alphanumériques'

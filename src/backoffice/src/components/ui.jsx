@@ -245,6 +245,7 @@ export function BadgeEnreg({ statut }) {
     partage:          { bg: 'bg-green-50',  border: 'border-green-200',  text: 'text-green-700',  label: 'Partagé'          },
     echec_temporaire: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', label: 'Échec temporaire' },
     echec_definitif:  { bg: 'bg-red-50',    border: 'border-red-200',    text: 'text-red-700',    label: 'Échec définitif'  },
+    suspendu:         { bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-800', label: 'Suspendu'         },
   }
   const s = map[statut] || { bg: 'bg-gray-100', border: 'border-gray-200', text: 'text-gray-500', label: statut?.replace(/_/g, ' ') || '—' }
   return (

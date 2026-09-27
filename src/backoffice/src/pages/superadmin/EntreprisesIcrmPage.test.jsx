@@ -122,33 +122,97 @@ describe('EntreprisesIcrmPage', () => {
     expect(container.textContent).toContain('Entreprise I-CRM réactivée : 4 envois suspendus relancés.')
   })
 
-  it('Supprimer : 409 (bornes affectées) → seconde confirmation → DELETE ?force=true', async () => {
-    api.delete
-      .mockRejectedValueOnce({
-        response: {
-          status: 409,
-          data: {
-            success: false,
-            error: {
-              code: 'ENTREPRISE_ICRM_EN_USAGE',
-              message: "L'entreprise « LENA (France) » est la destination de 2 bornes.",
-              details: { bornes: [{ id: 'b1', idBorne: 'BORNE-A' }, { id: 'b2', idBorne: 'BORNE-B' }] },
-            },
-          },
+  const reponse409 = {
+    response: {
+      status: 409,
+      data: {
+        success: false,
+        error: {
+          code: 'ENTREPRISE_ICRM_EN_USAGE',
+          message: "L'entreprise « LENA (France) » est la destination de 2 bornes et de 5 envois pas encore livrés.",
+          details: { bornes: [{ id: 'b1', idBorne: 'BORNE-A' }, { id: 'b2', idBorne: 'BORNE-B' }], envoisEnAttente: 5 },
         },
-      })
-      .mockResolvedValueOnce({ data: { success: true, data: { id: 'e1', bornesDesaffectees: 2 } } })
-    await monter()
+      },
+    },
+  }
 
+  async function ouvrirChoixSuppression() {
+    await monter()
     await cliquer(bouton('Supprimer'))
     expect(container.textContent).toContain("Supprimer l'entreprise I-CRM")
     await cliquer([...container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Supprimer').pop())
-
     expect(api.delete).toHaveBeenNthCalledWith(1, '/api/entreprises-icrm/e1', undefined)
-    expect(container.textContent).toContain('Bornes : BORNE-A, BORNE-B')
+    expect(container.textContent).toContain('Bornes désaffectées : BORNE-A, BORNE-B.')
+    expect(container.textContent).toContain('5 envoi(s) pas encore livré(s)')
+  }
 
-    await cliquer(bouton('Désaffecter et supprimer'))
+  it('Supprimer : 409 → choix explicite ; « garder les envois suspendus » (recommandé) → DELETE ?force=true', async () => {
+    api.delete
+      .mockRejectedValueOnce(reponse409)
+      .mockResolvedValueOnce({ data: { success: true, data: { id: 'e1', bornesDesaffectees: 2, envoisRediriges: 0, envoisSuspendus: 5 } } })
+    await ouvrirChoixSuppression()
+
+    await cliquer(container.querySelector('[data-testid="suppression-garder"]'))
+
     expect(api.delete).toHaveBeenNthCalledWith(2, '/api/entreprises-icrm/e1', { params: { force: 'true' } })
     expect(container.textContent).toContain('2 bornes repassées sur leurs canaux')
+    expect(container.textContent).toContain('5 envoi(s) gardé(s) suspendu(s)')
+  })
+
+  it('Supprimer : 409 → « envoyer vers les canaux » → DELETE ?force=true&redirigerEnvoisEnAttente=true', async () => {
+    api.delete
+      .mockRejectedValueOnce(reponse409)
+      .mockResolvedValueOnce({ data: { success: true, data: { id: 'e1', bornesDesaffectees: 2, envoisRediriges: 5, envoisSuspendus: 0 } } })
+    await ouvrirChoixSuppression()
+
+    await cliquer(container.querySelector('[data-testid="suppression-rediriger"]'))
+
+    expect(api.delete).toHaveBeenNthCalledWith(2, '/api/entreprises-icrm/e1', { params: { force: 'true', redirigerEnvoisEnAttente: 'true' } })
+    expect(container.textContent).toContain('5 envoi(s) redirigé(s) vers les canaux')
+  })
+
+  it('envois suspendus affichés dans la colonne Actif', async () => {
+    api.get.mockResolvedValue({ data: { success: true, data: [{ ...LENA, actif: false, nbEnvoisSuspendus: 12 }] } })
+    await monter()
+    expect(container.querySelector('[data-testid="envois-suspendus"]').textContent).toContain('12 envois suspendus')
+  })
+
+  it('Tester : résultat non enregistré (identifiants modifiés pendant le ping) → toast d’avertissement', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true, type: 'icrm_api_key', httpStatus: 200, latencyMs: 20, entreprise: 'LENA', persiste: false,
+        avertissement: 'Les identifiants ont été modifiés pendant le test : résultat non enregistré, relancez le test.',
+        entrepriseIcrm: LENA,
+      },
+    })
+    await monter()
+    await cliquer(bouton('Tester'))
+    expect(container.textContent).toContain('résultat non enregistré, relancez le test')
+  })
+
+  it('Tester : succès qui reprend des envois suspendus → toast avec le nombre relancé', async () => {
+    api.post.mockResolvedValue({
+      data: {
+        success: true, type: 'icrm_api_key', httpStatus: 200, latencyMs: 20, entreprise: 'LENA', subtype: { id: 23, name: 'BORNE TACTILE' },
+        persiste: true, jobsRepris: 3, entrepriseIcrm: { ...LENA, dernierStatut: 'ok' },
+      },
+    })
+    await monter()
+    await cliquer(bouton('Tester'))
+    expect(container.textContent).toContain('3 envoi(s) suspendu(s) relancé(s)')
+  })
+
+  it('réactivation refusée faute de test réussi : toast « testez l’entreprise »', async () => {
+    api.get.mockResolvedValue({ data: { success: true, data: [{ ...LENA, actif: false }] } })
+    api.put.mockResolvedValue({
+      data: { success: true, data: { ...LENA, actif: true }, jobsRepris: 0, avertissement: "Testez l'entreprise pour reprendre les envois." },
+    })
+    await monter()
+    await cliquer(bouton('Modifier'))
+    await cliquer(container.querySelector('#entreprise-actif'))
+    await act(async () => {
+      container.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+    expect(container.textContent).toContain("Testez l'entreprise pour reprendre les envois.")
   })
 })

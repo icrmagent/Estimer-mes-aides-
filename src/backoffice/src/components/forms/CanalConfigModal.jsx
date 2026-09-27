@@ -8,6 +8,7 @@ import {
   typeDuCanal,
   typeInitialFormulaire,
   estNouvelleCleApi,
+  estNouvelHoteApi,
   validerSaisieCanal,
   construireRequeteCanal,
 } from './canalConfig.js'
@@ -63,7 +64,10 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
   const cleFacultative = isEdit && !changementDeType
   // … sauf le secret d'une NOUVELLE clé API : I-CRM l'émet avec la clé.
   const nouvelleCle = estNouvelleCleApi({ isEdit, type, typeInitial, apiKey, apiKeyInitiale })
-  const secretFacultatif = cleFacultative && !nouvelleCle
+  // … et le secret d'un NOUVEL HÔTE d'URL : il ne part jamais vers un hôte non confirmé.
+  const nouvelHote = estCleApi && !changementDeType && typeInitial === CANAL_TYPE_ICRM_API_KEY
+    && estNouvelHoteApi({ isEdit, apiUrl, apiUrlInitiale: initialCanal?.apiUrl || '' })
+  const secretFacultatif = cleFacultative && !nouvelleCle && !nouvelHote
 
   const handleTypeChange = (nouveauType) => {
     setType(nouveauType)
@@ -84,6 +88,7 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
     try {
       const erreurSaisie = validerSaisieCanal({
         isEdit, type, typeInitial, borneId: selectedBorneId, label, apiUrl, apiKey, token, apiKeyInitiale,
+        apiUrlInitiale: initialCanal?.apiUrl || '',
       })
       if (erreurSaisie) { setError(erreurSaisie); setLoading(false); return }
 
@@ -302,6 +307,11 @@ function CanalConfigForm({ onClose, borneId, bornes = [], onSave, initialCanal =
                     {showToken ? '🙈' : '👁'}
                   </button>
                 </div>
+                {nouvelHote && !nouvelleCle && (
+                  <p className="text-xs text-orange-600 mt-1" data-testid="canal-secret-nouvel-hote">
+                    Nouvel hôte d'URL : saisissez le secret (il n'est jamais envoyé à un hôte non confirmé).
+                  </p>
+                )}
                 {nouvelleCle && (
                   <p className="text-xs text-orange-600 mt-1" data-testid="canal-secret-nouvelle-cle">
                     Nouvelle clé : saisissez le secret émis avec elle par I-CRM (l'ancien secret ne fonctionne pas avec une autre clé).

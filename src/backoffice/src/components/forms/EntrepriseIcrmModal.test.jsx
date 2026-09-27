@@ -161,8 +161,8 @@ describe('EntrepriseIcrmModal — édition', () => {
     await changer('#entreprise-nom', 'LENA')
     await cocher('#entreprise-actif')
     const avertissement = $('[data-testid="entreprise-desactivation"]').textContent
-    expect(avertissement).toContain('envois de ses bornes sont suspendus')
-    expect(avertissement).toContain('aucun envoi vers leurs canaux')
+    expect(avertissement).toContain('envois qui la ciblent sont suspendus')
+    expect(avertissement).toContain('aucun envoi vers les canaux')
     expect(avertissement).not.toMatch(/repassent sur leurs canaux/)
     await soumettre()
 
@@ -206,5 +206,43 @@ describe('EntrepriseIcrmModal — édition', () => {
     await changer('#entreprise-secret', SECRET)
     await soumettre()
     expect(api.put).toHaveBeenCalledWith('/api/entreprises-icrm/e1', expect.objectContaining({ apiKey: autre, token: SECRET }))
+  })
+})
+
+describe('EntrepriseIcrmModal — nouvel hôte et changement d’identité', () => {
+  const entreprise = {
+    id: 'e1', nom: 'LENA (France)', apiUrl: 'https://icrm.api.ila26.fr', apiKeyId: CLE, hasToken: true, actif: true,
+  }
+
+  it('nouvel hôte d’URL : secret obligatoire (mention, refus sans appel API), puis envoyé avec le secret', async () => {
+    api.put.mockResolvedValue({ data: { success: true, data: entreprise } })
+    await monter({ initialEntreprise: entreprise })
+    await changer('#entreprise-url', 'https://icrm.api.es.ila26.com')
+
+    expect($('[data-testid="entreprise-secret-nouvel-hote"]')).not.toBeNull()
+    expect($('label[for="entreprise-secret"]').textContent).not.toContain('laisser vide')
+    expect($('[data-testid="entreprise-identite-modifiee"]').textContent).toMatch(/suspendus jusqu'à un test réussi/)
+
+    await soumettre()
+    expect(alerte()).toMatch(/Nouvel hôte/)
+    expect(api.put).not.toHaveBeenCalled()
+
+    await changer('#entreprise-secret', SECRET)
+    await soumettre()
+    expect(api.put).toHaveBeenCalledWith('/api/entreprises-icrm/e1', expect.objectContaining({ apiUrl: 'https://icrm.api.es.ila26.com', token: SECRET }))
+  })
+
+  it('même hôte (/api final) : ni secret exigé ni avertissement d’identité', async () => {
+    await monter({ initialEntreprise: entreprise })
+    await changer('#entreprise-url', 'https://icrm.api.ila26.fr/api/')
+    expect($('[data-testid="entreprise-secret-nouvel-hote"]')).toBeNull()
+    expect($('[data-testid="entreprise-identite-modifiee"]')).toBeNull()
+  })
+
+  it('transmet la réponse complète à onSave (jobsRepris, avertissement)', async () => {
+    api.put.mockResolvedValue({ data: { success: true, data: entreprise, jobsRepris: 0, avertissement: 'Testez' } })
+    const { onSave } = await monter({ initialEntreprise: entreprise })
+    await soumettre()
+    expect(onSave).toHaveBeenCalledWith(entreprise, { success: true, data: entreprise, jobsRepris: 0, avertissement: 'Testez' })
   })
 })

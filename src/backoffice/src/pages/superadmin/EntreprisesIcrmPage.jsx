@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import EntrepriseIcrmModal from '../../components/forms/EntrepriseIcrmModal.jsx'
+import ChoixModal from '../../components/ChoixModal.jsx'
 import { resumeTestCanal } from '../../components/forms/canalConfig.js'
 import { statutVerification, messageBornesSuspendues } from '../../components/forms/entrepriseIcrmConfig.js'
 import {
@@ -34,6 +35,7 @@ export default function EntreprisesIcrmPage() {
   const [testingId, setTestingId] = useState(null)
   const [confirm, setConfirm] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [choixSuppression, setChoixSuppression] = useState(null)
 
   const charger = useCallback(() => {
     api.get('/api/entreprises-icrm')
@@ -51,14 +53,24 @@ export default function EntreprisesIcrmPage() {
 
   const handleSaved = (entreprise, reponse) => {
     const repris = reponse?.jobsRepris || 0
-    setToast({
-      message: repris > 0
-        ? `Entreprise I-CRM réactivée : ${repris} envoi${repris > 1 ? 's' : ''} suspendu${repris > 1 ? 's' : ''} relancé${repris > 1 ? 's' : ''}.`
-        : entreprise?.actif === false
-          ? 'Entreprise I-CRM enregistrée — désactivée : les envois de ses bornes sont suspendus.'
-          : 'Entreprise I-CRM enregistrée. Cliquez « Tester » pour vérifier la clé.',
-      type: 'success',
-    })
+    const suspendus = reponse?.jobsSuspendus || 0
+    const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? 's' : ''}`
+    let message
+    let type = 'success'
+    if (repris > 0) {
+      message = `Entreprise I-CRM réactivée : ${pluriel(repris, 'envoi')} suspendu${repris > 1 ? 's' : ''} relancé${repris > 1 ? 's' : ''}.`
+    } else if (reponse?.avertissement) {
+      message = `Entreprise I-CRM enregistrée — ${reponse.avertissement}`
+      type = 'error'
+    } else if (entreprise?.actif === false) {
+      message = `Entreprise I-CRM enregistrée — désactivée : ${pluriel(suspendus, 'envoi')} suspendu${suspendus > 1 ? 's' : ''}.`
+    } else if (entreprise?.verificationRequise) {
+      message = "Entreprise I-CRM enregistrée — URL ou clé modifiée : cliquez « Tester » pour reprendre les envois."
+      type = 'error'
+    } else {
+      message = 'Entreprise I-CRM enregistrée. Cliquez « Tester » pour vérifier la clé.'
+    }
+    setToast({ message, type })
     charger()
   }
 
@@ -68,7 +80,15 @@ export default function EntreprisesIcrmPage() {
       const res = await api.post(`/api/entreprises-icrm/${entreprise.id}/test`)
       remplacer(res.data?.entrepriseIcrm)
       // Le toast nomme l'entreprise et le sous-type renvoyés par le ping I-CRM
-      setToast(resumeTestCanal(res.data || {}))
+      const resume = resumeTestCanal(res.data || {})
+      if (res.data?.persiste === false) {
+        setToast({ message: `${resume.message} — ${res.data.avertissement}`, type: 'error' })
+      } else {
+        const repris = res.data?.jobsRepris || 0
+        setToast(repris > 0
+          ? { ...resume, message: `${resume.message} — ${repris} envoi(s) suspendu(s) relancé(s)` }
+          : resume)
+      }
     } catch (err) {
       remplacer(err.response?.data?.entrepriseIcrm)
       setToast({ message: `Test échoué : ${messageErreur(err, 'erreur réseau')}`, type: 'error' })
@@ -77,33 +97,30 @@ export default function EntreprisesIcrmPage() {
     }
   }
 
-  const supprimer = async (entreprise, force) => {
+  const supprimer = async (entreprise, { force = false, rediriger = false } = {}) => {
     setDeleting(true)
     setError(null)
     try {
-      const res = await api.delete(`/api/entreprises-icrm/${entreprise.id}`, force ? { params: { force: 'true' } } : undefined)
-      const n = res.data?.data?.bornesDesaffectees || 0
-      setToast({
-        message: n > 0
-          ? `Entreprise supprimée — ${n} borne${n > 1 ? 's' : ''} repassée${n > 1 ? 's' : ''} sur leurs canaux.`
-          : 'Entreprise supprimée.',
-        type: 'success',
-      })
+      const params = force ? { force: 'true', ...(rediriger ? { redirigerEnvoisEnAttente: 'true' } : {}) } : null
+      const res = await api.delete(`/api/entreprises-icrm/${entreprise.id}`, params ? { params } : undefined)
+      const d = res.data?.data || {}
+      const n = d.bornesDesaffectees || 0
+      const morceaux = ['Entreprise supprimée']
+      if (n > 0) morceaux.push(`${n} borne${n > 1 ? 's' : ''} repassée${n > 1 ? 's' : ''} sur leurs canaux`)
+      if (d.envoisRediriges) morceaux.push(`${d.envoisRediriges} envoi(s) redirigé(s) vers les canaux`)
+      if (d.envoisSuspendus) morceaux.push(`${d.envoisSuspendus} envoi(s) gardé(s) suspendu(s)`)
+      setToast({ message: `${morceaux.join(' — ')}.`, type: 'success' })
       setConfirm(null)
+      setChoixSuppression(null)
       charger()
     } catch (err) {
       const e = err.response?.data?.error
       if (err.response?.status === 409 && e?.code === 'ENTREPRISE_ICRM_EN_USAGE' && !force) {
-        const bornes = e.details?.bornes || []
-        setConfirm({
-          title: 'Entreprise utilisée par des bornes',
-          message: `${e.message} Bornes : ${bornes.map((b) => b.idBorne).join(', ')}.`,
-          confirmLabel: 'Désaffecter et supprimer',
-          danger: true,
-          onConfirm: () => supprimer(entreprise, true),
-        })
+        setConfirm(null)
+        setChoixSuppression({ entreprise, message: e.message, bornes: e.details?.bornes || [], envoisEnAttente: e.details?.envoisEnAttente || 0 })
       } else {
         setConfirm(null)
+        setChoixSuppression(null)
         setError(messageErreur(err, 'Erreur lors de la suppression'))
       }
     } finally {
@@ -117,7 +134,7 @@ export default function EntreprisesIcrmPage() {
       message: `Supprimer « ${entreprise.nom} » ? Sa clé ne sera plus utilisée par EMA.`,
       confirmLabel: 'Supprimer',
       danger: true,
-      onConfirm: () => supprimer(entreprise, false),
+      onConfirm: () => supprimer(entreprise),
     })
   }
 
@@ -224,6 +241,11 @@ export default function EntreprisesIcrmPage() {
                         {entreprise.actif === false && messageBornesSuspendues(entreprise.nbBornes) && (
                           <div className="text-xs text-orange-600 mt-1">⏸ {messageBornesSuspendues(entreprise.nbBornes)}</div>
                         )}
+                        {entreprise.nbEnvoisSuspendus > 0 && (
+                          <div className="text-xs text-orange-700 font-semibold mt-1" data-testid="envois-suspendus">
+                            ⏸ {entreprise.nbEnvoisSuspendus} envoi{entreprise.nbEnvoisSuspendus > 1 ? 's' : ''} suspendu{entreprise.nbEnvoisSuspendus > 1 ? 's' : ''}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2 flex-wrap">
@@ -281,6 +303,40 @@ export default function EntreprisesIcrmPage() {
           onConfirm={confirm.onConfirm}
           onCancel={() => setConfirm(null)}
           danger={confirm.danger}
+          saving={deleting}
+        />
+      )}
+
+      {choixSuppression && (
+        <ChoixModal
+          titre={`Supprimer « ${choixSuppression.entreprise.nom} » ?`}
+          message={choixSuppression.message}
+          details={(
+            <>
+              {choixSuppression.bornes.length > 0 && (
+                <p>Bornes désaffectées : {choixSuppression.bornes.map((b) => b.idBorne).join(', ')}.</p>
+              )}
+              <p>
+                {choixSuppression.envoisEnAttente} envoi(s) pas encore livré(s) ciblent cette entreprise : ils ne
+                lui seront jamais envoyés.
+              </p>
+            </>
+          )}
+          choix={[
+            {
+              label: 'Supprimer et garder les envois suspendus (recommandé)',
+              variante: 'recommande',
+              testId: 'suppression-garder',
+              onClick: () => supprimer(choixSuppression.entreprise, { force: true }),
+            },
+            {
+              label: 'Supprimer et envoyer ces envois vers les canaux des bornes',
+              variante: 'danger',
+              testId: 'suppression-rediriger',
+              onClick: () => supprimer(choixSuppression.entreprise, { force: true, rediriger: true }),
+            },
+          ]}
+          onAnnuler={() => setChoixSuppression(null)}
           saving={deleting}
         />
       )}
