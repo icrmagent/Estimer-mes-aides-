@@ -3,12 +3,17 @@ import { useNavigate, useParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import { ErrorBanner } from '../../components/ui.jsx'
+import EntrepriseIcrmSelect from '../../components/forms/EntrepriseIcrmSelect.jsx'
+import { useAuth } from '../../context/AuthContext.jsx'
 import { COUNTRIES } from '../../utils/countries.js'
 
 export default function BorneFormPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const isEdit = !!id
+  const auth = useAuth()
+  // L'entreprise I-CRM destinataire est choisie par le SuperAdmin uniquement (le backend le vérifie aussi)
+  const estSuperAdmin = auth?.user?.role === 'SUPER_ADMIN'
 
   const [form, setForm] = useState({
     idBorne: '',
@@ -22,10 +27,15 @@ export default function BorneFormPage() {
     formulaireId: '',
     adminBorneId: '',
     ecranVeilleId: '',
+    entrepriseIcrmId: '',
   })
   const [formulaires, setFormulaires] = useState([])
   const [ecransVeille, setEcransVeille] = useState([])
   const [adminBornes, setAdminBornes] = useState([])
+  const [entreprisesIcrm, setEntreprisesIcrm] = useState([])
+  // Entreprise de la borne au chargement : affichée même inactive, et seul un
+  // changement réel est envoyé (un formulaire réémis ne la retire jamais par erreur)
+  const [entrepriseInitiale, setEntrepriseInitiale] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [fieldErrors, setFieldErrors] = useState({})
@@ -36,10 +46,12 @@ export default function BorneFormPage() {
       api.get('/api/formulaires').catch(() => ({ data: [] })),
       api.get('/api/admin-bornes').catch(() => ({ data: [] })),
       api.get('/api/ecrans-veille').catch(() => ({ data: [] })),
-    ]).then(([fRes, aRes, eRes]) => {
+      api.get('/api/entreprises-icrm').catch(() => ({ data: [] })),
+    ]).then(([fRes, aRes, eRes, iRes]) => {
       setFormulaires(fRes.data.formulaires || fRes.data.data || fRes.data || [])
       setAdminBornes(aRes.data.adminBornes || aRes.data.data || aRes.data || [])
       setEcransVeille(eRes.data.data || [])
+      setEntreprisesIcrm(iRes.data.data || [])
     })
 
     if (isEdit) {
@@ -58,7 +70,9 @@ export default function BorneFormPage() {
             formulaireId: b.formulaireId || '',
             adminBorneId: b.adminBorneId || '',
             ecranVeilleId: b.ecranVeilleId || '',
+            entrepriseIcrmId: b.entrepriseIcrmId || '',
           })
+          setEntrepriseInitiale(b.entrepriseIcrm || null)
         })
         .catch(() => setError('Borne introuvable'))
     }
@@ -78,6 +92,12 @@ export default function BorneFormPage() {
       // `idBorne` est généré côté backend : il n'est jamais envoyé.
       const payload = { ...form, ecranVeilleId: form.ecranVeilleId || null }
       delete payload.idBorne
+      // Entreprise I-CRM : envoyée seulement si elle change (et par le SuperAdmin)
+      delete payload.entrepriseIcrmId
+      const entrepriseIcrmId = form.entrepriseIcrmId || null
+      if (estSuperAdmin && entrepriseIcrmId !== (entrepriseInitiale?.id ?? null)) {
+        payload.entrepriseIcrmId = entrepriseIcrmId
+      }
       if (isEdit) {
         await api.put(`/api/bornes/${id}`, payload)
       } else {
@@ -230,6 +250,17 @@ export default function BorneFormPage() {
             </div>
           </div>
 
+          <EntrepriseIcrmSelect
+            value={form.entrepriseIcrmId}
+            onChange={value => handleChange('entrepriseIcrmId', value)}
+            entreprises={entreprisesIcrm}
+            entrepriseActuelle={entrepriseInitiale}
+            disabled={!estSuperAdmin}
+            className={`${inputClass}${estSuperAdmin ? '' : ' bg-gray-50 text-gray-500 cursor-not-allowed'}`}
+            style={inputStyle}
+          />
+          {fieldErrors.entrepriseIcrmId && <p className="text-red-500 text-xs -mt-4">{fieldErrors.entrepriseIcrmId}</p>}
+
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Canal de transmission I-CRM</label>
             <input
@@ -241,7 +272,9 @@ export default function BorneFormPage() {
               placeholder="ex: canal-principal (configurer les identifiants dans Partage)"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage.
+              {form.entrepriseIcrmId
+                ? "Ignoré tant que l'entreprise I-CRM choisie ci-dessus est active (repli si elle est désactivée)."
+                : "Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage."}
             </p>
           </div>
 

@@ -167,6 +167,14 @@ export default function PartageJobsPage() {
     && canaux.length > 0
     && !canaux.some((c) => c.label === selectedBorne.canalTransmission)
 
+  // Entreprise I-CRM de la borne : si elle est active, c'est la destination (prioritaire sur les canaux)
+  const entrepriseDestination = selectedBorne?.entrepriseIcrm && selectedBorne.entrepriseIcrm.actif !== false
+    ? selectedBorne.entrepriseIcrm
+    : null
+  const entrepriseInactive = selectedBorne?.entrepriseIcrm && !entrepriseDestination
+    ? selectedBorne.entrepriseIcrm
+    : null
+
   const fetchBornes = useCallback(() => {
     // `loadingBornes` est initialisé à true : ce chargement a lieu au montage.
     api.get('/api/bornes', { params: { limit: 100 } })
@@ -337,7 +345,7 @@ export default function PartageJobsPage() {
   const requestLancerTransmission = () => {
     if (!selectedBorneId) return
 
-    if (!hasActiveChannel) {
+    if (!entrepriseDestination && !hasActiveChannel) {
       setError(
         `Impossible de lancer la transmission : aucun canal I-CRM actif n'est configuré pour cette borne. `
         + `Créez et activez un canal avant de continuer.`,
@@ -345,7 +353,7 @@ export default function PartageJobsPage() {
       return
     }
 
-    if (channelLabelMismatch) {
+    if (!entrepriseDestination && channelLabelMismatch) {
       setError(
         `Le canal de transmission « ${selectedBorne.canalTransmission} » ne correspond à aucun canal actif. `
         + `Réaffectez un canal depuis le tableau ci-dessous.`,
@@ -359,14 +367,16 @@ export default function PartageJobsPage() {
         + (stats.byStatut?.echec_definitif || 0)
       : null
 
-    const targetLabel = activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'
+    const cible = entrepriseDestination
+      ? `l'entreprise I-CRM « ${entrepriseDestination.nom} »`
+      : `le canal « ${activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'} »`
 
     setConfirm({
       title: 'Mettre en file d\'attente la transmission ?',
       message:
         enAttenteEtErreur != null
-          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers le canal « ${targetLabel} ». Le worker traite la file toutes les 30 secondes.`
-          : `Les enregistrements non encore partagés seront mis en file vers le canal « ${targetLabel} ». Le worker traite la file toutes les 30 secondes.`,
+          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.`
+          : `Les enregistrements non encore partagés seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.`,
       confirmLabel: 'Mettre en file',
       danger: false,
       onConfirm: doLancerTransmission,
@@ -423,7 +433,8 @@ export default function PartageJobsPage() {
 
   const inputClass = 'border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent'
   const inputStyle = { minHeight: '40px', fontSize: '14px' }
-  const canLaunch = Boolean(selectedBorneId) && !launching && hasActiveChannel && !channelLabelMismatch
+  const canLaunch = Boolean(selectedBorneId) && !launching
+    && (Boolean(entrepriseDestination) || (hasActiveChannel && !channelLabelMismatch))
 
   const canalLabelByLabel = useMemo(() => {
     const map = new Map()
@@ -484,18 +495,28 @@ export default function PartageJobsPage() {
             </div>
 
             <div className="min-w-[200px]">
-              <div className="block text-xs font-semibold text-gray-600 mb-1">2. Canal actif</div>
+              <div className="block text-xs font-semibold text-gray-600 mb-1">2. Destination</div>
               <div
                 className="px-3 py-2 text-sm rounded-xl border border-gray-200 bg-gray-50"
                 style={{ minHeight: '40px' }}
+                data-testid="partage-destination"
               >
                 {!selectedBorneId
                   ? <span className="text-gray-400">—</span>
-                  : channelLabelMismatch
-                    ? <span className="text-red-600 font-medium">⚠️ Canal "{selectedBorne.canalTransmission}" introuvable</span>
-                    : activeChannel
-                      ? <span className="font-medium text-gray-900">{activeChannel.label}</span>
-                      : <span className="text-orange-600">Aucun canal actif</span>
+                  : entrepriseDestination
+                    ? (
+                      <span
+                        className="font-medium text-purple-800"
+                        title={entrepriseDestination.nomIcrm ? `I-CRM : ${entrepriseDestination.nomIcrm}` : 'Entreprise I-CRM non vérifiée'}
+                      >
+                        🏢 Entreprise I-CRM « {entrepriseDestination.nom} »
+                      </span>
+                    )
+                    : channelLabelMismatch
+                      ? <span className="text-red-600 font-medium">⚠️ Canal "{selectedBorne.canalTransmission}" introuvable</span>
+                      : activeChannel
+                        ? <span className="font-medium text-gray-900">Canal {activeChannel.label}</span>
+                        : <span className="text-orange-600">Aucun canal actif</span>
                 }
               </div>
             </div>
@@ -519,6 +540,7 @@ export default function PartageJobsPage() {
               style={{ background: SECONDARY, minHeight: '40px' }}
               title={
                 !selectedBorneId ? 'Sélectionnez une borne'
+                : entrepriseDestination ? 'Mettre en file d\'attente'
                 : !hasActiveChannel ? 'Aucun canal actif'
                 : channelLabelMismatch ? 'Canal incohérent'
                 : 'Mettre en file d\'attente'
@@ -528,9 +550,16 @@ export default function PartageJobsPage() {
             </button>
           </div>
 
-          {selectedBorneId && !loadingCanaux && !hasActiveChannel && (
+          {selectedBorneId && entrepriseInactive && (
             <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-              ⚠️ Aucun canal actif n'est configuré. La transmission est désactivée tant que vous n'aurez pas ajouté un canal.
+              ⚠️ L'entreprise I-CRM « {entrepriseInactive.nom} » de cette borne est inactive : les enregistrements partent par les canaux ci-dessous.
+            </div>
+          )}
+
+          {selectedBorneId && !entrepriseDestination && !loadingCanaux && !hasActiveChannel && (
+            <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+              ⚠️ Aucun canal actif n'est configuré. La transmission est désactivée tant que vous n'aurez pas ajouté un canal
+              ou choisi une entreprise I-CRM dans la fiche de la borne.
             </div>
           )}
         </div>
@@ -590,6 +619,12 @@ export default function PartageJobsPage() {
               </p>
             </div>
           </div>
+          {entrepriseDestination && (
+            <div className="mx-4 mt-3 text-xs text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+              Cette borne envoie ses enregistrements à l'entreprise I-CRM « {entrepriseDestination.nom} »
+              (menu « Entreprises I-CRM ») : ses canaux ne servent qu'en repli, si l'entreprise est désactivée.
+            </div>
+          )}
           {loadingCanaux ? (
             <div className="flex items-center justify-center h-40 text-gray-400">Chargement...</div>
           ) : !selectedBorneId ? (
@@ -807,7 +842,7 @@ export default function PartageJobsPage() {
                   <thead>
                     <tr className="border-b border-gray-100 bg-gray-50">
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Enregistrement</th>
-                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Canal</th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Destination</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Tentatives</th>
                       <th className="text-left px-4 py-3 font-semibold text-gray-600">Erreur</th>
@@ -821,6 +856,11 @@ export default function PartageJobsPage() {
                         || enregistrementBorneCanalByEnregId.get(enregId)
                         || null
                       const canalForJob = labelFromJob ? canalLabelByLabel.get(labelFromJob) : null
+                      // Entreprise qui a reçu l'enregistrement, sinon celle (active) de la borne
+                      const entrepriseRecue = job.enregistrement?.crmEntrepriseIcrm
+                      const entrepriseBorne = job.enregistrement?.borne?.entrepriseIcrm
+                      const entrepriseJob = entrepriseRecue
+                        || (entrepriseBorne && entrepriseBorne.actif !== false ? entrepriseBorne : null)
                       const isStuckEnCours = job.statut === 'en_cours'
                         && job.updatedAt
                         && (now - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
@@ -829,14 +869,20 @@ export default function PartageJobsPage() {
                         <tr key={job.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-3"><CopyId id={enregId} /></td>
                           <td className="px-4 py-3 text-xs">
-                            {labelFromJob
+                            {entrepriseJob
                               ? (
-                                <span className={canalForJob ? 'text-gray-700' : 'text-orange-600'}>
-                                  {labelFromJob}
-                                  {!canalForJob && <span title="Canal introuvable" className="ml-1">⚠</span>}
+                                <span className="text-purple-800" title={entrepriseRecue ? 'Entreprise I-CRM qui a reçu l’enregistrement' : 'Entreprise I-CRM de la borne'}>
+                                  🏢 {entrepriseJob.nom}
                                 </span>
                               )
-                              : <span className="text-gray-400">—</span>}
+                              : labelFromJob
+                                ? (
+                                  <span className={canalForJob ? 'text-gray-700' : 'text-orange-600'}>
+                                    {labelFromJob}
+                                    {!canalForJob && <span title="Canal introuvable" className="ml-1">⚠</span>}
+                                  </span>
+                                )
+                                : <span className="text-gray-400">—</span>}
                           </td>
                           <td className="px-4 py-3"><StatutBadge statut={job.statut} /></td>
                           <td className="px-4 py-3 text-gray-600">{job.tentatives ?? '—'}</td>

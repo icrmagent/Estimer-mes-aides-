@@ -4,6 +4,7 @@ import AppLayout from '../../components/layout/AppLayout.jsx'
 import api from '../../services/api.js'
 import ConfirmCredentialsModal from '../../components/ConfirmCredentialsModal.jsx'
 import { getMetaTotal, getTotalPages } from '../../utils/apiResponse.js'
+import DestinationBorne from '../../components/DestinationBorne.jsx'
 import {
   PRIMARY,
   IcoMore, IcoPlus,
@@ -258,15 +259,16 @@ export default function BornesListPage() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Statut</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Formulaire</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-600">Admin Borne</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-600">Destination I-CRM</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-600 rounded-tr-2xl">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonTableRows cols={6} rows={4} />
+                <SkeletonTableRows cols={8} rows={4} />
               ) : bornes.length === 0 ? (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <EmptyState
                       icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
                       title="Aucune borne trouvée"
@@ -292,6 +294,7 @@ export default function BornesListPage() {
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {borne.adminBorne ? `${borne.adminBorne.nom} ${borne.adminBorne.prenom}` : <span className="italic">Géré par SuperAdmin</span>}
                     </td>
+                    <td className="px-4 py-3 text-xs"><DestinationBorne borne={borne} /></td>
                     <td className="px-4 py-3 text-right">
                       <BorneRowActions
                         borne={borne}
