@@ -4,12 +4,25 @@ import { prisma } from '../lib/prisma.js'
 import { jwtAuthV2 } from '../middleware/jwtAuth.js'
 import { requireRole } from '../middleware/roleAuth.js'
 import logger from '../lib/logger.js'
+import { STATUT_JOB_SUSPENDU, entrepriseIcrmUtilisable } from '../lib/icrmApiKey.js'
+import { SELECT_ETAT_ENTREPRISE, statutPourCible, etatsEntreprises } from '../services/partageCibleService.js'
 
 export const partageRouter = Router()
 
 // ─── GET /api/partage/jobs ────────────────────────────────────────────────────
 
-const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif']
+// `suspendu` : entreprise I-CRM cible désactivée, supprimée ou à retester — catégorie
+// à part (ni en file, ni en échec).
+const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif', STATUT_JOB_SUSPENDU]
+
+/** Avertissement d'une destination entreprise suspendue (lancer / relancer). */
+function avertissementSuspension(entreprise) {
+  const etat = entreprise?.deletedAt ? 'supprimée'
+    : entreprise?.actif === false ? 'désactivée'
+      : 'à retester (URL ou clé modifiée)'
+  return `Entreprise I-CRM « ${entreprise?.nom ?? '?'} » ${etat} : les envois sont suspendus `
+    + "jusqu'à sa réactivation ou un test réussi (aucun envoi vers les canaux)"
+}
 
 const listQuerySchema = z.object({
   statut: z.enum(JOB_STATUTS).optional(),
@@ -53,8 +66,10 @@ partageRouter.get('/jobs', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
             borneId: true,
             statutPartage: true,
             createdAt: true,
-            // Entreprise I-CRM qui a effectivement reçu l'enregistrement (envoi par entreprise)
+            // Livraison par entreprise : entreprise qui l'a reçu + instantané de la destination
+            // (nom, entreprise / sous-type I-CRM, hôte, identifiant de clé — jamais le secret)
             crmEntrepriseIcrm: { select: { id: true, nom: true } },
+            crmDestination: true,
             borne: {
               select: {
                 id: true,
@@ -66,6 +81,8 @@ partageRouter.get('/jobs', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
             },
           },
         },
+        // Cible figée du job (NULL = canaux)
+        entrepriseIcrm: { select: { id: true, nom: true, actif: true, deletedAt: true, verificationRequise: true } },
       },
     }),
     prisma.partageJob.count({ where }),
@@ -171,10 +188,13 @@ partageRouter.put('/bornes/:borneId/canal', jwtAuthV2, requireRole('SUPER_ADMIN'
 
 // ─── POST /api/partage/bornes/:borneId/lancer ────────────────────────────────
 // Prépare ou relance les jobs des enregistrements non partagés d'une borne.
-// Destination (même règle que le worker) : une borne affectée à une entreprise
-// I-CRM n'envoie qu'à elle — active : envoi ; désactivée : jobs mis en file mais
-// envois SUSPENDUS (avertissement renvoyé), jamais de repli sur les canaux.
-// Borne sans entreprise : ses canaux actifs (canalTransmission puis premier actif).
+// Cible de chaque job (même règle que le worker) : un job EXISTANT garde sa cible
+// (figée à sa création) ; un job CRÉÉ ici prend la destination actuelle de la borne
+// (son entreprise I-CRM, sinon ses canaux). Cible = entreprise inutilisable
+// (désactivée, supprimée, à retester) : le job est mis en file au statut
+// `suspendu` (hors de la file du worker) + avertissement ; jamais de repli sur
+// les canaux. Les enregistrements déjà suspendus ne sont pas relancés ici : ils
+// reprennent à la réactivation de leur entreprise ou par redirection explicite.
 
 partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const { borneId } = req.params
@@ -186,13 +206,12 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
         id: true,
         idBorne: true,
         canalTransmission: true,
+        entrepriseIcrmId: true,
         canaux: {
           where: { actif: true },
           select: { id: true, label: true },
         },
-        entrepriseIcrm: {
-          select: { id: true, nom: true, actif: true, deletedAt: true },
-        },
+        entrepriseIcrm: { select: SELECT_ETAT_ENTREPRISE },
       },
     })
 
@@ -205,7 +224,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
 
     const entreprise = borne.entrepriseIcrm
     const versEntreprise = Boolean(entreprise)
-    const suspendu = versEntreprise && (!entreprise.actif || Boolean(entreprise.deletedAt))
+    const suspendu = versEntreprise && !entrepriseIcrmUtilisable(entreprise)
     const destination = versEntreprise
       ? {
           type: 'entreprise_icrm',
@@ -214,10 +233,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
           ...(suspendu ? { suspendu: true } : {}),
         }
       : { type: 'canal', label: borne.canalTransmission ?? null }
-    const avertissement = suspendu
-      ? `Entreprise I-CRM « ${entreprise.nom} » ${entreprise.deletedAt ? 'supprimée' : 'désactivée'} : `
-        + "les envois sont suspendus jusqu'à sa réactivation (aucun envoi vers les canaux)"
-      : null
+    const avertissement = suspendu ? avertissementSuspension(entreprise) : null
     const extra = avertissement ? { avertissement } : {}
 
     if (!versEntreprise && (!borne.canaux || borne.canaux.length === 0)) {
@@ -252,7 +268,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
     if (enregistrements.length === 0) {
       return res.json({
         success: true,
-        data: { borneId, canalTransmission: borne.canalTransmission, destination, ...extra, queued: 0, created: 0, relaunched: 0 },
+        data: { borneId, canalTransmission: borne.canalTransmission, destination, ...extra, queued: 0, created: 0, relaunched: 0, suspendus: 0 },
       })
     }
 
@@ -269,37 +285,70 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       }
     }
 
-    const operations = [
-      prisma.enregistrement.updateMany({
-        where: { id: { in: enregistrementIds } },
-        data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
-      }),
-    ]
+    // Cible de chaque job : la sienne s'il existe, sinon la destination actuelle de la borne
+    const cibleDe = (enr) => {
+      const existant = latestJobByEnregistrement.get(enr.id)
+      return existant ? (existant.entrepriseIcrmId ?? null) : (borne.entrepriseIcrmId ?? null)
+    }
+    const etats = await etatsEntreprises(enregistrements.map(cibleDe))
 
+    const operations = []
+    const enAttente = []
+    const suspendusParMotif = new Map()
     let created = 0
     let relaunched = 0
     for (const enregistrement of enregistrements) {
       const existingJob = latestJobByEnregistrement.get(enregistrement.id)
+      const cible = cibleDe(enregistrement)
+      const { statut, erreur } = statutPourCible(cible, etats.get(cible))
+      if (statut === STATUT_JOB_SUSPENDU) {
+        suspendusParMotif.set(erreur, [...(suspendusParMotif.get(erreur) ?? []), enregistrement.id])
+      } else {
+        enAttente.push(enregistrement.id)
+      }
       if (existingJob) {
         relaunched += 1
         operations.push(prisma.partageJob.update({
           where: { id: existingJob.id },
           data: {
-            statut: 'en_attente',
+            statut,
             tentatives: 0,
-            erreur: null,
+            erreur,
             prochainEssai: null,
           },
         }))
       } else {
         created += 1
         operations.push(prisma.partageJob.create({
-          data: { enregistrementId: enregistrement.id },
+          data: {
+            enregistrementId: enregistrement.id,
+            ...(cible ? { entrepriseIcrmId: cible } : {}),
+            ...(statut === STATUT_JOB_SUSPENDU ? { statut, erreur } : {}),
+          },
         }))
       }
     }
 
+    if (enAttente.length > 0) {
+      operations.unshift(prisma.enregistrement.updateMany({
+        where: { id: { in: enAttente } },
+        data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
+      }))
+    }
+    for (const [motif, ids] of suspendusParMotif) {
+      operations.unshift(prisma.enregistrement.updateMany({
+        where: { id: { in: ids } },
+        data: { statutPartage: STATUT_JOB_SUSPENDU, derniereErreur: motif, tentatives: 0 },
+      }))
+    }
+
     await prisma.$transaction(operations)
+
+    const suspendus = enregistrements.length - enAttente.length
+    const avertissementFinal = avertissement
+      ?? (suspendus > 0
+        ? `${suspendus} envoi(s) suspendu(s) : leur entreprise I-CRM cible est désactivée, supprimée ou à retester`
+        : null)
 
     return res.json({
       success: true,
@@ -307,10 +356,11 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
         borneId,
         canalTransmission: borne.canalTransmission,
         destination,
-        ...extra,
+        ...(avertissementFinal ? { avertissement: avertissementFinal } : {}),
         queued: enregistrements.length,
         created,
         relaunched,
+        suspendus,
       },
     })
   } catch (err) {
@@ -329,7 +379,10 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
   const { id } = req.params
 
   try {
-    const job = await prisma.partageJob.findUniqueOrThrow({ where: { id } })
+    const job = await prisma.partageJob.findUniqueOrThrow({
+      where: { id },
+      include: { entrepriseIcrm: { select: SELECT_ETAT_ENTREPRISE } },
+    })
 
     // Un job 'en_cours' peut être bloqué (crash worker). On l'autorise au relancer
     // s'il n'a pas été touché depuis 5 minutes.
@@ -339,7 +392,7 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
       && (Date.now() - new Date(job.updatedAt).getTime()) > STALE_EN_COURS_MS
 
     const isRelaunchable =
-      ['echec_definitif', 'echec_temporaire'].includes(job.statut) || isStale
+      ['echec_definitif', 'echec_temporaire', STATUT_JOB_SUSPENDU].includes(job.statut) || isStale
 
     if (!isRelaunchable) {
       return res.status(400).json({
@@ -351,24 +404,42 @@ partageRouter.post('/jobs/:id/relancer', jwtAuthV2, requireRole('SUPER_ADMIN'), 
       })
     }
 
-    // Remettre en attente pour le prochain cycle du worker
+    // Le job garde SA cible (figée à sa création) : entreprise inutilisable → il reste
+    // (ou redevient) suspendu, jamais redirigé implicitement vers un canal.
+    const { statut, erreur } = statutPourCible(job.entrepriseIcrmId, job.entrepriseIcrm)
+    if (statut === STATUT_JOB_SUSPENDU && job.statut === STATUT_JOB_SUSPENDU) {
+      return res.status(409).json({
+        success: false,
+        error: {
+          code: 'ENVOI_SUSPENDU',
+          message: `${avertissementSuspension(job.entrepriseIcrm)}. `
+            + "Réactivez ou testez l'entreprise, ou redirigez les envois depuis la fiche de la borne.",
+        },
+      })
+    }
+
+    // Remettre en attente pour le prochain cycle du worker (ou suspendre)
     const updated = await prisma.partageJob.update({
       where: { id },
       data: {
-        statut: 'en_attente',
+        statut,
         tentatives: 0,
-        erreur: null,
+        erreur,
         prochainEssai: null,
       },
     })
 
-    // Remettre l'enregistrement en attente aussi
+    // Refléter sur l'enregistrement
     await prisma.enregistrement.update({
       where: { id: job.enregistrementId },
-      data: { statutPartage: 'en_attente', derniereErreur: null, tentatives: 0 },
+      data: { statutPartage: statut, derniereErreur: erreur, tentatives: 0 },
     })
 
-    return res.json({ success: true, data: updated })
+    return res.json({
+      success: true,
+      data: updated,
+      ...(statut === STATUT_JOB_SUSPENDU ? { avertissement: avertissementSuspension(job.entrepriseIcrm) } : {}),
+    })
   } catch (err) {
     if (err.code === 'P2025') {
       return res.status(404).json({

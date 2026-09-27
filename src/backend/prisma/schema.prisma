@@ -264,6 +264,9 @@ model Enregistrement {
   // Entreprise I-CRM qui a reçu l'enregistrement (renseignée au succès d'un envoi par entreprise)
   crmEntrepriseIcrmId String?
   crmEntrepriseIcrm   EntrepriseIcrm?        @relation(fields: [crmEntrepriseIcrmId], references: [id], onDelete: SetNull)
+  // Instantané de la destination au moment de la livraison (l'entreprise reste modifiable) :
+  // { entrepriseIcrmId, nom, nomIcrm, sousTypeIcrm, apiHost, apiKeyId } — jamais le secret
+  crmDestination      Json?
   submissionId       String?                 @unique
   submission         Submission?             @relation(fields: [submissionId], references: [id])
   createdAt          DateTime                @default(now())
@@ -276,6 +279,7 @@ model Enregistrement {
   @@index([borneId, createdAt])
   @@index([statutPartage])
   @@index([deletedAt])
+  @@index([crmEntrepriseIcrmId])
   @@map("enregistrements")
 }
 
@@ -300,11 +304,18 @@ model PartageJob {
   tentatives       Int       @default(0)
   prochainEssai    DateTime?
   erreur           String?
+  // Destination figée à la création du job : l'entreprise I-CRM de la borne à cet instant
+  // (NULL = chemin des canaux). Le worker n'envoie qu'à CETTE cible, jamais à la destination
+  // courante de la borne. Restrict : une suppression physique de l'entreprise ne doit jamais
+  // transformer ces jobs en jobs « canal » (l'application ne fait que des suppressions logiques).
+  entrepriseIcrmId String?
+  entrepriseIcrm   EntrepriseIcrm? @relation(fields: [entrepriseIcrmId], references: [id], onDelete: Restrict)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   @@index([statut, prochainEssai])
   @@index([enregistrementId])
+  @@index([entrepriseIcrmId, statut])
   @@map("partage_jobs")
 }
 
@@ -344,6 +355,8 @@ model EntrepriseIcrm {
   apiKey               String
   token                String
   actif                Boolean          @default(true)
+  // true après un changement d'URL ou de clé : envois suspendus jusqu'au prochain test réussi
+  verificationRequise  Boolean          @default(false)
   derniereVerification DateTime?
   dernierStatut        String?
   createdAt            DateTime         @default(now())
@@ -351,6 +364,7 @@ model EntrepriseIcrm {
   deletedAt            DateTime?
   bornes               Borne[]
   enregistrements      Enregistrement[]
+  partageJobs          PartageJob[]
 
   @@index([deletedAt])
   @@map("entreprises_icrm")

@@ -506,3 +506,42 @@ describe('POST /api/canaux/:id/test — azure_ad (comportement historique inchan
     expect(res.body).toMatchObject({ success: true, httpStatus: 401, authValid: false })
   })
 })
+
+// ─── Règles partagées avec les entreprises I-CRM ──────────────────────────────
+
+describe('Canal icrm_api_key — nouvel hôte d’URL et hôtes internes', () => {
+  it('nouvel hôte sans secret : refusé ; avec le secret : accepté ; même hôte : secret non requis', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase())
+
+    const refus = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.es.ila26.com' })
+    expect(refus.status).toBe(400)
+    expect(refus.body.details).toEqual([expect.objectContaining({ path: ['token'], message: expect.stringMatching(/Nouvel hôte/) })])
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+
+    const avecSecret = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA)
+      .send({ apiUrl: 'https://icrm.api.es.ila26.com', token: 'N'.repeat(48) })
+    expect(avecSecret.status).toBe(200)
+
+    const memeHote = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.ila26.fr/api/' })
+    expect(memeHote.status).toBe(200)
+  })
+
+  it('canal azure_ad : changer d’hôte reste libre (comportement historique)', async () => {
+    mockPrisma.canal.findFirst.mockResolvedValue(canalEnBase({ type: 'azure_ad', apiUrl: 'https://legacy.example', apiKey: 'rt', token: 'at' }))
+    const res = await request(app).put(`/api/canaux/${CANAL_ID}`).set(authSA).send({ apiUrl: 'https://autre.example' })
+    expect(res.status).toBe(200)
+  })
+
+  it('production : URL vers une adresse interne refusée à la création', async () => {
+    const avant = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const res = await request(app).post('/api/canaux').set(authSA).send(creationCleApi({ apiUrl: 'https://192.168.1.10' }))
+      expect(res.status).toBe(400)
+      expect(res.body.details[0]).toMatchObject({ path: ['apiUrl'], message: expect.stringMatching(/adresse interne/) })
+    } finally {
+      process.env.NODE_ENV = avant
+    }
+    expect(mockPrisma.canal.create).not.toHaveBeenCalled()
+  })
+})

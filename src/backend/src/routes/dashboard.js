@@ -57,11 +57,13 @@ dashboardRouter.get('/superadmin', jwtAuthV2, requireRole('SUPER_ADMIN'), async 
 
     const dateFilter = { gte: rangeStart, lte: rangeEnd }
 
-    const [bornesActives, enregistrementsInRange, enAttenteCRM, adminBornesActifs] = await Promise.all([
+    const [bornesActives, enregistrementsInRange, enAttenteCRM, adminBornesActifs, suspendusCRM] = await Promise.all([
       prisma.borne.count({ where: { statut: 'actif' } }),
       prisma.enregistrement.count({ where: { createdAt: dateFilter } }),
       prisma.enregistrement.count({ where: { statutPartage: 'en_attente' } }),
       prisma.adminBorne.count({ where: { actif: true } }),
+      // Catégorie à part : entreprise I-CRM cible désactivée, supprimée ou à retester
+      prisma.enregistrement.count({ where: { statutPartage: 'suspendu' } }),
     ])
 
     // Build daily counts for the selected range
@@ -113,6 +115,7 @@ dashboardRouter.get('/superadmin', jwtAuthV2, requireRole('SUPER_ADMIN'), async 
       bornesActives,
       enregistrements30j: enregistrementsInRange,
       enAttenteCRM,
+      suspendusCRM: suspendusCRM ?? 0,
       adminBornesActifs,
       graphique,
       recentEnregistrements,

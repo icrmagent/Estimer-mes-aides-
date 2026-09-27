@@ -21,9 +21,12 @@ const mockPrisma = {
     update: jest.fn(),
     count: jest.fn(),
   },
-  entrepriseIcrm: { findFirst: jest.fn() },
+  entrepriseIcrm: { findFirst: jest.fn(), findMany: jest.fn() },
   ecranVeille: { findFirst: jest.fn() },
   formulaire: { findUnique: jest.fn() },
+  partageJob: { groupBy: jest.fn(), count: jest.fn(), findMany: jest.fn(), updateMany: jest.fn() },
+  enregistrement: { updateMany: jest.fn() },
+  $transaction: jest.fn(),
 }
 
 const mockCache = {
@@ -75,15 +78,24 @@ const sign = (sub, role) => jwt.sign({ sub, role }, process.env.JWT_SECRET, { ex
 const authSA = { Authorization: `Bearer ${sign('uuid-super', 'SUPER_ADMIN')}` }
 const authAB = { Authorization: `Bearer ${sign(AB_ID, 'ADMIN_BORNE')}` }
 
-const SELECT_ENTREPRISE_ATTENDU = { select: { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true } }
+const SELECT_ENTREPRISE_ATTENDU = { select: { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true, verificationRequise: true } }
 
 beforeEach(() => {
   jest.clearAllMocks()
   mockPrisma.borne.update.mockImplementation(async ({ where, data }) => ({ id: where.id, ...data }))
   mockPrisma.borne.create.mockImplementation(async ({ data }) => ({ id: BORNE_ID, ...data }))
   mockPrisma.entrepriseIcrm.findFirst.mockImplementation(async ({ where }) => (
-    [ENT_LENA, ENT_CAE].includes(where.id) ? { id: where.id, actif: true } : null
+    [ENT_LENA, ENT_CAE].includes(where.id)
+      ? { id: where.id, nom: where.id === ENT_LENA ? 'LENA' : 'CAE', actif: true, deletedAt: null, verificationRequise: false }
+      : null
   ))
+  mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
+  mockPrisma.partageJob.groupBy.mockResolvedValue([])
+  mockPrisma.partageJob.count.mockResolvedValue(0)
+  mockPrisma.partageJob.findMany.mockResolvedValue([])
+  mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.enregistrement.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
 })
 
 // ─── Création ─────────────────────────────────────────────────────────────────
@@ -253,5 +265,130 @@ describe('GET /api/bornes — entreprise I-CRM de la borne', () => {
     const res = await request(app).get(`/api/bornes/${BORNE_ID}`).set(authSA)
     expect(res.status).toBe(200)
     expect(mockPrisma.borne.findUniqueOrThrow.mock.calls[0][0].include.entrepriseIcrm).toEqual(SELECT_ENTREPRISE_ATTENDU)
+  })
+})
+
+// ─── Changement de destination : envois pas encore livrés ─────────────────────
+
+describe('PUT /api/bornes/:id — changement d’entreprise et envois en attente', () => {
+  const JOBS_CAE = [
+    { id: 'j1', enregistrementId: 'e1', statut: 'suspendu' },
+    { id: 'j2', enregistrementId: 'e2', statut: 'en_attente' },
+  ]
+  const appelsMajJobs = () => mockPrisma.partageJob.updateMany.mock.calls.map((c) => c[0])
+
+  it('par défaut, les envois GARDENT leur cible (ancienne entreprise) : rien n’est redirigé, nombre renvoyé', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
+    mockPrisma.partageJob.count.mockResolvedValue(5)
+
+    const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA).send({ entrepriseIcrmId: ENT_LENA })
+
+    expect(res.status).toBe(200)
+    expect(res.body.envoisEnAttente).toEqual({ conserves: 5 })
+    expect(mockPrisma.partageJob.count).toHaveBeenCalledWith({
+      where: {
+        statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] },
+        entrepriseIcrmId: ENT_CAE,
+        enregistrement: { borneId: BORNE_ID },
+      },
+    })
+    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+    expect(mockPrisma.borne.update).toHaveBeenCalledWith({ where: { id: BORNE_ID }, data: { entrepriseIcrmId: ENT_LENA } })
+  })
+
+  it('redirigerEnvoisEnAttente: true → cible = nouvelle entreprise, suspendus remis en file', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+
+    const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA)
+      .send({ entrepriseIcrmId: ENT_LENA, redirigerEnvoisEnAttente: true })
+
+    expect(res.status).toBe(200)
+    expect(res.body.envoisEnAttente).toEqual({ rediriges: 2 })
+    expect(mockPrisma.partageJob.findMany.mock.calls[0][0].where).toEqual({
+      statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] },
+      enregistrement: { borneId: BORNE_ID },
+      OR: [{ entrepriseIcrmId: ENT_CAE }, { entrepriseIcrm: { is: { deletedAt: { not: null } } } }],
+    })
+    expect(appelsMajJobs()).toEqual([
+      { where: { id: { in: ['j1', 'j2'] } }, data: { entrepriseIcrmId: ENT_LENA } },
+      { where: { id: { in: ['j1'] } }, data: { statut: 'en_attente', erreur: null, prochainEssai: null } },
+    ])
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['e1'] }, statutPartage: 'suspendu' },
+      data: { statutPartage: 'en_attente', derniereErreur: null },
+    })
+    // Le drapeau n'est jamais écrit sur la borne
+    expect(mockPrisma.borne.update.mock.calls[0][0].data).toEqual({ entrepriseIcrmId: ENT_LENA })
+  })
+
+  it('redirection vers « Aucune » (null) : cible = canaux (NULL), suspendus remis en file', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+
+    const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA)
+      .send({ entrepriseIcrmId: null, redirigerEnvoisEnAttente: true })
+
+    expect(res.body.envoisEnAttente).toEqual({ rediriges: 2 })
+    expect(appelsMajJobs()[0]).toEqual({ where: { id: { in: ['j1', 'j2'] } }, data: { entrepriseIcrmId: null } })
+  })
+
+  it('redirection vers une entreprise à retester : envois redirigés mais SUSPENDUS avec son motif', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_LENA, nom: 'LENA', actif: true, deletedAt: null, verificationRequise: true })
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS_CAE)
+
+    await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA).send({ entrepriseIcrmId: ENT_LENA, redirigerEnvoisEnAttente: true })
+
+    expect(appelsMajJobs()[1]).toEqual({
+      where: { id: { in: ['j1', 'j2'] } },
+      data: { statut: 'suspendu', erreur: expect.stringMatching(/LENA.*testez l'entreprise/), prochainEssai: null },
+    })
+  })
+
+  it('drapeau sans changement de destination : ignoré', async () => {
+    mockPrisma.borne.findFirst.mockResolvedValue({ entrepriseIcrmId: ENT_CAE })
+    const res = await request(app).put(`/api/bornes/${BORNE_ID}`).set(authSA)
+      .send({ entrepriseIcrmId: ENT_CAE, redirigerEnvoisEnAttente: true, adresse: 'x' })
+    expect(res.status).toBe(200)
+    expect(res.body).not.toHaveProperty('envoisEnAttente')
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
+    expect(mockPrisma.borne.update.mock.calls[0][0].data).toEqual({ adresse: 'x' })
+  })
+})
+
+describe('GET /api/bornes/:id — envois en attente par cible', () => {
+  it('décompte par entreprise cible (nom, état, suspendus) et par canaux', async () => {
+    mockPrisma.borne.findUniqueOrThrow.mockResolvedValue({ id: BORNE_ID, entrepriseIcrmId: ENT_LENA, entrepriseIcrm: null })
+    mockPrisma.partageJob.groupBy.mockResolvedValue([
+      { entrepriseIcrmId: ENT_CAE, statut: 'suspendu', _count: { _all: 4 } },
+      { entrepriseIcrmId: ENT_CAE, statut: 'en_attente', _count: { _all: 1 } },
+      { entrepriseIcrmId: null, statut: 'echec_temporaire', _count: { _all: 2 } },
+    ])
+    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([{ id: ENT_CAE, nom: 'CAE España', actif: false, deletedAt: null }])
+
+    const res = await request(app).get(`/api/bornes/${BORNE_ID}`).set(authSA)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.envoisEnAttente).toEqual({
+      total: 7,
+      parEntreprise: [
+        { entrepriseIcrmId: ENT_CAE, nom: 'CAE España', actif: false, supprimee: false, total: 5, suspendus: 4 },
+        { entrepriseIcrmId: null, nom: null, actif: null, supprimee: false, total: 2, suspendus: 0 },
+      ],
+    })
+    expect(mockPrisma.partageJob.groupBy).toHaveBeenCalledWith({
+      by: ['entrepriseIcrmId', 'statut'],
+      where: { statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] }, enregistrement: { borneId: BORNE_ID, deletedAt: null } },
+      _count: { _all: true },
+    })
+  })
+
+  it('décompte impossible : la borne est quand même renvoyée (envoisEnAttente null)', async () => {
+    mockPrisma.borne.findUniqueOrThrow.mockResolvedValue({ id: BORNE_ID })
+    mockPrisma.partageJob.groupBy.mockRejectedValue(new Error('panne'))
+    const res = await request(app).get(`/api/bornes/${BORNE_ID}`).set(authSA)
+    expect(res.status).toBe(200)
+    expect(res.body.data.envoisEnAttente).toBeNull()
   })
 })

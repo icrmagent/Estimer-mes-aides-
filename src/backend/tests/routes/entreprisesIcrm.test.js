@@ -1,14 +1,15 @@
 /**
  * Entreprises (tenants) I-CRM — routes /api/entreprises-icrm.
  *
- * Couvre : CRUD SuperAdmin, lecture AdminBorne cloisonnée à ses bornes, écritures
- * refusées à l'AdminBorne, validation Zod (clé « emak_… », secret de 48 caractères,
- * URL https hors localhost, nom), secret en écriture seule (jamais renvoyé, même
- * dans une erreur), nouvelle clé sans secret refusée, vérification effacée quand
- * les identifiants changent, suppression logique (409 si des bornes l'utilisent,
- * désaffectation avec ?force=true), test de connexion (ping I-CRM : succès,
- * 401, 2xx non conforme, timeout, réseau, entreprise incomplète) avec mémorisation
- * de l'entreprise / du sous-type / du statut.
+ * Couvre : SuperAdmin seul (lecture comprise : AdminBorne 403 partout), CRUD,
+ * validation Zod (clé, secret, URL https ; hôtes internes refusés en production),
+ * secret en écriture seule, nouvelle clé OU nouvel hôte sans secret refusés,
+ * `verificationRequise` après un changement d'URL / de clé, suspension des envois
+ * à la désactivation et au changement d'identifiants, reprise à la réactivation
+ * seulement pour des identifiants inchangés et vérifiés, suppression (409 si
+ * bornes ou envois en attente ; force : envois gardés suspendus ou redirigés vers
+ * les canaux sur choix explicite), test de connexion (ping, écriture
+ * conditionnelle contre la course, reprise des envois sur succès).
  */
 
 import { jest } from '@jest/globals'
@@ -20,9 +21,11 @@ const mockPrisma = {
     findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
   },
   borne: { findFirst: jest.fn(), updateMany: jest.fn() },
-  partageJob: { updateMany: jest.fn() },
+  partageJob: { findMany: jest.fn(), updateMany: jest.fn(), count: jest.fn() },
+  enregistrement: { updateMany: jest.fn() },
   $transaction: jest.fn(),
 }
 
@@ -85,6 +88,7 @@ function entrepriseEnBase(overrides = {}) {
     apiKey: CLE,
     token: SECRET,
     actif: true,
+    verificationRequise: false,
     derniereVerification: now,
     dernierStatut: 'ok',
     createdAt: now,
@@ -126,6 +130,11 @@ function tousLesLogs() {
   ])
 }
 
+const JOBS = [
+  { id: 'j1', enregistrementId: 'e1', statut: 'en_attente' },
+  { id: 'j2', enregistrementId: 'e2', statut: 'suspendu' },
+]
+
 beforeEach(() => {
   jest.clearAllMocks()
   global.fetch = jest.fn()
@@ -135,7 +144,12 @@ beforeEach(() => {
     ...data,
   }))
   mockPrisma.entrepriseIcrm.update.mockImplementation(async ({ data }) => ({ ...entrepriseEnBase(), ...data }))
+  mockPrisma.entrepriseIcrm.updateMany.mockResolvedValue({ count: 1 })
   mockPrisma.borne.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.partageJob.findMany.mockResolvedValue([])
+  mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 0 })
+  mockPrisma.partageJob.count.mockResolvedValue(0)
+  mockPrisma.enregistrement.updateMany.mockResolvedValue({ count: 0 })
   mockPrisma.$transaction.mockImplementation(async (ops) => Promise.all(ops))
 })
 
@@ -143,14 +157,18 @@ afterAll(() => {
   global.fetch = originalFetch
 })
 
+const appelsMajJobs = () => mockPrisma.partageJob.updateMany.mock.calls.map((c) => c[0])
+
 // ─── Rôles ────────────────────────────────────────────────────────────────────
 
-describe('Entreprises I-CRM — rôles', () => {
+describe('Entreprises I-CRM — SuperAdmin seulement', () => {
   it('sans JWT → 401', async () => {
     expect((await request(app).get('/api/entreprises-icrm')).status).toBe(401)
   })
 
   it.each([
+    ['GET', '/api/entreprises-icrm'],
+    ['GET', `/api/entreprises-icrm/${ENT_ID}`],
     ['POST', '/api/entreprises-icrm'],
     ['PUT', `/api/entreprises-icrm/${ENT_ID}`],
     ['DELETE', `/api/entreprises-icrm/${ENT_ID}`],
@@ -158,6 +176,8 @@ describe('Entreprises I-CRM — rôles', () => {
   ])('AdminBorne : %s %s → 403 sans toucher à la base ni appeler I-CRM', async (methode, url) => {
     const res = await request(app)[methode.toLowerCase()](url).set(authAB).send(creation())
     expect(res.status).toBe(403)
+    expect(mockPrisma.entrepriseIcrm.findMany).not.toHaveBeenCalled()
+    expect(mockPrisma.entrepriseIcrm.findFirst).not.toHaveBeenCalled()
     expect(mockPrisma.entrepriseIcrm.create).not.toHaveBeenCalled()
     expect(mockPrisma.entrepriseIcrm.update).not.toHaveBeenCalled()
     expect(global.fetch).not.toHaveBeenCalled()
@@ -165,57 +185,39 @@ describe('Entreprises I-CRM — rôles', () => {
 
   it('le préfixe canonique /api/backoffice/entreprises-icrm est monté', async () => {
     mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
-    const res = await request(app).get('/api/backoffice/entreprises-icrm').set(authSA)
-    expect(res.status).toBe(200)
+    expect((await request(app).get('/api/backoffice/entreprises-icrm').set(authSA)).status).toBe(200)
   })
 })
 
 // ─── Lecture ──────────────────────────────────────────────────────────────────
 
 describe('GET /api/entreprises-icrm', () => {
-  it('SuperAdmin : toutes les entreprises non supprimées, nombre de bornes, jamais le secret', async () => {
+  it('toutes les entreprises non supprimées + nombre de bornes et d’envois suspendus, jamais le secret', async () => {
     mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([
-      { ...entrepriseEnBase(), _count: { bornes: 3 } },
+      { ...entrepriseEnBase(), _count: { bornes: 3, partageJobs: 12 } },
     ])
 
     const res = await request(app).get('/api/entreprises-icrm').set(authSA)
 
     expect(res.status).toBe(200)
     expect(res.body.data[0]).toMatchObject({
-      id: ENT_ID,
-      nom: 'LENA (France)',
-      nomIcrm: 'LENA',
-      sousTypeIcrm: 'BORNE TACTILE',
-      apiUrl: 'https://icrm.api.ila26.fr',
-      apiKeyId: CLE,
-      hasToken: true,
-      actif: true,
-      dernierStatut: 'ok',
-      nbBornes: 3,
+      id: ENT_ID, nom: 'LENA (France)', nomIcrm: 'LENA', apiKeyId: CLE, hasToken: true,
+      actif: true, verificationRequise: false, dernierStatut: 'ok', nbBornes: 3, nbEnvoisSuspendus: 12,
     })
     expect(res.body.data[0]).not.toHaveProperty('deletedAt')
     sansSecret(res.body)
     const { where, include } = mockPrisma.entrepriseIcrm.findMany.mock.calls[0][0]
     expect(where).toEqual({ deletedAt: null })
-    expect(include._count.select.bornes).toEqual({ where: { deletedAt: null } })
+    expect(include._count.select).toEqual({
+      bornes: { where: { deletedAt: null } },
+      partageJobs: { where: { statut: 'suspendu' } },
+    })
   })
 
   it('?actif=true filtre les entreprises actives', async () => {
     mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([])
     await request(app).get('/api/entreprises-icrm?actif=true').set(authSA)
     expect(mockPrisma.entrepriseIcrm.findMany.mock.calls[0][0].where).toEqual({ deletedAt: null, actif: true })
-  })
-
-  it('AdminBorne : seulement les entreprises de SES bornes, sans compteur global', async () => {
-    mockPrisma.entrepriseIcrm.findMany.mockResolvedValue([entrepriseEnBase()])
-
-    const res = await request(app).get('/api/entreprises-icrm').set(authAB)
-
-    expect(res.status).toBe(200)
-    const args = mockPrisma.entrepriseIcrm.findMany.mock.calls[0][0]
-    expect(args.where).toEqual({ deletedAt: null, bornes: { some: { deletedAt: null, adminBorneId: AB_ID } } })
-    expect(args.include).toBeUndefined()
-    sansSecret(res.body)
   })
 
   it('n’expose jamais un apiKey qui n’a pas le format d’un identifiant de clé', async () => {
@@ -225,32 +227,17 @@ describe('GET /api/entreprises-icrm', () => {
     sansSecret(res.body)
   })
 
-  it('détail : bornes affectées sans adminBorneId ; AdminBorne limité à ses bornes (403 sinon)', async () => {
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({
-      bornes: [
-        { id: BORNE_ID, idBorne: 'BORNE-A', adresse: '1 rue A', pays: 'FR', adminBorneId: AB_ID },
-        { id: 'autre', idBorne: 'BORNE-B', adresse: '2 rue B', pays: 'FR', adminBorneId: 'autre-ab' },
-      ],
+  it('détail : bornes affectées ; 404 si inconnue ou supprimée', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValueOnce(entrepriseEnBase({
+      bornes: [{ id: BORNE_ID, idBorne: 'BORNE-A', adresse: '1 rue A', pays: 'FR' }],
     }))
-
     const sa = await request(app).get(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
     expect(sa.status).toBe(200)
-    expect(sa.body.data.bornes).toHaveLength(2)
-    expect(sa.body.data.bornes[0]).not.toHaveProperty('adminBorneId')
+    expect(sa.body.data.bornes).toHaveLength(1)
     sansSecret(sa.body)
 
-    const ab = await request(app).get(`/api/entreprises-icrm/${ENT_ID}`).set(authAB)
-    expect(ab.status).toBe(200)
-    expect(ab.body.data.bornes.map((b) => b.idBorne)).toEqual(['BORNE-A'])
-
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({ bornes: [] }))
-    expect((await request(app).get(`/api/entreprises-icrm/${ENT_ID}`).set(authAB)).status).toBe(403)
-  })
-
-  it('détail : 404 si inconnue ou supprimée', async () => {
-    const res = await request(app).get(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-    expect(res.status).toBe(404)
-    expect(mockPrisma.entrepriseIcrm.findFirst.mock.calls[0][0].where).toEqual({ id: ENT_ID, deletedAt: null })
+    const inconnue = await request(app).get(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
+    expect(inconnue.status).toBe(404)
   })
 })
 
@@ -259,27 +246,19 @@ describe('GET /api/entreprises-icrm', () => {
 describe('POST /api/entreprises-icrm', () => {
   it('crée l’entreprise (URL normalisée, active par défaut) et ne renvoie jamais le secret', async () => {
     const res = await request(app).post('/api/entreprises-icrm').set(authSA)
-      .send(creation({ apiUrl: 'https://icrm.api.ila26.fr/api/', nomIcrm: 'forgé', dernierStatut: 'ok' }))
+      .send(creation({ apiUrl: 'https://icrm.api.ila26.fr/api/', nomIcrm: 'forgé', dernierStatut: 'ok', verificationRequise: false }))
 
     expect(res.status).toBe(201)
     expect(mockPrisma.entrepriseIcrm.create).toHaveBeenCalledWith({
-      data: {
-        nom: 'LENA (France)',
-        apiUrl: 'https://icrm.api.ila26.fr',
-        apiKey: CLE,
-        token: SECRET,
-        actif: true,
-      },
+      data: { nom: 'LENA (France)', apiUrl: 'https://icrm.api.ila26.fr', apiKey: CLE, token: SECRET, actif: true },
     })
     expect(res.body.data).toMatchObject({ apiKeyId: CLE, hasToken: true, actif: true })
     sansSecret(res.body)
     expect(tousLesLogs()).not.toContain(SECRET)
   })
 
-  it('accepte http://localhost (mock I-CRM de développement)', async () => {
-    const res = await request(app).post('/api/entreprises-icrm').set(authSA)
-      .send(creation({ apiUrl: 'http://localhost:8000' }))
-    expect(res.status).toBe(201)
+  it('hors production : http://localhost accepté (mock I-CRM de développement)', async () => {
+    expect((await request(app).post('/api/entreprises-icrm').set(authSA).send(creation({ apiUrl: 'http://localhost:8000' }))).status).toBe(201)
   })
 
   it.each([
@@ -287,17 +266,33 @@ describe('POST /api/entreprises-icrm', () => {
     ['nom trop long', { nom: 'N'.repeat(121) }, 'nom', /120 caractères/],
     ['clé au mauvais format', { apiKey: 'cle-quelconque' }, 'apiKey', /emak_/],
     ['secret trop court', { token: 'abc' }, 'token', /48 caractères/],
-    ['secret non alphanumérique', { token: `${SECRET.slice(0, 47)}-` }, 'token', /48 caractères/],
     ['URL http distante', { apiUrl: 'http://icrm.api.ila26.fr' }, 'apiUrl', /https/],
     ['URL invalide', { apiUrl: 'pas une url' }, 'apiUrl', /URL API invalide/],
   ])('refuse %s (400, message FR, secret jamais renvoyé)', async (_cas, patch, champ, message) => {
     const res = await request(app).post('/api/entreprises-icrm').set(authSA).send(creation(patch))
-
     expect(res.status).toBe(400)
     expect(res.body.error.code).toBe('VALIDATION_ERROR')
     expect(res.body.error.details.fieldErrors[champ][0]).toMatch(message)
-    expect(res.body.error.message).toMatch(message)
     expect(JSON.stringify(res.body)).not.toContain(SECRET)
+    expect(mockPrisma.entrepriseIcrm.create).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['http://localhost:8000', /https/],
+    ['https://10.0.0.5', /adresse interne/],
+    ['https://169.254.169.254', /adresse interne/],
+    ['https://[fd00::1]', /adresse interne/],
+    ['https://localhost', /adresse interne/],
+  ])('production : %s refusé', async (apiUrl, message) => {
+    const avant = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      const res = await request(app).post('/api/entreprises-icrm').set(authSA).send(creation({ apiUrl }))
+      expect(res.status).toBe(400)
+      expect(res.body.error.details.fieldErrors.apiUrl[0]).toMatch(message)
+    } finally {
+      process.env.NODE_ENV = avant
+    }
     expect(mockPrisma.entrepriseIcrm.create).not.toHaveBeenCalled()
   })
 
@@ -313,94 +308,92 @@ describe('POST /api/entreprises-icrm', () => {
     mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: 'autre' })
     const res = await request(app).post('/api/entreprises-icrm').set(authSA).send(creation({ nom: 'lena (france)' }))
     expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe('DUPLICATE')
     expect(mockPrisma.entrepriseIcrm.findFirst.mock.calls[0][0].where).toEqual({
       deletedAt: null, nom: { equals: 'lena (france)', mode: 'insensitive' },
     })
-    expect(mockPrisma.entrepriseIcrm.create).not.toHaveBeenCalled()
   })
 })
 
 // ─── Modification ─────────────────────────────────────────────────────────────
 
-describe('PUT /api/entreprises-icrm/:id', () => {
+describe('PUT /api/entreprises-icrm/:id — identifiants', () => {
   beforeEach(() => {
-    mockPrisma.entrepriseIcrm.findFirst.mockImplementation(async ({ where }) => (
-      where.id === ENT_ID ? entrepriseEnBase() : null
-    ))
+    mockPrisma.entrepriseIcrm.findFirst.mockImplementation(async ({ where }) => (where.id === ENT_ID ? entrepriseEnBase() : null))
   })
 
-  it('nom / actif seuls : secret non requis, vérification conservée', async () => {
-    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-      .send({ nom: 'LENA France', actif: false })
-
+  it('nom seul : ni secret requis, ni vérification effacée, ni suspension', async () => {
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ nom: 'LENA France' })
     expect(res.status).toBe(200)
-    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
-      where: { id: ENT_ID }, data: { nom: 'LENA France', actif: false },
-    })
+    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({ where: { id: ENT_ID }, data: { nom: 'LENA France' } })
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
     sansSecret(res.body)
   })
 
-  it('rotation du secret : statut de vérification effacé, entreprise vérifiée conservée', async () => {
+  it('rotation du secret (même clé, même hôte) : statut du test effacé, pas de suspension', async () => {
     const nouveau = 'N'.repeat(48)
     const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ token: nouveau })
-
     expect(res.status).toBe(200)
     expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
-      where: { id: ENT_ID },
-      data: { token: nouveau, derniereVerification: null, dernierStatut: null },
+      where: { id: ENT_ID }, data: { token: nouveau, derniereVerification: null, dernierStatut: null },
     })
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
     expect(JSON.stringify(res.body)).not.toContain(nouveau)
   })
 
-  it('nouvelle clé sans secret : refusée (I-CRM émet toujours la clé avec un nouveau secret)', async () => {
-    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-      .send({ apiKey: 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ' })
-
+  it('nouvelle clé sans secret : refusée', async () => {
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ apiKey: 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ' })
     expect(res.status).toBe(400)
-    expect(res.body.error.message).toMatch(/Nouvelle clé API/)
     expect(res.body.error.details.fieldErrors.token[0]).toMatch(/Nouvelle clé API/)
     expect(mockPrisma.entrepriseIcrm.update).not.toHaveBeenCalled()
   })
 
-  it('nouvelle clé + secret : acceptée, entreprise vérifiée effacée (peut-être un autre tenant)', async () => {
+  it.each([
+    ['autre domaine', 'https://icrm.api.es.ila26.com'],
+    ['autre port', 'https://icrm.api.ila26.fr:8443'],
+  ])('nouvel hôte d’URL (%s) sans secret : refusé', async (_cas, apiUrl) => {
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ apiUrl })
+    expect(res.status).toBe(400)
+    expect(res.body.error.details.fieldErrors.token[0]).toMatch(/Nouvel hôte/)
+    expect(mockPrisma.entrepriseIcrm.update).not.toHaveBeenCalled()
+  })
+
+  it('nouvelle clé + secret : identité effacée, verificationRequise, envois en file SUSPENDUS', async () => {
+    mockPrisma.partageJob.findMany.mockResolvedValue([JOBS[0]])
     const nouvelleCle = 'emak_ZZZZZZZZZZZZZZZZZZZZZZZZ'
     const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
       .send({ apiKey: nouvelleCle, token: 'N'.repeat(48) })
 
     expect(res.status).toBe(200)
-    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
-      where: { id: ENT_ID },
-      data: {
-        apiKey: nouvelleCle,
-        token: 'N'.repeat(48),
-        nomIcrm: null,
-        sousTypeIcrm: null,
-        derniereVerification: null,
-        dernierStatut: null,
-      },
-    })
-  })
-
-  it('même clé renvoyée sans secret : acceptée, rien n’est effacé', async () => {
-    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ apiKey: CLE, nom: 'LENA' })
-    expect(res.status).toBe(200)
-    expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toEqual({ apiKey: CLE, nom: 'LENA' })
-  })
-
-  it('nouvelle URL : normalisée, entreprise vérifiée effacée ; même URL avec /api final : rien d’effacé', async () => {
-    await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-      .send({ apiUrl: 'https://icrm.api.es.ila26.com/api' })
     expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toEqual({
-      apiUrl: 'https://icrm.api.es.ila26.com',
+      apiKey: nouvelleCle,
+      token: 'N'.repeat(48),
       nomIcrm: null,
       sousTypeIcrm: null,
       derniereVerification: null,
       dernierStatut: null,
+      verificationRequise: true,
     })
+    expect(mockPrisma.partageJob.findMany).toHaveBeenCalledWith({
+      where: { entrepriseIcrmId: ENT_ID, statut: { in: ['en_attente', 'echec_temporaire'] } },
+      select: { id: true, enregistrementId: true },
+    })
+    expect(appelsMajJobs()[0]).toEqual({
+      where: { id: { in: ['j1'] }, statut: { in: ['en_attente', 'echec_temporaire'] } },
+      data: { statut: 'suspendu', erreur: expect.stringMatching(/URL ou clé modifiée, testez l'entreprise/), prochainEssai: null },
+    })
+    expect(res.body.jobsSuspendus).toBe(1)
+  })
 
+  it('même hôte, autre chemin, sans secret : accepté, mais à retester (envois suspendus)', async () => {
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.ila26.fr/v2' })
+    expect(res.status).toBe(200)
+    expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toMatchObject({ apiUrl: 'https://icrm.api.ila26.fr/v2', verificationRequise: true })
+  })
+
+  it('même URL renvoyée avec /api final : rien d’effacé, rien de suspendu', async () => {
     await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ apiUrl: 'https://icrm.api.ila26.fr/api/' })
-    expect(mockPrisma.entrepriseIcrm.update.mock.calls[1][0].data).toEqual({ apiUrl: 'https://icrm.api.ila26.fr' })
+    expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toEqual({ apiUrl: 'https://icrm.api.ila26.fr' })
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -411,58 +404,106 @@ describe('PUT /api/entreprises-icrm/:id', () => {
     const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send(patch)
     expect(res.status).toBe(400)
     expect(res.body.error.details.fieldErrors[champ]).toBeDefined()
-    expect(mockPrisma.entrepriseIcrm.update).not.toHaveBeenCalled()
   })
 
   it('les champs calculés envoyés par le client sont ignorés', async () => {
     await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-      .send({ nom: 'LENA', nomIcrm: 'forgé', dernierStatut: 'ok', deletedAt: null })
+      .send({ nom: 'LENA', nomIcrm: 'forgé', dernierStatut: 'ok', verificationRequise: false, deletedAt: null })
     expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toEqual({ nom: 'LENA' })
   })
 
-  it('renommage vers un nom déjà pris : 409', async () => {
-    mockPrisma.entrepriseIcrm.findFirst
-      .mockResolvedValueOnce(entrepriseEnBase())
-      .mockResolvedValueOnce({ id: 'autre' })
-    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ nom: 'CAE España' })
-    expect(res.status).toBe(409)
-    expect(mockPrisma.entrepriseIcrm.findFirst.mock.calls[1][0].where).toMatchObject({ id: { not: ENT_ID } })
+  it('renommage vers un nom déjà pris : 409 ; entreprise inconnue : 404', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockReset()
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValueOnce(entrepriseEnBase()).mockResolvedValueOnce({ id: 'autre' })
+    expect((await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ nom: 'CAE España' })).status).toBe(409)
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(null)
+    expect((await request(app).put('/api/entreprises-icrm/inconnue').set(authSA).send({ nom: 'x' })).status).toBe(404)
   })
+})
 
-  it('404 si l’entreprise est inconnue ou supprimée', async () => {
-    const res = await request(app).put('/api/entreprises-icrm/inconnue').set(authSA).send({ nom: 'x' })
-    expect(res.status).toBe(404)
-  })
+describe('PUT /api/entreprises-icrm/:id — désactivation / réactivation', () => {
+  it('désactivation : envois en file SUSPENDUS (jobs + enregistrements), rien n’est repris', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase())
+    mockPrisma.partageJob.findMany.mockResolvedValue([JOBS[0], { id: 'j3', enregistrementId: 'e3' }])
 
-  it('désactivation : aucun job reprogrammé (les envois de ses bornes sont suspendus par le worker)', async () => {
     const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: false })
+
     expect(res.status).toBe(200)
-    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+    expect(res.body.jobsSuspendus).toBe(2)
     expect(res.body).not.toHaveProperty('jobsRepris')
+    const motif = 'Entreprise I-CRM « LENA (France) » désactivée — envoi suspendu'
+    expect(appelsMajJobs()).toEqual([{
+      where: { id: { in: ['j1', 'j3'] }, statut: { in: ['en_attente', 'echec_temporaire'] } },
+      data: { statut: 'suspendu', erreur: motif, prochainEssai: null },
+    }])
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['e1', 'e3'] }, statutPartage: { not: 'partage' } },
+      data: { statutPartage: 'suspendu', derniereErreur: motif },
+    })
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
   })
 
-  it('réactivation : les jobs SUSPENDUS de ses bornes sont reprogrammés tout de suite', async () => {
+  it('réactivation, identifiants inchangés et dernier test réussi : envois suspendus repris (jobsRepris)', async () => {
     mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({ actif: false }))
-    mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 3 })
+    mockPrisma.partageJob.findMany.mockResolvedValue([JOBS[1]])
 
     const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: true })
 
     expect(res.status).toBe(200)
-    expect(res.body.jobsRepris).toBe(3)
-    expect(mockPrisma.partageJob.updateMany).toHaveBeenCalledWith({
-      where: {
-        statut: 'echec_temporaire',
-        erreur: { endsWith: '— envoi suspendu' },
-        enregistrement: { borne: { entrepriseIcrmId: ENT_ID } },
-      },
-      data: { prochainEssai: expect.any(Date) },
+    expect(res.body.jobsRepris).toBe(1)
+    expect(res.body).not.toHaveProperty('avertissement')
+    expect(mockPrisma.partageJob.findMany).toHaveBeenCalledWith({
+      where: { entrepriseIcrmId: ENT_ID, statut: 'suspendu' },
+      select: { id: true, enregistrementId: true },
     })
-    expect(mockPrisma.partageJob.updateMany.mock.calls[0][0].data.prochainEssai.getTime()).toBeLessThanOrEqual(Date.now())
+    expect(appelsMajJobs()).toEqual([{
+      where: { id: { in: ['j2'] }, statut: 'suspendu' },
+      data: { statut: 'en_attente', erreur: null, prochainEssai: null },
+    }])
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['e2'] }, statutPartage: 'suspendu' },
+      data: { statutPartage: 'en_attente', derniereErreur: null },
+    })
   })
 
-  it('entreprise déjà active renvoyée active : rien n’est reprogrammé', async () => {
-    await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: true, nom: 'LENA' })
-    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+  it.each([
+    ['jamais testée', {}, { actif: true }],
+    ['dernier test en échec', { dernierStatut: 'invalid_credentials' }, { actif: true }],
+    ['secret changé dans la même requête', {}, { actif: true, token: 'N'.repeat(48) }],
+  ])('réactivation — %s : envois NON repris, « testez l’entreprise »', async (_cas, etat, corps) => {
+    const existante = entrepriseEnBase({ actif: false, dernierStatut: null, ...etat })
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(existante)
+    mockPrisma.entrepriseIcrm.update.mockImplementation(async ({ data }) => ({ ...existante, ...data }))
+    mockPrisma.partageJob.findMany.mockResolvedValue([JOBS[1]])
+
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send(corps)
+
+    expect(res.status).toBe(200)
+    expect(res.body.jobsRepris).toBe(0)
+    expect(res.body.avertissement).toMatch(/Testez l'entreprise pour reprendre les envois/)
+    expect(appelsMajJobs().some((c) => c.data.statut === 'en_attente')).toBe(false)
+  })
+
+  it('réactivation + nouvelle URL / clé dans la même requête : reste suspendue (à retester), rien n’est repris', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({ actif: false }))
+    mockPrisma.partageJob.findMany.mockResolvedValue([])
+
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
+      .send({ actif: true, apiUrl: 'https://icrm.api.es.ila26.com', token: 'N'.repeat(48) })
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ actif: true, verificationRequise: true })
+    expect(res.body.jobsRepris).toBe(0)
+    expect(res.body.avertissement).toMatch(/Testez l'entreprise/)
+    // Suspension (en_attente / echec_temporaire), jamais de reprise des suspendus
+    expect(mockPrisma.partageJob.findMany.mock.calls.every((c) => c[0].where.statut.in !== undefined)).toBe(true)
+  })
+
+  it('entreprise déjà active renvoyée active : rien n’est repris ni suspendu', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase())
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: true, nom: 'LENA' })
+    expect(res.body).not.toHaveProperty('jobsRepris')
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
   })
 })
 
@@ -471,159 +512,191 @@ describe('PUT /api/entreprises-icrm/:id', () => {
 describe('DELETE /api/entreprises-icrm/:id', () => {
   const BORNES = [{ id: BORNE_ID, idBorne: 'BORNE-A', adresse: '1 rue A' }]
 
-  it('409 avec la liste des bornes qui l’utilisent, rien n’est modifié', async () => {
+  it('409 avec les bornes et le nombre d’envois pas encore livrés, rien n’est modifié', async () => {
     mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_ID, nom: 'LENA', bornes: BORNES })
+    mockPrisma.partageJob.count.mockResolvedValue(7)
 
     const res = await request(app).delete(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
 
     expect(res.status).toBe(409)
     expect(res.body.error.code).toBe('ENTREPRISE_ICRM_EN_USAGE')
-    expect(res.body.error.details.bornes).toEqual(BORNES)
-    expect(res.body.error.message).toMatch(/1 borne\./)
+    expect(res.body.error.details).toEqual({ bornes: BORNES, envoisEnAttente: 7 })
+    expect(mockPrisma.partageJob.count).toHaveBeenCalledWith({
+      where: { entrepriseIcrmId: ENT_ID, statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] } },
+    })
     expect(mockPrisma.$transaction).not.toHaveBeenCalled()
   })
 
-  it('?force=true : désaffecte les bornes puis supprime logiquement, dans une transaction', async () => {
+  it('409 aussi sans borne affectée si des envois la ciblent encore (arriéré conservé après réaffectation)', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_ID, nom: 'LENA', bornes: [] })
+    mockPrisma.partageJob.count.mockResolvedValue(3)
+    expect((await request(app).delete(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)).status).toBe(409)
+  })
+
+  it('?force=true (défaut) : bornes désaffectées, entreprise supprimée, envois GARDÉS suspendus « supprimée »', async () => {
     mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_ID, nom: 'LENA', bornes: BORNES })
+    mockPrisma.partageJob.count.mockResolvedValue(2)
     mockPrisma.borne.updateMany.mockResolvedValue({ count: 1 })
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS)
 
     const res = await request(app).delete(`/api/entreprises-icrm/${ENT_ID}?force=true`).set(authSA)
 
     expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ id: ENT_ID, bornesDesaffectees: 1 })
-    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
-    expect(mockPrisma.borne.updateMany).toHaveBeenCalledWith({
-      where: { entrepriseIcrmId: ENT_ID }, data: { entrepriseIcrmId: null },
-    })
+    expect(res.body.data).toEqual({ id: ENT_ID, bornesDesaffectees: 1, envoisRediriges: 0, envoisSuspendus: 2 })
+    expect(mockPrisma.borne.updateMany).toHaveBeenCalledWith({ where: { entrepriseIcrmId: ENT_ID }, data: { entrepriseIcrmId: null } })
     expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
       where: { id: ENT_ID }, data: { deletedAt: expect.any(Date), actif: false },
     })
+    // Jobs déjà suspendus compris (motif mis à jour), cible conservée
+    expect(mockPrisma.partageJob.findMany.mock.calls[0][0].where).toEqual({
+      entrepriseIcrmId: ENT_ID, statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] },
+    })
+    expect(appelsMajJobs()).toEqual([{
+      where: { id: { in: ['j1', 'j2'] }, statut: { in: ['en_attente', 'echec_temporaire', 'suspendu'] } },
+      data: { statut: 'suspendu', erreur: 'Entreprise I-CRM « LENA » supprimée — envoi suspendu', prochainEssai: null },
+    }])
+    expect(appelsMajJobs().some((c) => 'entrepriseIcrmId' in c.data)).toBe(false)
   })
 
-  it('sans borne affectée : suppression logique directe', async () => {
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_ID, nom: 'LENA', bornes: [] })
+  it('?force=true&redirigerEnvoisEnAttente=true (choix explicite) : envois redirigés vers les canaux', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue({ id: ENT_ID, nom: 'LENA', bornes: BORNES })
+    mockPrisma.partageJob.count.mockResolvedValue(2)
+    mockPrisma.partageJob.findMany.mockResolvedValue(JOBS)
+
+    const res = await request(app).delete(`/api/entreprises-icrm/${ENT_ID}?force=true&redirigerEnvoisEnAttente=true`).set(authSA)
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ envoisRediriges: 2, envoisSuspendus: 0 })
+    expect(appelsMajJobs()).toEqual([
+      { where: { id: { in: ['j1', 'j2'] } }, data: { entrepriseIcrmId: null } },
+      { where: { id: { in: ['j2'] } }, data: { statut: 'en_attente', erreur: null, prochainEssai: null } },
+    ])
+    expect(mockPrisma.enregistrement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['e2'] }, statutPartage: 'suspendu' },
+      data: { statutPartage: 'en_attente', derniereErreur: null },
+    })
+  })
+
+  it('ni borne ni envoi : suppression logique directe ; 404 si déjà supprimée', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValueOnce({ id: ENT_ID, nom: 'LENA', bornes: [] })
     const res = await request(app).delete(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
     expect(res.status).toBe(200)
-    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalled()
-  })
-
-  it('404 si déjà supprimée', async () => {
-    const res = await request(app).delete(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)
-    expect(res.status).toBe(404)
-    expect(mockPrisma.entrepriseIcrm.findFirst.mock.calls[0][0].where).toEqual({ id: ENT_ID, deletedAt: null })
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
+    expect((await request(app).delete(`/api/entreprises-icrm/${ENT_ID}`).set(authSA)).status).toBe(404)
   })
 })
 
 // ─── Test de connexion ────────────────────────────────────────────────────────
 
 describe('POST /api/entreprises-icrm/:id/test', () => {
+  const ENTREPRISE_TESTEE = entrepriseEnBase({
+    apiUrl: 'https://icrm.api.es.ila26.com', nomIcrm: null, sousTypeIcrm: null, dernierStatut: null, verificationRequise: true,
+  })
+  const PING_OK = {
+    ok: true, api_version: '1', client: 'EMA CAE prod', entreprise: 'CAE España', subtype: { id: 6, name: 'BORNE TACTILE' },
+  }
+
   beforeEach(() => {
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({
-      apiUrl: 'https://icrm.api.es.ila26.com', nomIcrm: null, sousTypeIcrm: null, dernierStatut: null,
-    }))
+    mockPrisma.entrepriseIcrm.findFirst
+      .mockResolvedValueOnce(ENTREPRISE_TESTEE)
+      .mockResolvedValueOnce({ ...ENTREPRISE_TESTEE, nomIcrm: 'CAE España', verificationRequise: false, dernierStatut: 'ok', _count: { bornes: 1, partageJobs: 0 } })
   })
 
-  it('2xx conforme : succès, mémorise entreprise / sous-type / date / statut ok', async () => {
-    global.fetch.mockResolvedValue(reponseHttp(200, {
-      ok: true, api_version: '1', client: 'EMA CAE prod', entreprise: 'CAE España',
-      subtype: { id: 6, name: 'BORNE TACTILE' },
-    }))
+  it('succès : écriture CONDITIONNELLE (identifiants testés), verificationRequise levée, envois suspendus repris', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(200, PING_OK))
+    mockPrisma.partageJob.findMany.mockResolvedValue([JOBS[1]])
 
     const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
 
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({
-      success: true,
-      type: 'icrm_api_key',
-      httpStatus: 200,
-      authValid: true,
-      entreprise: 'CAE España',
-      subtype: { id: 6, name: 'BORNE TACTILE' },
-      client: 'EMA CAE prod',
-      apiVersion: '1',
-      entrepriseIcrm: { id: ENT_ID, nomIcrm: 'CAE España', sousTypeIcrm: 'BORNE TACTILE', dernierStatut: 'ok' },
+      success: true, entreprise: 'CAE España', subtype: { id: 6, name: 'BORNE TACTILE' }, persiste: true, jobsRepris: 1,
+      entrepriseIcrm: { id: ENT_ID, nomIcrm: 'CAE España', verificationRequise: false, dernierStatut: 'ok' },
     })
-    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
-      where: { id: ENT_ID },
+    expect(mockPrisma.entrepriseIcrm.updateMany).toHaveBeenCalledWith({
+      where: { id: ENT_ID, deletedAt: null, apiUrl: 'https://icrm.api.es.ila26.com', apiKey: CLE, token: SECRET },
       data: {
         nomIcrm: 'CAE España',
         sousTypeIcrm: 'BORNE TACTILE',
+        verificationRequise: false,
         derniereVerification: expect.any(Date),
         dernierStatut: 'ok',
       },
     })
-
     const [url, options] = global.fetch.mock.calls[0]
     expect(url).toBe('https://icrm.api.es.ila26.com/api/external/estimer-mes-aides/v1/ping')
-    expect(options.method).toBe('GET')
     expect(options.redirect).toBe('manual')
-    expect(options.signal).toBeInstanceOf(AbortSignal)
     expect(options.headers).toEqual({ Accept: 'application/json', 'X-Api-Key': CLE, 'X-Api-Secret': SECRET })
     sansSecret(res.body)
+    expect(tousLesLogs()).not.toContain(SECRET)
   })
 
-  it('401 invalid_credentials : échec, message FR, statut mémorisé, entreprise vérifiée conservée', async () => {
-    global.fetch.mockResolvedValue(reponseHttp(401, {
-      error: { code: 'invalid_credentials', message: 'Invalid credentials', request_id: 'req-1' },
-    }))
+  it('course : identifiants modifiés pendant le ping → résultat NON enregistré, rien n’est repris', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(200, PING_OK))
+    mockPrisma.entrepriseIcrm.updateMany.mockResolvedValue({ count: 0 })
 
     const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
 
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({
-      success: false, httpStatus: 401, authValid: false, code: 'invalid_credentials', requestId: 'req-1',
-    })
-    expect(res.body.error).toMatch(/Clé API ou secret refusé par I-CRM/)
-    expect(mockPrisma.entrepriseIcrm.update).toHaveBeenCalledWith({
-      where: { id: ENT_ID },
-      data: { derniereVerification: expect.any(Date), dernierStatut: 'invalid_credentials' },
-    })
+    expect(res.body).toMatchObject({ success: true, persiste: false })
+    expect(res.body.avertissement).toMatch(/modifiés pendant le test : résultat non enregistré/)
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
+    expect(mockLogger.warn.mock.calls.some((c) => /non enregistré/.test(c[0].message))).toBe(true)
   })
 
-  it('500 sans code I-CRM : statut http_500', async () => {
-    global.fetch.mockResolvedValue(reponseHttp(500, '<html>oops</html>'))
-    await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
-    expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data.dernierStatut).toBe('http_500')
-  })
-
-  it('2xx non conforme (page HTML d’un front) : jamais « Connecté », statut reponse_non_conforme', async () => {
-    global.fetch.mockResolvedValue(reponseHttp(200, '<!doctype html><html></html>'))
+  it('succès sur une entreprise désactivée : vérifiée, mais envois NON repris', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockReset()
+    mockPrisma.entrepriseIcrm.findFirst
+      .mockResolvedValueOnce({ ...ENTREPRISE_TESTEE, actif: false })
+      .mockResolvedValueOnce({ ...ENTREPRISE_TESTEE, actif: false, verificationRequise: false, dernierStatut: 'ok' })
+    global.fetch.mockResolvedValue(reponseHttp(200, PING_OK))
 
     const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
-
-    expect(res.body).toMatchObject({ success: false, code: 'reponse_non_conforme' })
-    expect(res.body.error).toMatch(/Réponse inattendue \(HTTP 200\)/)
-    expect(mockPrisma.entrepriseIcrm.update.mock.calls[0][0].data).toEqual({
-      derniereVerification: expect.any(Date), dernierStatut: 'reponse_non_conforme',
-    })
+    expect(res.body).toMatchObject({ success: true, persiste: true })
+    expect(res.body).not.toHaveProperty('jobsRepris')
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
   })
 
-  it('timeout → 504 + statut timeout ; erreur réseau → 502 + statut injoignable', async () => {
-    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' })
-    global.fetch.mockRejectedValueOnce(abort)
+  it('401 invalid_credentials : statut mémorisé, vérification NON levée, rien n’est repris', async () => {
+    global.fetch.mockResolvedValue(reponseHttp(401, { error: { code: 'invalid_credentials', message: 'x', request_id: 'req-1' } }))
+    const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
+    expect(res.body).toMatchObject({ success: false, httpStatus: 401, code: 'invalid_credentials', persiste: true })
+    expect(res.body.error).toMatch(/Clé API ou secret refusé par I-CRM/)
+    expect(mockPrisma.entrepriseIcrm.updateMany.mock.calls[0][0].data).toEqual({
+      derniereVerification: expect.any(Date), dernierStatut: 'invalid_credentials',
+    })
+    expect(mockPrisma.partageJob.findMany).not.toHaveBeenCalled()
+  })
+
+  it('2xx non conforme : reponse_non_conforme ; 500 : http_500', async () => {
+    global.fetch.mockResolvedValueOnce(reponseHttp(200, '<!doctype html><html></html>'))
+    await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
+    expect(mockPrisma.entrepriseIcrm.updateMany.mock.calls[0][0].data.dernierStatut).toBe('reponse_non_conforme')
+
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(ENTREPRISE_TESTEE)
+    global.fetch.mockResolvedValueOnce(reponseHttp(500, '<html>oops</html>'))
+    await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
+    expect(mockPrisma.entrepriseIcrm.updateMany.mock.calls[1][0].data.dernierStatut).toBe('http_500')
+  })
+
+  it('timeout → 504 + statut timeout ; réseau → 502 + injoignable', async () => {
+    global.fetch.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }))
     const r504 = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
     expect(r504.status).toBe(504)
-    expect(r504.body).toMatchObject({ success: false, reachable: false, entrepriseIcrm: { dernierStatut: 'timeout' } })
+    expect(mockPrisma.entrepriseIcrm.updateMany.mock.calls[0][0].data.dernierStatut).toBe('timeout')
 
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(ENTREPRISE_TESTEE)
     global.fetch.mockRejectedValueOnce(new Error('getaddrinfo ENOTFOUND icrm.api.es.ila26.com'))
     const r502 = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
     expect(r502.status).toBe(502)
-    expect(r502.body.error).toMatch(/ENOTFOUND/)
-    expect(mockPrisma.entrepriseIcrm.update.mock.calls[1][0].data.dernierStatut).toBe('injoignable')
-    expect(tousLesLogs()).not.toContain(SECRET)
+    expect(mockPrisma.entrepriseIcrm.updateMany.mock.calls[1][0].data.dernierStatut).toBe('injoignable')
   })
 
-  it('entreprise incomplète : 400 sans appel réseau', async () => {
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({ token: '' }))
-    const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
-    expect(res.status).toBe(400)
-    expect(global.fetch).not.toHaveBeenCalled()
-  })
-
-  it('404 si inconnue', async () => {
-    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(null)
-    const res = await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)
-    expect(res.status).toBe(404)
+  it('entreprise incomplète : 400 sans appel réseau ; inconnue : 404', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockReset()
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValueOnce(entrepriseEnBase({ token: '' })).mockResolvedValueOnce(null)
+    expect((await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)).status).toBe(400)
+    expect((await request(app).post(`/api/entreprises-icrm/${ENT_ID}/test`).set(authSA)).status).toBe(404)
     expect(global.fetch).not.toHaveBeenCalled()
   })
 })

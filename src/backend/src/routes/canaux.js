@@ -12,11 +12,13 @@ import {
   ICRM_API_SECRET_REGEX,
   MESSAGE_CLE_API_INVALIDE,
   MESSAGE_SECRET_INVALIDE,
-  MESSAGE_URL_HTTPS,
+  MESSAGE_SECRET_NOUVEL_HOTE,
   typeDeCanal,
   estCanalCleApi,
   normaliserUrlApiIcrm,
   urlApiIcrmAcceptable,
+  messageUrlApiIcrmRefusee,
+  changementHoteApiIcrm,
 } from '../lib/icrmApiKey.js'
 import { pingerIcrm } from '../services/icrmPingService.js'
 
@@ -34,7 +36,7 @@ function verifierChampsCleApi(valeurs, ctx) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['token'], message: MESSAGE_SECRET_INVALIDE })
   }
   if (valeurs.apiUrl !== undefined && !urlApiIcrmAcceptable(valeurs.apiUrl)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['apiUrl'], message: MESSAGE_URL_HTTPS })
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['apiUrl'], message: messageUrlApiIcrmRefusee(valeurs.apiUrl) })
   }
 }
 
@@ -69,6 +71,9 @@ const canalUpdateSchema = z.object({
  * Canal icrm_api_key : une NOUVELLE clé impose aussi son secret — I-CRM émet
  * toujours un identifiant de clé avec un nouveau secret (la rotation, elle, ne
  * change que le secret) ; garder l'ancien secret donnerait 401 sur chaque envoi.
+ * Un NOUVEL HÔTE d'URL impose lui aussi le secret : le secret enregistré ne part
+ * jamais vers un hôte que l'opérateur n'a pas confirmé (règle partagée avec les
+ * entreprises I-CRM, lib/icrmApiKey.js).
  * @returns {Array} issues au format ZodError.errors (vide si valide)
  */
 function verifierModificationCanal(patch, canalExistant) {
@@ -78,7 +83,13 @@ function verifierModificationCanal(patch, canalExistant) {
     && !changementDeType
     && patch.apiKey !== undefined
     && patch.apiKey !== canalExistant.apiKey
+  const nouvelHote = typeEffectif === CANAL_TYPE_ICRM_API_KEY
+    && !changementDeType
+    && changementHoteApiIcrm(canalExistant.apiUrl, patch.apiUrl)
   const schema = z.any().superRefine((valeurs, ctx) => {
+    if (nouvelHote && !nouvelleCleApi && valeurs.token === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['token'], message: MESSAGE_SECRET_NOUVEL_HOTE })
+    }
     if (changementDeType) {
       if (valeurs.apiKey === undefined) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['apiKey'], message: 'Changement de type : la clé (apiKey) doit être fournie' })

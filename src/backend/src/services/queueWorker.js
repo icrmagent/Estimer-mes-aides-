@@ -14,8 +14,10 @@ import {
   formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
   CODE_REPONSE_NON_CONFORME,
-  DELAI_REPRISE_SUSPENSION_MS,
+  STATUT_JOB_SUSPENDU,
+  entrepriseIcrmUtilisable,
   messageEnvoiSuspendu,
+  instantaneDestinationEntreprise,
 } from '../lib/icrmApiKey.js'
 import { validateEmail, validateTelephone, validateCodePostal } from '../lib/contactFormats.js'
 
@@ -698,30 +700,40 @@ const DESTINATION_ENTREPRISE_ICRM = 'entreprise_icrm'
 const DESTINATION_CANAL = 'canal'
 const DESTINATION_ENV = 'env'
 
-/** L'entreprise I-CRM de la borne peut recevoir : active et non supprimée. */
-function entrepriseIcrmUtilisable(entreprise) {
-  return Boolean(entreprise) && entreprise.actif === true && !entreprise.deletedAt
-}
+// Colonnes de l'entreprise cible lues par le worker (identifiants compris, jamais journalisés)
+const SELECT_ENTREPRISE_CIBLE = Object.freeze({
+  id: true,
+  nom: true,
+  nomIcrm: true,
+  sousTypeIcrm: true,
+  apiUrl: true,
+  apiKey: true,
+  token: true,
+  actif: true,
+  deletedAt: true,
+  verificationRequise: true,
+})
 
 /**
- * Envoi SUSPENDU : la borne est affectée à une entreprise I-CRM désactivée (ou
- * supprimée sans avoir été désaffectée). Rien n'est envoyé — ni à l'entreprise,
- * ni à un canal, ni aux variables d'environnement : ce serait livrer les leads
- * d'une entreprise à une autre. Le job reste en file (echec_temporaire),
- * SANS tentative comptée (jamais d'échec définitif pour une pause), et repasse
- * dans DELAI_REPRISE_SUSPENSION_MS ; la réactivation de l'entreprise le
- * reprogramme aussitôt (routes/entreprises-icrm.js). Aucune notification Pusher.
+ * Envoi SUSPENDU : l'entreprise I-CRM CIBLE du job est désactivée, supprimée ou à
+ * retester (URL ou clé modifiée). Rien n'est envoyé — ni à l'entreprise, ni à un
+ * canal, ni aux variables d'environnement : ce serait livrer les leads d'une
+ * entreprise à une autre. Le job passe au statut `suspendu`, HORS de la file du
+ * worker (pas de ré-examen périodique : aucune place de cycle occupée), sans
+ * tentative comptée (jamais d'échec définitif pour une pause) ; il est repris par
+ * la réactivation de l'entreprise, un test réussi ou une redirection explicite
+ * (services/partageCibleService.js). Aucune notification Pusher.
+ * Normalement déjà fait par la route qui désactive l'entreprise : ici en défense
+ * (course entre la désactivation et un cycle en cours, job créé entre-temps).
  */
-async function suspendreJob(job, enregistrement, entreprise, jobStart) {
-  const motif = messageEnvoiSuspendu(entreprise)
-  const prochainEssai = new Date(Date.now() + DELAI_REPRISE_SUSPENSION_MS)
+async function suspendreJob(job, entreprise, jobStart) {
+  // Ligne introuvable (cas anormal) : traitée comme une entreprise supprimée
+  const motif = messageEnvoiSuspendu(entreprise ?? { id: job.entrepriseIcrmId, deletedAt: new Date() })
 
-  if (entreprise?.deletedAt) {
-    // Ne devrait pas arriver : la suppression forcée désaffecte les bornes
+  if (!entreprise || entreprise.deletedAt) {
     logger.warn({
-      message: '[QUEUE] Borne affectée à une entreprise I-CRM supprimée — envoi suspendu, réaffecter la borne',
-      entrepriseIcrmId: entreprise.id,
-      borneId: enregistrement.borne?.id ?? null,
+      message: '[QUEUE] Job ciblant une entreprise I-CRM supprimée — envoi suspendu',
+      entrepriseIcrmId: job.entrepriseIcrmId,
       jobId: job.id,
     })
   }
@@ -729,29 +741,26 @@ async function suspendreJob(job, enregistrement, entreprise, jobStart) {
   await prisma.partageJob.update({
     where: { id: job.id },
     data: {
-      statut: 'echec_temporaire',
-      tentatives: job.tentatives,
+      statut: STATUT_JOB_SUSPENDU,
       erreur: motif,
-      prochainEssai,
+      prochainEssai: null,
       updatedAt: new Date(),
     },
   })
   await prisma.enregistrement.update({
     where: { id: job.enregistrementId },
-    data: { statutPartage: 'echec_temporaire', derniereErreur: motif },
+    data: { statutPartage: STATUT_JOB_SUSPENDU, derniereErreur: motif },
   })
 
   logger.warn({
-    message: '[QUEUE] Job suspendu — entreprise I-CRM de la borne désactivée',
+    message: '[QUEUE] Job suspendu — entreprise I-CRM cible indisponible',
     jobId: job.id,
     enregistrementId: job.enregistrementId,
-    status: 'suspendu',
+    status: STATUT_JOB_SUSPENDU,
     destination: DESTINATION_ENTREPRISE_ICRM,
-    entrepriseIcrmId: entreprise?.id ?? enregistrement.borne?.entrepriseIcrmId ?? null,
-    borneId: enregistrement.borne?.id ?? null,
+    entrepriseIcrmId: job.entrepriseIcrmId,
     tentatives: job.tentatives,
     duration: Date.now() - jobStart,
-    prochainEssai: prochainEssai.toISOString(),
   })
 }
 
@@ -826,12 +835,6 @@ async function processJob(job) {
             adminBorne: {
               select: { nom: true, prenom: true, email: true, raisonSociale: true, siret: true },
             },
-            // Entreprise I-CRM destinataire : si elle est affectée, c'est la SEULE destination
-            // (active → envoi ; désactivée ou supprimée → envoi suspendu, jamais de canal)
-            entrepriseIcrmId: true,
-            entrepriseIcrm: {
-              select: { id: true, nom: true, apiUrl: true, apiKey: true, token: true, actif: true, deletedAt: true },
-            },
             canaux: {
               where: { actif: true },
               orderBy: { createdAt: 'desc' },
@@ -873,22 +876,29 @@ async function processJob(job) {
       return
     }
 
-    // Destination :
-    //   - borne AFFECTÉE à une entreprise I-CRM → cette entreprise, et elle seule :
-    //       active → envoi par clé API ; désactivée ou supprimée → envoi SUSPENDU
+    // Destination = la CIBLE DU JOB, figée à sa création (jamais la destination
+    // courante de la borne : changer l'entreprise d'une borne ne déplace pas son
+    // arriéré, sauf redirection explicite) :
+    //   - cible = entreprise I-CRM → cette entreprise, et elle seule : utilisable →
+    //       envoi par clé API ; désactivée, supprimée ou à retester → SUSPENDU
     //       (jamais de repli sur un canal ni sur l'environnement : pas de fuite
     //       des leads d'une entreprise vers une autre) ;
-    //   - borne sans entreprise → canal choisi par canalTransmission (label),
-    //       sinon premier canal actif, sinon variables d'environnement (inchangé).
-    const entreprise = enregistrement.borne?.entrepriseIcrm
-    const borneAffectee = Boolean(entreprise || enregistrement.borne?.entrepriseIcrmId)
-    const versEntreprise = entrepriseIcrmUtilisable(entreprise)
-    if (borneAffectee && !versEntreprise) {
-      await suspendreJob(job, enregistrement, entreprise, jobStart)
-      return
+    //   - cible NULL → canal choisi par canalTransmission (label), sinon premier
+    //       canal actif, sinon variables d'environnement (inchangé).
+    const versEntreprise = Boolean(job.entrepriseIcrmId)
+    let entreprise = null
+    if (versEntreprise) {
+      entreprise = await prisma.entrepriseIcrm.findUnique({
+        where: { id: job.entrepriseIcrmId },
+        select: SELECT_ENTREPRISE_CIBLE,
+      })
+      if (!entrepriseIcrmUtilisable(entreprise)) {
+        await suspendreJob(job, entreprise, jobStart)
+        return
+      }
     }
 
-    // Canaux consultés seulement pour une borne sans entreprise
+    // Canaux consultés seulement pour un job sans entreprise cible
     canal = versEntreprise ? null : choisirCanal(enregistrement, job)
     destinationLog = versEntreprise
       ? { destination: DESTINATION_ENTREPRISE_ICRM, entrepriseIcrmId: entreprise.id }
@@ -964,8 +974,11 @@ async function processJob(job) {
           ...(envoiCleApi
             ? { crmProjetId: envoiCleApi.crmProjetId, crmProjetRef: envoiCleApi.crmProjetRef }
             : {}),
-          // … et de l'entreprise I-CRM qui l'a reçue (envoi par entreprise uniquement)
-          ...(versEntreprise ? { crmEntrepriseIcrmId: entreprise.id } : {}),
+          // … et de l'entreprise I-CRM qui l'a reçue (envoi par entreprise uniquement),
+          // avec un instantané de la destination : l'entreprise reste modifiable
+          ...(versEntreprise
+            ? { crmEntrepriseIcrmId: entreprise.id, crmDestination: instantaneDestinationEntreprise(entreprise) }
+            : {}),
         },
       }),
     ])
@@ -1112,6 +1125,11 @@ async function processJob(job) {
 /**
  * Traite tous les jobs en attente ou prêts pour retry.
  * Task 30.4 — Process up to 10 jobs concurrently using Promise.allSettled()
+ *
+ * Équité : seuls en_attente et echec_temporaire échus sont lus. Les jobs
+ * `suspendu` (entreprise cible désactivée, supprimée ou à retester) sont hors de
+ * cette requête : quel que soit leur nombre, ils n'occupent jamais les 10 places
+ * d'un cycle et ne retardent pas les jobs des autres entreprises.
  */
 async function processPendingJobs() {
   if (isRunning) return

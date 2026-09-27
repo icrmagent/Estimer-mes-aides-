@@ -10,6 +10,12 @@ import logger from '../lib/logger.js'
 import { cacheService } from '../services/cacheService.js'
 import { publishEvent } from '../services/pusherService.js'
 import * as authService from '../services/authService.js'
+import {
+  STATUTS_JOB_EN_ATTENTE,
+  SELECT_ETAT_ENTREPRISE,
+  envoisEnAttenteBorne,
+  redirigerEnvoisBorne,
+} from '../services/partageCibleService.js'
 
 export const bornesRouter = Router()
 
@@ -36,10 +42,14 @@ const createBorneSchema = z.object({
   entrepriseIcrmId: z.string().uuid("Identifiant d'entreprise I-CRM invalide").nullable().optional(),
 })
 
-const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial()
+const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial().extend({
+  // Changement d'entreprise : true = rediriger vers la nouvelle destination les envois
+  // pas encore livrés qui ciblaient l'ancienne (défaut : ils GARDENT leur cible).
+  redirigerEnvoisEnAttente: z.boolean().optional(),
+})
 
 // Entreprise I-CRM exposée avec la borne : jamais l'URL, la clé ni le secret.
-const ENTREPRISE_ICRM_SELECT = { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true }
+const ENTREPRISE_ICRM_SELECT = { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true, verificationRequise: true }
 
 const updateStatutSchema = z.object({
   statut: z.enum(['actif', 'inactif']),
@@ -224,7 +234,15 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       },
     })
 
-    return res.json({ success: true, data: borne })
+    // Envois pas encore livrés, par cible : sert à confirmer un changement de destination
+    let envoisEnAttente = null
+    try {
+      envoisEnAttente = await envoisEnAttenteBorne(id)
+    } catch (err) {
+      logger.warn({ message: '[BORNES] Décompte des envois en attente impossible', borneId: id, error: err.message })
+    }
+
+    return res.json({ success: true, data: { ...borne, envoisEnAttente } })
   } catch (err) {
     return handlePrismaError(err, res)
   }
@@ -268,7 +286,12 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
   // Entreprise I-CRM destinataire : choix réservé au SuperAdmin. Renvoyer la
   // valeur actuelle (formulaire complet réémis) n'est pas un changement : accepté
   // pour tous et sans revalidation (l'entreprise a pu être désactivée depuis).
+  // Changement : les envois pas encore livrés GARDENT leur cible (ancienne
+  // destination), sauf `redirigerEnvoisEnAttente: true` (choix explicite).
+  const redirigerEnvois = parsed.data.redirigerEnvoisEnAttente === true
+  delete parsed.data.redirigerEnvoisEnAttente
   let entrepriseIcrmModifiee = false
+  let ancienneEntrepriseId = null
   if (parsed.data.entrepriseIcrmId !== undefined) {
     try {
       const demandee = parsed.data.entrepriseIcrmId ?? null
@@ -286,6 +309,7 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
         actuelle = courante.entrepriseIcrmId ?? null
       }
 
+      ancienneEntrepriseId = actuelle
       if (demandee === actuelle) {
         delete parsed.data.entrepriseIcrmId
       } else if (req.user.role !== 'SUPER_ADMIN') {
@@ -337,15 +361,37 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
       await publishEvent(`borne-${req.params.id}`, 'ecran-veille.maj', { ecranVeilleId: parsed.data.ecranVeilleId })
     }
 
+    let envois = null
     if (entrepriseIcrmModifiee) {
+      const nouvelleId = parsed.data.entrepriseIcrmId ?? null
+      if (redirigerEnvois) {
+        const nouvelle = nouvelleId
+          ? await prisma.entrepriseIcrm.findFirst({ where: { id: nouvelleId }, select: SELECT_ETAT_ENTREPRISE })
+          : null
+        envois = {
+          rediriges: await redirigerEnvoisBorne(req.params.id, { ancienneId: ancienneEntrepriseId, nouvelleId, nouvelle }),
+        }
+      } else {
+        envois = {
+          conserves: await prisma.partageJob.count({
+            where: {
+              statut: { in: [...STATUTS_JOB_EN_ATTENTE] },
+              entrepriseIcrmId: ancienneEntrepriseId,
+              enregistrement: { borneId: req.params.id },
+            },
+          }),
+        }
+      }
       logger.info({
         message: '[BORNES] Entreprise I-CRM destinataire modifiée',
         borneId: req.params.id,
-        entrepriseIcrmId: parsed.data.entrepriseIcrmId ?? null,
+        ancienneEntrepriseIcrmId: ancienneEntrepriseId,
+        entrepriseIcrmId: nouvelleId,
+        ...envois,
       })
     }
 
-    return res.json({ success: true, data: borne })
+    return res.json({ success: true, data: borne, ...(envois ? { envoisEnAttente: envois } : {}) })
   } catch (err) {
     return handlePrismaError(err, res)
   }

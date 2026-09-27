@@ -37,23 +37,37 @@ export const ICRM_API_SECRET_REGEX = /^[A-Za-z0-9]{48}$/
 export const MESSAGE_CLE_API_INVALIDE = 'Clé API I-CRM invalide : format attendu « emak_ » suivi de 24 caractères alphanumériques'
 export const MESSAGE_SECRET_INVALIDE = 'Secret API I-CRM invalide : 48 caractères alphanumériques attendus'
 export const MESSAGE_URL_HTTPS = "L'URL API I-CRM doit être en https (le secret transite dans les en-têtes)"
+export const MESSAGE_URL_INTERNE = "L'URL API I-CRM ne peut pas viser une adresse interne (localhost, réseau privé, lien local)"
+export const MESSAGE_SECRET_NOUVEL_HOTE = "Nouvel hôte de l'URL API : le secret doit être saisi à nouveau (il ne part jamais vers un hôte non confirmé)"
 
-// ─── Entreprise I-CRM d'une borne désactivée : envois SUSPENDUS ───────────────
-// Une borne affectée à une entreprise n'envoie JAMAIS ailleurs (ni canal, ni
-// variables d'environnement) : entreprise inactive ou supprimée = pause, le job
-// est reprogrammé sans compter de tentative (voir services/queueWorker.js).
+// ─── Envois SUSPENDUS (cible d'un job : entreprise I-CRM) ─────────────────────
+// Un job ciblant une entreprise n'est envoyé qu'à ELLE (jamais à un canal ni à
+// l'environnement). Entreprise désactivée, supprimée ou à retester après un
+// changement d'URL / de clé : le job passe au statut `suspendu` (hors de la file
+// du worker, aucune tentative comptée) jusqu'à sa reprise explicite.
 
-export const DELAI_REPRISE_SUSPENSION_MS = 10 * 60 * 1000
+export const STATUT_JOB_SUSPENDU = 'suspendu'
 
-// Fin commune des messages de suspension (sert aussi à retrouver les jobs suspendus)
+// Fin commune des messages de suspension
 export const SUFFIXE_ENVOI_SUSPENDU = '— envoi suspendu'
 
-/** Motif de suspension enregistré dans le job et l'enregistrement (sans donnée personnelle). */
+/**
+ * Motif de suspension enregistré dans le job et l'enregistrement (sans donnée
+ * personnelle), selon l'état de l'entreprise cible.
+ */
 export function messageEnvoiSuspendu(entreprise) {
   const nom = entreprise?.nom || entreprise?.id || '?'
-  return entreprise?.deletedAt
-    ? `Entreprise I-CRM « ${nom} » supprimée mais encore affectée à la borne ${SUFFIXE_ENVOI_SUSPENDU}`
-    : `Entreprise I-CRM « ${nom} » désactivée ${SUFFIXE_ENVOI_SUSPENDU}`
+  if (!entreprise || entreprise.deletedAt) return `Entreprise I-CRM « ${nom} » supprimée ${SUFFIXE_ENVOI_SUSPENDU}`
+  if (entreprise.actif === false) return `Entreprise I-CRM « ${nom} » désactivée ${SUFFIXE_ENVOI_SUSPENDU}`
+  if (entreprise.verificationRequise) {
+    return `Entreprise I-CRM « ${nom} » : URL ou clé modifiée, testez l'entreprise pour reprendre les envois ${SUFFIXE_ENVOI_SUSPENDU}`
+  }
+  return `Entreprise I-CRM « ${nom} » indisponible ${SUFFIXE_ENVOI_SUSPENDU}`
+}
+
+/** Une entreprise I-CRM peut recevoir : active, non supprimée, identifiants vérifiés. */
+export function entrepriseIcrmUtilisable(entreprise) {
+  return Boolean(entreprise) && entreprise.actif === true && !entreprise.deletedAt && !entreprise.verificationRequise
 }
 
 // Échecs définitifs : réessayer ne changera rien (identifiants, URL, données).
@@ -83,17 +97,117 @@ export function normaliserUrlApiIcrm(apiUrl) {
     .replace(/\/+$/, '')
 }
 
+const HOTES_LOCAUX = ['localhost', '127.0.0.1', '[::1]']
+
+function ipv4Interne(hote) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hote)
+  if (!m) return false
+  const a = Number(m[1])
+  const b = Number(m[2])
+  return a === 0 // « ce réseau » / non spécifiée
+    || a === 10 // privé
+    || a === 127 // bouclage
+    || (a === 100 && b >= 64 && b <= 127) // CGNAT 100.64.0.0/10
+    || (a === 169 && b === 254) // lien local
+    || (a === 172 && b >= 16 && b <= 31) // privé
+    || (a === 192 && b === 168) // privé
+}
+
+/** 8 groupes de 16 bits d'une adresse IPv6 normalisée par new URL() (sans crochets), ou null. */
+function groupesIpv6(adresse) {
+  if (!adresse.includes(':')) return null
+  const compressee = adresse.includes('::')
+  const [tete, queue] = compressee ? adresse.split('::') : [adresse, '']
+  const partie = (x) => (x ? x.split(':').map((h) => Number.parseInt(h, 16)) : [])
+  const debut = partie(tete)
+  const fin = partie(queue)
+  const manquants = 8 - debut.length - fin.length
+  if (manquants < 0 || (!compressee && manquants !== 0)) return null
+  const groupes = [...debut, ...new Array(manquants).fill(0), ...fin]
+  return groupes.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groupes : null
+}
+
+function ipv6Interne(hote) {
+  if (!hote.startsWith('[') || !hote.endsWith(']')) return false
+  const g = groupesIpv6(hote.slice(1, -1))
+  if (!g) return true // littéral IPv6 illisible : refusé par prudence
+  const zeros = (n) => g.slice(0, n).every((x) => x === 0)
+  if (zeros(8)) return true // :: non spécifiée
+  if (zeros(7) && g[7] === 1) return true // ::1 bouclage
+  if ((g[0] & 0xfe00) === 0xfc00) return true // fc00::/7 unique local
+  if ((g[0] & 0xffc0) === 0xfe80) return true // fe80::/10 lien local
+  if (zeros(5) && g[5] === 0xffff) { // ::ffff:a.b.c.d (IPv4 mappée)
+    return ipv4Interne(`${g[6] >> 8}.${g[6] & 0xff}.${g[7] >> 8}.${g[7] & 0xff}`)
+  }
+  return false
+}
+
 /**
- * Le secret part dans un en-tête HTTP : https obligatoire, http toléré seulement
- * vers localhost (développement, mock I-CRM local).
+ * Le secret part dans un en-tête HTTP vers cette URL :
+ * - https obligatoire ; http seulement vers localhost / 127.0.0.1 / [::1] HORS
+ *   production (développement, mock I-CRM local) ;
+ * - en production, refuse aussi les hôtes internes : `localhost`, adresses IP
+ *   littérales privées, de bouclage, de lien local, CGNAT et IPv6 unique local
+ *   (aucun secret envoyé vers le réseau interne de l'hébergeur).
+ * Partagé par les canaux `icrm_api_key` et les entreprises I-CRM.
  */
-export function urlApiIcrmAcceptable(apiUrl) {
+export function urlApiIcrmAcceptable(apiUrl, nodeEnv = process.env.NODE_ENV) {
+  let url
   try {
-    const url = new URL(apiUrl)
-    if (url.protocol === 'https:') return true
-    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    url = new URL(apiUrl)
   } catch {
     return false
+  }
+  const hote = url.hostname.toLowerCase()
+  const production = nodeEnv === 'production'
+  if (url.protocol === 'http:') return !production && HOTES_LOCAUX.includes(hote)
+  if (url.protocol !== 'https:') return false
+  if (!production) return true
+  if (hote === 'localhost' || hote.endsWith('.localhost')) return false
+  return !ipv4Interne(hote) && !ipv6Interne(hote)
+}
+
+/** Message d'erreur adapté à une URL refusée par urlApiIcrmAcceptable. */
+export function messageUrlApiIcrmRefusee(apiUrl) {
+  try {
+    if (new URL(apiUrl).protocol === 'https:') return MESSAGE_URL_INTERNE
+  } catch { /* URL illisible : message https générique */ }
+  return MESSAGE_URL_HTTPS
+}
+
+/** Hôte (nom + port) d'une URL API I-CRM, en minuscules ; null si illisible. */
+export function hoteApiIcrm(apiUrl) {
+  try {
+    return new URL(normaliserUrlApiIcrm(apiUrl)).host.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * true si une modification change l'hôte de l'URL API : le secret doit alors être
+ * ressaisi (même règle qu'un changement de clé), pour ne jamais envoyer le secret
+ * enregistré vers un hôte que l'opérateur n'a pas confirmé en le saisissant.
+ */
+export function changementHoteApiIcrm(ancienneUrl, nouvelleUrl) {
+  if (nouvelleUrl === undefined || nouvelleUrl === null) return false
+  return hoteApiIcrm(ancienneUrl) !== hoteApiIcrm(nouvelleUrl)
+}
+
+/**
+ * Instantané de la destination d'une livraison par entreprise I-CRM, conservé sur
+ * l'enregistrement (`crmDestination`) : l'entreprise reste modifiable, cet instantané
+ * dit à qui le lead a réellement été remis. Jamais le secret.
+ */
+export function instantaneDestinationEntreprise(entreprise) {
+  if (!entreprise) return null
+  return {
+    entrepriseIcrmId: entreprise.id ?? null,
+    nom: entreprise.nom ?? null,
+    nomIcrm: entreprise.nomIcrm ?? null,
+    sousTypeIcrm: entreprise.sousTypeIcrm ?? null,
+    apiHost: hoteApiIcrm(entreprise.apiUrl),
+    apiKeyId: ICRM_API_KEY_ID_REGEX.test(entreprise.apiKey || '') ? entreprise.apiKey : null,
   }
 }
 

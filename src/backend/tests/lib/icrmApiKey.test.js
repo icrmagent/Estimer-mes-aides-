@@ -16,7 +16,14 @@ import {
   urlApiIcrmAcceptable,
   messageEnvoiSuspendu,
   SUFFIXE_ENVOI_SUSPENDU,
-  DELAI_REPRISE_SUSPENSION_MS,
+  STATUT_JOB_SUSPENDU,
+  entrepriseIcrmUtilisable,
+  instantaneDestinationEntreprise,
+  messageUrlApiIcrmRefusee,
+  hoteApiIcrm,
+  changementHoteApiIcrm,
+  MESSAGE_URL_HTTPS,
+  MESSAGE_URL_INTERNE,
   urlPointAccesIcrm,
   enTetesCleApiIcrm,
   estStatutIcrmDefinitif,
@@ -205,18 +212,68 @@ describe('icrmApiKey — conformité des réponses 2xx au contrat v1', () => {
 })
 
 describe('icrmApiKey — urlApiIcrmAcceptable (canaux et entreprises I-CRM)', () => {
-  it('https partout, http seulement vers localhost ; le reste est refusé', () => {
-    expect(urlApiIcrmAcceptable('https://icrm.api.ila26.fr')).toBe(true)
-    expect(urlApiIcrmAcceptable('https://icrm.api.es.ila26.com/api/')).toBe(true)
+  it('hors production : https partout, http seulement vers localhost', () => {
+    expect(urlApiIcrmAcceptable('https://icrm.api.ila26.fr', 'test')).toBe(true)
+    expect(urlApiIcrmAcceptable('https://icrm.api.es.ila26.com/api/', 'development')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://localhost:8000', 'test')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://127.0.0.1:3998', 'development')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://[::1]:8000', 'test')).toBe(true)
+    expect(urlApiIcrmAcceptable('https://10.0.0.5', 'test')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://icrm.api.ila26.fr', 'test')).toBe(false)
+    expect(urlApiIcrmAcceptable('http://localhost.evil.example', 'test')).toBe(false)
+    expect(urlApiIcrmAcceptable('ftp://icrm.api.ila26.fr', 'test')).toBe(false)
+    expect(urlApiIcrmAcceptable('pas une url', 'test')).toBe(false)
+    expect(urlApiIcrmAcceptable('', 'test')).toBe(false)
+    expect(urlApiIcrmAcceptable(undefined, 'test')).toBe(false)
+  })
+
+  it('NODE_ENV courant par défaut (test) : http://localhost accepté', () => {
     expect(urlApiIcrmAcceptable('http://localhost:8000')).toBe(true)
-    expect(urlApiIcrmAcceptable('http://127.0.0.1:3998')).toBe(true)
-    expect(urlApiIcrmAcceptable('http://[::1]:8000')).toBe(true)
-    expect(urlApiIcrmAcceptable('http://icrm.api.ila26.fr')).toBe(false)
-    expect(urlApiIcrmAcceptable('http://localhost.evil.example')).toBe(false)
-    expect(urlApiIcrmAcceptable('ftp://icrm.api.ila26.fr')).toBe(false)
-    expect(urlApiIcrmAcceptable('pas une url')).toBe(false)
-    expect(urlApiIcrmAcceptable('')).toBe(false)
-    expect(urlApiIcrmAcceptable(undefined)).toBe(false)
+  })
+
+  it.each([
+    'https://icrm.api.ila26.fr',
+    'https://icrm.api.es.ila26.com',
+    'https://8.8.8.8',
+    'https://172.32.0.1',
+    'https://100.128.0.1',
+    'https://[2001:db8::1]',
+  ])('production : %s accepté (hôte public en https)', (url) => {
+    expect(urlApiIcrmAcceptable(url, 'production')).toBe(true)
+  })
+
+  it.each([
+    ['http://localhost:8000', 'http'],
+    ['http://127.0.0.1:3998', 'http'],
+    ['http://icrm.api.ila26.fr', 'http'],
+    ['https://localhost', 'localhost'],
+    ['https://api.localhost', 'localhost'],
+    ['https://127.0.0.1', 'bouclage'],
+    ['https://0x7f.1', 'bouclage (forme hexadécimale normalisée)'],
+    ['https://2130706433', 'bouclage (forme entière normalisée)'],
+    ['https://0.0.0.0', 'non spécifiée'],
+    ['https://10.0.0.5', 'privé'],
+    ['https://172.16.0.1', 'privé'],
+    ['https://172.31.255.254', 'privé'],
+    ['https://192.168.1.1', 'privé'],
+    ['https://169.254.169.254', 'lien local (métadonnées cloud)'],
+    ['https://100.64.0.1', 'CGNAT'],
+    ['https://100.127.255.254', 'CGNAT'],
+    ['https://[::1]', 'bouclage IPv6'],
+    ['https://[::]', 'non spécifiée IPv6'],
+    ['https://[fd00::1]', 'unique local IPv6'],
+    ['https://[fc12:3456::1]', 'unique local IPv6'],
+    ['https://[fe80::1]', 'lien local IPv6'],
+    ['https://[::ffff:10.0.0.1]', 'IPv4 privée mappée'],
+    ['https://[::ffff:127.0.0.1]', 'bouclage mappé'],
+  ])('production : %s refusé (%s)', (url) => {
+    expect(urlApiIcrmAcceptable(url, 'production')).toBe(false)
+  })
+
+  it('message adapté : https interne → « adresse interne », sinon « https »', () => {
+    expect(messageUrlApiIcrmRefusee('https://10.0.0.5')).toBe(MESSAGE_URL_INTERNE)
+    expect(messageUrlApiIcrmRefusee('http://icrm.api.ila26.fr')).toBe(MESSAGE_URL_HTTPS)
+    expect(messageUrlApiIcrmRefusee('pas une url')).toBe(MESSAGE_URL_HTTPS)
   })
 
   it('en-têtes : une entreprise I-CRM (apiKey + token) donne les mêmes en-têtes qu’un canal', () => {
@@ -225,14 +282,55 @@ describe('icrmApiKey — urlApiIcrmAcceptable (canaux et entreprises I-CRM)', ()
   })
 })
 
-describe('icrmApiKey — envoi suspendu (entreprise I-CRM désactivée)', () => {
-  it('motif lisible, sans donnée personnelle, toujours terminé par le suffixe de suspension', () => {
+describe('icrmApiKey — hôte de l’URL API (nouveau secret exigé)', () => {
+  it('compare les hôtes normalisés (casse, /api final, port)', () => {
+    expect(hoteApiIcrm('https://ICRM.api.ila26.fr/api/')).toBe('icrm.api.ila26.fr')
+    expect(hoteApiIcrm('https://icrm.api.ila26.fr:8443')).toBe('icrm.api.ila26.fr:8443')
+    expect(hoteApiIcrm('pas une url')).toBeNull()
+    expect(changementHoteApiIcrm('https://icrm.api.ila26.fr', 'https://ICRM.api.ila26.fr/api/')).toBe(false)
+    expect(changementHoteApiIcrm('https://icrm.api.ila26.fr', 'https://icrm.api.ila26.fr/v2')).toBe(false)
+    expect(changementHoteApiIcrm('https://icrm.api.ila26.fr', 'https://icrm.api.es.ila26.com')).toBe(true)
+    expect(changementHoteApiIcrm('https://icrm.api.ila26.fr', 'https://icrm.api.ila26.fr:8443')).toBe(true)
+    expect(changementHoteApiIcrm('https://icrm.api.ila26.fr', undefined)).toBe(false)
+  })
+})
+
+describe('icrmApiKey — envois suspendus et instantané de destination', () => {
+  it('motif selon l’état de l’entreprise cible, toujours terminé par le suffixe', () => {
     expect(messageEnvoiSuspendu({ id: 'e1', nom: 'CAE España', actif: false }))
       .toBe('Entreprise I-CRM « CAE España » désactivée — envoi suspendu')
     expect(messageEnvoiSuspendu({ id: 'e1', nom: 'LENA', actif: false, deletedAt: new Date() }))
-      .toBe('Entreprise I-CRM « LENA » supprimée mais encore affectée à la borne — envoi suspendu')
-    expect(messageEnvoiSuspendu({ id: 'e1' }).endsWith(SUFFIXE_ENVOI_SUSPENDU)).toBe(true)
-    expect(messageEnvoiSuspendu(null).endsWith(SUFFIXE_ENVOI_SUSPENDU)).toBe(true)
-    expect(DELAI_REPRISE_SUSPENSION_MS).toBe(10 * 60 * 1000)
+      .toBe('Entreprise I-CRM « LENA » supprimée — envoi suspendu')
+    expect(messageEnvoiSuspendu({ id: 'e1', nom: 'LENA', actif: true, verificationRequise: true }))
+      .toMatch(/URL ou clé modifiée, testez l'entreprise pour reprendre les envois — envoi suspendu$/)
+    expect(messageEnvoiSuspendu(null)).toBe('Entreprise I-CRM « ? » supprimée — envoi suspendu')
+    expect(messageEnvoiSuspendu({ id: 'e1', actif: true }).endsWith(SUFFIXE_ENVOI_SUSPENDU)).toBe(true)
+    expect(STATUT_JOB_SUSPENDU).toBe('suspendu')
+  })
+
+  it('entreprise utilisable : active, non supprimée, identifiants vérifiés', () => {
+    expect(entrepriseIcrmUtilisable({ actif: true, deletedAt: null, verificationRequise: false })).toBe(true)
+    expect(entrepriseIcrmUtilisable({ actif: false, deletedAt: null })).toBe(false)
+    expect(entrepriseIcrmUtilisable({ actif: true, deletedAt: new Date() })).toBe(false)
+    expect(entrepriseIcrmUtilisable({ actif: true, verificationRequise: true })).toBe(false)
+    expect(entrepriseIcrmUtilisable(null)).toBe(false)
+  })
+
+  it('instantané de destination : nom, entreprise / sous-type I-CRM, hôte, identifiant de clé — jamais le secret', () => {
+    const instantane = instantaneDestinationEntreprise({
+      id: 'e1', nom: 'CAE España', nomIcrm: 'CAE España', sousTypeIcrm: 'BORNE TACTILE',
+      apiUrl: 'https://icrm.api.es.ila26.com/api/', apiKey: CLE, token: SECRET,
+    })
+    expect(instantane).toEqual({
+      entrepriseIcrmId: 'e1',
+      nom: 'CAE España',
+      nomIcrm: 'CAE España',
+      sousTypeIcrm: 'BORNE TACTILE',
+      apiHost: 'icrm.api.es.ila26.com',
+      apiKeyId: CLE,
+    })
+    expect(JSON.stringify(instantane)).not.toContain(SECRET)
+    expect(instantaneDestinationEntreprise({ id: 'e2', apiKey: SECRET }).apiKeyId).toBeNull()
+    expect(instantaneDestinationEntreprise(null)).toBeNull()
   })
 })
