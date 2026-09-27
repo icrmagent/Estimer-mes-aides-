@@ -11,7 +11,13 @@ import { ConfirmModal, Toast, ErrorBanner, PRIMARY, SECONDARY } from '../../comp
 import api from '../../services/api.js'
 import { subscribeToBorne } from '../../services/pusher.js'
 import { BadgeEnvoisSuspendus } from '../../components/DestinationBorne.jsx'
-import { destinationJob, libelleSuspension } from '../../components/forms/entrepriseIcrmConfig.js'
+import ChoixModal from '../../components/ChoixModal.jsx'
+import {
+  destinationJob,
+  libelleSuspension,
+  libelleDestination,
+  resumeDestinations,
+} from '../../components/forms/entrepriseIcrmConfig.js'
 
 // `suspendu` : entreprise I-CRM cible désactivée, supprimée ou à tester — ni en file, ni en échec
 const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif', 'suspendu']
@@ -141,6 +147,8 @@ export default function PartageJobsPage() {
   const [editingCanal, setEditingCanal] = useState(null)
   const [deletingCanalId, setDeletingCanalId] = useState(null)
   const [confirm, setConfirm] = useState(null) // { title, message, onConfirm, danger }
+  // Confirmation de « Mettre en file » : répartition par destination (simulations)
+  const [choixLancement, setChoixLancement] = useState(null) // { simulation, simulationRedirection? }
   const [testingCanalId, setTestingCanalId] = useState(null)
 
   const selectedBorne = useMemo(
@@ -365,44 +373,55 @@ export default function PartageJobsPage() {
       return
     }
 
-    const enAttenteEtErreur = stats
-      ? (stats.byStatut?.en_attente || 0)
-        + (stats.byStatut?.echec_temporaire || 0)
-        + (stats.byStatut?.echec_definitif || 0)
-      : null
-
-    const cible = entrepriseDestination
-      ? `l'entreprise I-CRM « ${entrepriseDestination.nom} »`
-      : `le canal « ${activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'} »`
-    const suspension = envoisSuspendus
-      ? ` ⚠️ ${suspensionDestination} : ces envois seront mis en file au statut « Suspendu » (rien ne part, pas même vers les canaux) jusqu'à la réactivation de l'entreprise ou un test réussi.`
-      : ''
-
-    setConfirm({
-      title: 'Mettre en file d\'attente la transmission ?',
-      message:
-        enAttenteEtErreur != null
-          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.${suspension}`
-          : `Les enregistrements non encore partagés seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.${suspension}`,
-      confirmLabel: 'Mettre en file',
-      danger: false,
-      onConfirm: doLancerTransmission,
-    })
+    // Répartition par destination demandée au serveur AVANT toute écriture
+    // (?simulation=true) : la confirmation annonce chaque destination, jamais une seule
+    // quand plusieurs s'appliquent (envois gardant leur entreprise d'origine, suspendus…).
+    simulerLancement()
   }
 
-  const doLancerTransmission = async () => {
+  const urlLancer = () => `/api/partage/bornes/${selectedBorneId}/lancer`
+
+  const simulerLancement = async () => {
     setLaunching(true)
     setError(null)
-    setConfirm(null)
     try {
-      const res = await api.post(`/api/partage/bornes/${selectedBorneId}/lancer`)
+      const res = await api.post(urlLancer(), {}, { params: { simulation: 'true' } })
+      const simulation = res.data?.data || {}
+      if (!simulation.queued) {
+        setToast({ message: 'Aucun enregistrement non partagé à mettre en file pour cette borne.', type: 'success' })
+        return
+      }
+      // Des envois gardent une autre entreprise : répartition de l'option « tout rediriger »
+      let simulationRedirection = null
+      if (simulation.autresCibles > 0) {
+        const r = await api.post(urlLancer(), { redirigerEnvoisEnAttente: true }, { params: { simulation: 'true' } })
+        simulationRedirection = r.data?.data || null
+      }
+      setChoixLancement({ simulation, simulationRedirection })
+    } catch (err) {
+      const e = err.response?.data?.error
+      setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors de la préparation de la transmission'))
+    } finally {
+      setLaunching(false)
+    }
+  }
+
+  const doLancerTransmission = async ({ rediriger = false } = {}) => {
+    setLaunching(true)
+    setError(null)
+    try {
+      const res = await api.post(urlLancer(), rediriger ? { redirigerEnvoisEnAttente: true } : {})
       const result = res.data?.data || {}
-      setToast(result.avertissement
-        ? { message: `${result.queued || 0} enregistrement(s) mis en file — ${result.avertissement}.`, type: 'error' }
-        : { message: `${result.queued || 0} enregistrement(s) mis en file. Worker actif toutes les 30s.`, type: 'success' })
+      const repartition = resumeDestinations(result.destinations)
+      const base = `${result.queued || 0} enregistrement(s) mis en file${repartition ? ` : ${repartition}` : ''}`
+      setToast(result.suspendus > 0
+        ? { message: `${base} — ${result.suspendus} envoi(s) suspendu(s) (entreprise désactivée, supprimée ou à tester).`, type: 'error' }
+        : { message: `${base}. Worker actif toutes les 30s.`, type: 'success' })
+      setChoixLancement(null)
       refreshAll()
     } catch (err) {
       const e = err.response?.data?.error
+      setChoixLancement(null)
       setError(typeof e === 'string' ? e : (e?.message || 'Erreur lors du lancement de la transmission'))
     } finally {
       setLaunching(false)
@@ -945,6 +964,53 @@ export default function PartageJobsPage() {
           saving={launching || Boolean(relancing) || Boolean(deletingCanalId)}
         />
       )}
+
+      {choixLancement && (() => {
+        const { simulation, simulationRedirection } = choixLancement
+        const plusieurs = (simulation.destinations || []).length > 1
+        return (
+          <ChoixModal
+            titre="Mettre en file d'attente la transmission ?"
+            message={`${simulation.queued} enregistrement(s) non partagé(s) de cette borne, par destination : `
+              + `${resumeDestinations(simulation.destinations)}. Le worker traite la file toutes les 30 secondes.`}
+            details={(
+              <div className="space-y-1" data-testid="lancer-repartition">
+                <p>Destination actuelle de la borne : {libelleDestination(simulation.destinationActuelle)}.</p>
+                {plusieurs && (
+                  <p className="text-orange-700">
+                    ⚠️ Plusieurs destinations : {simulation.autresCibles} envoi(s) gardent l'entreprise choisie à leur création.
+                  </p>
+                )}
+                {simulation.suspendus > 0 && (
+                  <p className="text-orange-700">
+                    ⏸ {simulation.suspendus} envoi(s) seront mis en file au statut « Suspendu » (rien ne part, pas même vers
+                    les canaux) jusqu'à la réactivation ou un test réussi de leur entreprise.
+                  </p>
+                )}
+              </div>
+            )}
+            choix={[
+              {
+                label: `Mettre en file : ${resumeDestinations(simulation.destinations)}`,
+                variante: 'recommande',
+                testId: 'lancer-confirmer',
+                onClick: () => doLancerTransmission(),
+              },
+              ...(simulationRedirection
+                ? [{
+                    label: `Tout envoyer vers ${libelleDestination(simulation.destinationActuelle)} : `
+                      + `${resumeDestinations(simulationRedirection.destinations)}`,
+                    variante: 'secondaire',
+                    testId: 'lancer-rediriger',
+                    onClick: () => doLancerTransmission({ rediriger: true }),
+                  }]
+                : []),
+            ]}
+            onAnnuler={() => setChoixLancement(null)}
+            saving={launching}
+          />
+        )
+      })()}
 
       {toast && (
         <Toast

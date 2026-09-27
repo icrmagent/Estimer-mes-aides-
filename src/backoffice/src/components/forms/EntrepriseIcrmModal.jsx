@@ -204,6 +204,13 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
             </p>
           </div>
 
+          {!isEdit && (
+            <div className="text-xs text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2" role="status" data-testid="entreprise-a-tester">
+              Après l'enregistrement, cliquez « Tester » : une nouvelle entreprise ne reçoit aucun enregistrement avant un
+              test de connexion réussi (les captures de ses bornes sont suspendues d'ici là).
+            </div>
+          )}
+
           {identiteModifiee && (
             <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2" role="status" data-testid="entreprise-identite-modifiee">
               URL ou clé modifiée : il peut s'agir d'une autre entreprise I-CRM. Après l'enregistrement, ses envois

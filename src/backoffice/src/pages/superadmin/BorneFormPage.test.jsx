@@ -5,7 +5,9 @@
  * destination → confirmation explicite (« les garder pour <ancienne> » par défaut /
  * « les envoyer vers <nouvelle> » = redirigerEnvoisEnAttente) ; sans envoi en
  * attente, pas de question ; liste des entreprises indisponible → choix verrouillé
- * et jamais envoyé (la destination actuelle n'est jamais retirée par erreur).
+ * et jamais envoyé (la destination actuelle n'est jamais retirée par erreur) ;
+ * « Rediriger les envois » vers la destination actuelle : simulation, répartition
+ * annoncée, confirmation, puis appel réel.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act } from 'react'
@@ -102,7 +104,7 @@ describe('BorneFormPage — changement d’entreprise I-CRM et envois en attente
     await soumettre()
 
     expect(api.put).not.toHaveBeenCalled()
-    expect(container.textContent).toContain("3 envoi(s) en attente pour l'entreprise « CAE España » (dont 2 suspendu(s))")
+    expect(container.textContent).toContain("3 envoi(s) non livré(s) pour l'entreprise « CAE España » (dont 2 suspendu(s))")
     expect($('[data-testid="envois-garder"]').textContent).toContain("Les garder pour l'entreprise « CAE España » (recommandé)")
     expect($('[data-testid="envois-rediriger"]').textContent).toContain("Les envoyer vers l'entreprise « LENA (France) »")
 
@@ -170,5 +172,83 @@ describe('BorneFormPage — changement d’entreprise I-CRM et envois en attente
     expect(container.textContent).toContain('Impossible de charger les entreprises I-CRM')
     await soumettre()
     expect(api.put.mock.calls[0][1]).not.toHaveProperty('entrepriseIcrmId')
+  })
+})
+
+// Après la suppression forcée de « Vieille » (envois gardés suspendus) et un échec
+// définitif de l'ère des canaux : 3 envois ne visent pas la destination actuelle (CAE)
+const ENVOIS_HORS_DESTINATION = {
+  total: 6,
+  horsDestination: 3,
+  parEntreprise: [
+    { entrepriseIcrmId: 'cae', nom: 'CAE España', actif: true, supprimee: false, total: 3, suspendus: 0, echecs: 0 },
+    { entrepriseIcrmId: 'vieille', nom: 'Vieille', actif: false, supprimee: true, total: 2, suspendus: 2, echecs: 0 },
+    { entrepriseIcrmId: null, nom: null, actif: null, supprimee: false, total: 1, suspendus: 0, echecs: 1 },
+  ],
+}
+const SIMULATION = {
+  borneId: 'b1',
+  simulation: true,
+  destinationActuelle: { type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE España', actif: true, supprimee: false },
+  total: 3,
+  depuis: [
+    { type: 'entreprise_icrm', entrepriseIcrmId: 'vieille', nom: 'Vieille', supprimee: true, total: 2, suspendus: 2, echecs: 0 },
+    { type: 'canal', entrepriseIcrmId: null, nom: null, total: 1, suspendus: 0, echecs: 1 },
+  ],
+  destinations: [{ type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE España', total: 3, suspendus: 0, echecs: 1 }],
+}
+
+describe('BorneFormPage — « Rediriger les envois » vers la destination actuelle', () => {
+  it('annonce les envois hors destination, simule, montre la répartition, puis redirige sur confirmation', async () => {
+    armer({ envoisEnAttente: ENVOIS_HORS_DESTINATION })
+    api.post.mockImplementation(async (url, corps, options) => ({
+      data: { success: true, data: options?.params?.simulation === 'true' ? SIMULATION : { ...SIMULATION, simulation: undefined } },
+    }))
+    await monter()
+
+    const bandeau = $('[data-testid="envois-hors-destination"]')
+    expect(bandeau.textContent).toContain('3 envoi(s) non livré(s)')
+    expect(bandeau.textContent).toContain('2 → « Vieille » (supprimée) (2 suspendus), 1 → canaux de la borne (1 en échec définitif)')
+
+    await cliquer($('[data-testid="rediriger-envois"]'))
+
+    // Simulation d'abord : rien n'est écrit tant que l'opérateur n'a pas confirmé
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect(api.post.mock.calls[0]).toEqual(['/api/bornes/b1/rediriger-envois', { vers: 'destination_actuelle' }, { params: { simulation: 'true' } }])
+    const repartition = $('[data-testid="redirection-repartition"]')
+    expect(repartition.textContent).toContain('3 → « CAE España » (1 en échec définitif)')
+    expect(container.textContent).toContain('3 envoi(s) non livré(s) : 2 → « Vieille » (supprimée) (2 suspendus), 1 → canaux de la borne (1 en échec définitif) → « CAE España »')
+
+    await cliquer($('[data-testid="redirection-confirmer"]'))
+
+    expect(api.post).toHaveBeenCalledTimes(2)
+    expect(api.post.mock.calls[1]).toEqual(['/api/bornes/b1/rediriger-envois', { vers: 'destination_actuelle' }])
+    expect($('[data-testid="redirection-confirmer"]')).toBeNull()
+    expect(container.textContent).toContain('3 envoi(s) redirigé(s) : 3 → « CAE España » (1 en échec définitif).')
+    expect(api.put).not.toHaveBeenCalled()
+  })
+
+  it('annuler la confirmation : aucune redirection', async () => {
+    armer({ envoisEnAttente: ENVOIS_HORS_DESTINATION })
+    api.post.mockResolvedValue({ data: { success: true, data: SIMULATION } })
+    await monter()
+    await cliquer($('[data-testid="rediriger-envois"]'))
+    await cliquer([...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Annuler' && b.closest('[role="dialog"]')))
+    expect(api.post).toHaveBeenCalledTimes(1)
+    expect($('[data-testid="redirection-confirmer"]')).toBeNull()
+  })
+
+  it('destination modifiée mais pas encore enregistrée : bouton désactivé (la redirection vise la destination enregistrée)', async () => {
+    armer({ envoisEnAttente: ENVOIS_HORS_DESTINATION })
+    await monter()
+    await choisirEntreprise('lena')
+    expect($('[data-testid="rediriger-envois"]').disabled).toBe(true)
+    expect(container.textContent).toContain("Enregistrez d'abord la borne")
+  })
+
+  it('tous les envois visent déjà la destination actuelle : pas de bandeau', async () => {
+    armer({ envoisEnAttente: ENVOIS_CAE })
+    await monter()
+    expect($('[data-testid="envois-hors-destination"]')).toBeNull()
   })
 })

@@ -122,6 +122,32 @@ describe('EntreprisesIcrmPage', () => {
     expect(container.textContent).toContain('Entreprise I-CRM réactivée : 4 envois suspendus relancés.')
   })
 
+  it('création : entreprise « À tester », toast « cliquez Tester : aucun enregistrement avant un test réussi »', async () => {
+    const creee = { ...LENA, id: 'e2', nom: 'CAE España', verificationRequise: true, nbBornes: 0 }
+    api.post.mockResolvedValue({ data: { success: true, data: creee, avertissement: "Testez l'entreprise : …" } })
+    await monter()
+
+    await cliquer(bouton('Nouvelle entreprise'))
+    const saisir = async (sel, valeur) => act(async () => {
+      const el = container.querySelector(sel)
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, valeur)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await saisir('#entreprise-nom', 'CAE España')
+    await saisir('#entreprise-url', 'https://icrm.api.es.ila26.com')
+    await saisir('#entreprise-cle-api', CLE)
+    await saisir('#entreprise-secret', 'S'.repeat(48))
+    api.get.mockResolvedValue({ data: { success: true, data: [LENA, creee] } })
+    await act(async () => {
+      container.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+
+    expect(api.post).toHaveBeenCalledWith('/api/entreprises-icrm', expect.objectContaining({ nom: 'CAE España' }))
+    expect(container.textContent).toContain('Entreprise I-CRM créée. Cliquez « Tester » : elle ne recevra aucun enregistrement avant un test de connexion réussi.')
+    const ligneCae = [...container.querySelectorAll('tbody tr')].find((tr) => tr.textContent.includes('CAE España')).textContent
+    expect(ligneCae).toContain('À tester (aucun envoi avant un test réussi)')
+  })
+
   const reponse409 = {
     response: {
       status: 409,
@@ -129,8 +155,16 @@ describe('EntreprisesIcrmPage', () => {
         success: false,
         error: {
           code: 'ENTREPRISE_ICRM_EN_USAGE',
-          message: "L'entreprise « LENA (France) » est la destination de 2 bornes et de 5 envois pas encore livrés.",
-          details: { bornes: [{ id: 'b1', idBorne: 'BORNE-A' }, { id: 'b2', idBorne: 'BORNE-B' }], envoisEnAttente: 5 },
+          message: "L'entreprise « LENA (France) » est la destination de 2 bornes et de 5 envois non livrés.",
+          details: {
+            bornes: [{ id: 'b1', idBorne: 'BORNE-A' }, { id: 'b2', idBorne: 'BORNE-B' }],
+            envoisEnAttente: 5,
+            // Redirigés, chacun irait vers la destination ACTUELLE de sa borne
+            redirection: [
+              { type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE España', total: 3, suspendus: 0, echecs: 1 },
+              { type: 'canal', entrepriseIcrmId: null, nom: null, total: 2, suspendus: 0, echecs: 0 },
+            ],
+          },
         },
       },
     },
@@ -143,7 +177,10 @@ describe('EntreprisesIcrmPage', () => {
     await cliquer([...container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Supprimer').pop())
     expect(api.delete).toHaveBeenNthCalledWith(1, '/api/entreprises-icrm/e1', undefined)
     expect(container.textContent).toContain('Bornes désaffectées : BORNE-A, BORNE-B.')
-    expect(container.textContent).toContain('5 envoi(s) pas encore livré(s)')
+    expect(container.textContent).toContain('5 envoi(s) non livré(s)')
+    // Répartition annoncée AVANT de confirmer (jamais une seule destination quand plusieurs s'appliquent)
+    expect(container.querySelector('[data-testid="suppression-repartition"]').textContent)
+      .toContain('3 → « CAE España » (1 en échec définitif), 2 → canaux de la borne')
   }
 
   it('Supprimer : 409 → choix explicite ; « garder les envois suspendus » (recommandé) → DELETE ?force=true', async () => {
@@ -159,16 +196,40 @@ describe('EntreprisesIcrmPage', () => {
     expect(container.textContent).toContain('5 envoi(s) gardé(s) suspendu(s)')
   })
 
-  it('Supprimer : 409 → « envoyer vers les canaux » → DELETE ?force=true&redirigerEnvoisEnAttente=true', async () => {
+  it('Supprimer : 409 → « rediriger vers la destination actuelle de chaque borne » (répartition dans le libellé) → DELETE ?force=true&redirigerEnvoisEnAttente=true', async () => {
     api.delete
       .mockRejectedValueOnce(reponse409)
-      .mockResolvedValueOnce({ data: { success: true, data: { id: 'e1', bornesDesaffectees: 2, envoisRediriges: 5, envoisSuspendus: 0 } } })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            id: 'e1', bornesDesaffectees: 2, envoisRediriges: 5, envoisSuspendus: 0,
+            destinations: [
+              { type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE España', total: 3, suspendus: 0, echecs: 1 },
+              { type: 'canal', entrepriseIcrmId: null, nom: null, total: 2, suspendus: 0, echecs: 0 },
+            ],
+          },
+        },
+      })
     await ouvrirChoixSuppression()
 
-    await cliquer(container.querySelector('[data-testid="suppression-rediriger"]'))
+    const choix = container.querySelector('[data-testid="suppression-rediriger"]')
+    expect(choix.textContent).toContain('Supprimer et rediriger vers la destination actuelle de chaque borne : 3 → « CAE España » (1 en échec définitif), 2 → canaux de la borne')
+    await cliquer(choix)
 
     expect(api.delete).toHaveBeenNthCalledWith(2, '/api/entreprises-icrm/e1', { params: { force: 'true', redirigerEnvoisEnAttente: 'true' } })
-    expect(container.textContent).toContain('5 envoi(s) redirigé(s) vers les canaux')
+    expect(container.textContent).toContain('5 envoi(s) redirigé(s) vers la destination actuelle de leur borne : 3 → « CAE España »')
+  })
+
+  it('Supprimer : 409 avec des bornes mais aucun envoi : seul « garder » est proposé', async () => {
+    api.delete.mockRejectedValueOnce({
+      response: { status: 409, data: { success: false, error: { ...reponse409.response.data.error, details: { bornes: [{ id: 'b1', idBorne: 'BORNE-A' }], envoisEnAttente: 0, redirection: [] } } } },
+    })
+    await monter()
+    await cliquer(bouton('Supprimer'))
+    await cliquer([...container.querySelectorAll('button')].filter((b) => b.textContent.trim() === 'Supprimer').pop())
+    expect(container.querySelector('[data-testid="suppression-garder"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="suppression-rediriger"]')).toBeNull()
   })
 
   it('envois suspendus affichés dans la colonne Actif', async () => {

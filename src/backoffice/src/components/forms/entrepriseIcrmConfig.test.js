@@ -11,6 +11,9 @@ import {
   libelleSuspension,
   envoisConcernesParChangement,
   destinationJob,
+  libelleDestination,
+  resumeDestinations,
+  envoisHorsDestination,
 } from './entrepriseIcrmConfig.js'
 
 const CLE = 'emak_A1b2C3d4E5f6G7h8I9j0K1l2'
@@ -167,22 +170,59 @@ describe('règles de la revue (hôte, chargement, envois en attente, destination
     expect(optionsEntreprisesIcrm([], { ...actuelle, actif: false })[0].label).toMatch(/— désactivée$/)
   })
 
-  it('statut « À tester » quand l’URL ou la clé a changé', () => {
-    expect(statutVerification({ verificationRequise: true, dernierStatut: null })).toEqual({ texte: 'À tester (URL ou clé modifiée)', ton: 'erreur' })
+  it('statut « À tester » : nouvelle entreprise, ou URL / clé modifiée (aucun envoi avant un test réussi)', () => {
+    expect(statutVerification({ verificationRequise: true, dernierStatut: null }))
+      .toEqual({ texte: 'À tester (aucun envoi avant un test réussi)', ton: 'erreur' })
+    // Test raté depuis : l'échec est affiché (plus utile que « À tester »)
+    expect(statutVerification({ verificationRequise: true, dernierStatut: 'invalid_credentials' }))
+      .toEqual({ texte: 'Clé ou secret refusé', ton: 'erreur' })
+    expect(statutVerification({ verificationRequise: false, dernierStatut: 'url_non_autorisee' }))
+      .toEqual({ texte: 'URL non autorisée (hôte hors liste)', ton: 'erreur' })
   })
 
   it('envois concernés par un changement : ceux de l’ancienne cible + ceux d’entreprises supprimées', () => {
     const envois = {
       total: 10,
       parEntreprise: [
-        { entrepriseIcrmId: 'cae', total: 5, suspendus: 4, supprimee: false },
-        { entrepriseIcrmId: null, total: 2, suspendus: 0, supprimee: false },
+        { entrepriseIcrmId: 'cae', total: 5, suspendus: 4, echecs: 1, supprimee: false },
+        { entrepriseIcrmId: null, total: 2, suspendus: 0, echecs: 0, supprimee: false },
         { entrepriseIcrmId: 'vieille', total: 3, suspendus: 3, supprimee: true },
       ],
     }
-    expect(envoisConcernesParChangement(envois, 'cae')).toEqual({ total: 8, suspendus: 7 })
-    expect(envoisConcernesParChangement(envois, null)).toEqual({ total: 5, suspendus: 3 })
-    expect(envoisConcernesParChangement(null, 'cae')).toEqual({ total: 0, suspendus: 0 })
+    expect(envoisConcernesParChangement(envois, 'cae')).toEqual({ total: 8, suspendus: 7, echecs: 1 })
+    expect(envoisConcernesParChangement(envois, null)).toEqual({ total: 5, suspendus: 3, echecs: 0 })
+    expect(envoisConcernesParChangement(null, 'cae')).toEqual({ total: 0, suspendus: 0, echecs: 0 })
+  })
+
+  it('répartition par destination : « 3 → « LENA », 1 → canaux de la borne », suspendus et échecs signalés', () => {
+    const destinations = [
+      { type: 'entreprise_icrm', entrepriseIcrmId: 'lena', nom: 'LENA', total: 3, suspendus: 0, echecs: 1 },
+      { type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE', supprimee: true, total: 2, suspendus: 2, echecs: 0 },
+      { type: 'canal', entrepriseIcrmId: null, nom: null, total: 1, suspendus: 0, echecs: 0 },
+    ]
+    expect(resumeDestinations(destinations))
+      .toBe('3 → « LENA » (1 en échec définitif), 2 → « CAE » (supprimée) (2 suspendus), 1 → canaux de la borne')
+    expect(resumeDestinations([])).toBe('')
+    expect(resumeDestinations(undefined)).toBe('')
+    expect(libelleDestination({ type: 'canal', label: 'icrm-lena' })).toBe('canal « icrm-lena »')
+    expect(libelleDestination({ type: 'entreprise_icrm', nom: null })).toBe('« entreprise inconnue »')
+    expect(libelleDestination(null)).toBe('—')
+  })
+
+  it('envois hors destination actuelle (bouton « Rediriger les envois ») : toutes les cibles sauf la destination enregistrée', () => {
+    const envois = {
+      parEntreprise: [
+        { entrepriseIcrmId: 'lena', nom: 'LENA', total: 6, suspendus: 0, echecs: 0 },
+        { entrepriseIcrmId: 'cae', nom: 'CAE', supprimee: true, total: 2, suspendus: 2, echecs: 0 },
+        { entrepriseIcrmId: null, nom: null, total: 1, suspendus: 0, echecs: 1 },
+      ],
+    }
+    expect(envoisHorsDestination(envois, 'lena')).toEqual([
+      { type: 'entreprise_icrm', entrepriseIcrmId: 'cae', nom: 'CAE', supprimee: true, total: 2, suspendus: 2, echecs: 0 },
+      { type: 'canal', entrepriseIcrmId: null, nom: null, supprimee: false, total: 1, suspendus: 0, echecs: 1 },
+    ])
+    expect(envoisHorsDestination(envois, null).map((d) => d.entrepriseIcrmId)).toEqual(['lena', 'cae'])
+    expect(envoisHorsDestination(null, 'lena')).toEqual([])
   })
 
   it('destination d’un job livré = instantané ; pas encore livré = cible du job (suspendue si besoin) ; sinon canal', () => {

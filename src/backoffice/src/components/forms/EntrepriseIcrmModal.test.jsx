@@ -110,6 +110,16 @@ describe('EntrepriseIcrmModal — création', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('création : annonce qu’une nouvelle entreprise ne reçoit rien avant un test réussi ; pas en modification', async () => {
+    await monter()
+    expect($('[data-testid="entreprise-a-tester"]').textContent)
+      .toContain('une nouvelle entreprise ne reçoit aucun enregistrement avant un test de connexion réussi')
+    await act(async () => {
+      root.render(<EntrepriseIcrmModal isOpen initialEntreprise={{ id: 'e1', nom: 'LENA', apiUrl: 'https://icrm.api.ila26.fr', apiKeyId: CLE, actif: true }} />)
+    })
+    expect($('[data-testid="entreprise-a-tester"]')).toBeNull()
+  })
+
   it('refuse une saisie invalide sans appeler l’API', async () => {
     await monter()
     await changer('#entreprise-nom', 'LENA')

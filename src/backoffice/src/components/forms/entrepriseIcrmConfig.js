@@ -4,7 +4,8 @@
  * Une entreprise (tenant) I-CRM est enregistrée une fois avec la clé API émise
  * par I-CRM (identifiant « emak_… » + secret), puis choisie borne par borne.
  * Chaque envoi fige sa cible à sa création : changer l'entreprise d'une borne ne
- * déplace pas ses envois en attente, sauf choix explicite.
+ * déplace pas ses envois en attente, sauf choix explicite. Une entreprise NOUVELLE
+ * est « à tester » : elle ne reçoit rien avant un test de connexion réussi.
  * Le backend refait les mêmes contrôles (double validation) : voir
  * src/backend/src/routes/entreprises-icrm.js.
  */
@@ -116,15 +117,22 @@ const LIBELLES_STATUT = {
   not_found: 'URL introuvable (404)',
   timeout: 'Délai dépassé',
   injoignable: 'Injoignable',
+  url_non_autorisee: 'URL non autorisée (hôte hors liste)',
 }
 
 /**
  * Résultat du dernier test de connexion, pour le tableau des entreprises.
- * URL ou clé modifiée depuis (verificationRequise) : « À tester ».
+ * Nouvelle entreprise, ou URL / clé modifiée depuis (verificationRequise) :
+ * « À tester » — aucun envoi avant un test réussi.
  * @returns {{ texte: string, ton: 'ok'|'erreur'|'neutre' }}
  */
 export function statutVerification(entreprise) {
-  if (entreprise?.verificationRequise) return { texte: 'À tester (URL ou clé modifiée)', ton: 'erreur' }
+  if (entreprise?.verificationRequise) {
+    // Statut d'échec mémorisé (test raté depuis) : affiché tel quel, sinon « À tester »
+    const statut = entreprise.dernierStatut
+    if (statut && statut !== 'ok') return statutVerification({ ...entreprise, verificationRequise: false })
+    return { texte: 'À tester (aucun envoi avant un test réussi)', ton: 'erreur' }
+  }
   const statut = entreprise?.dernierStatut
   if (!statut) return { texte: 'Non vérifiée', ton: 'neutre' }
   if (statut === 'ok') return { texte: LIBELLES_STATUT.ok, ton: 'ok' }
@@ -158,10 +166,11 @@ export function destinationBorne(borne) {
 }
 
 /**
- * Envois pas encore livrés concernés par un changement de destination de la borne :
- * ceux qui ciblent l'ancienne destination (ou une entreprise supprimée).
+ * Envois non livrés (en attente, suspendus, échecs définitifs) concernés par un
+ * changement de destination de la borne : ceux qui ciblent l'ancienne destination
+ * (ou une entreprise supprimée).
  * @param {?{ parEntreprise: Array }} envoisEnAttente décompte de GET /api/bornes/:id
- * @returns {{ total: number, suspendus: number }}
+ * @returns {{ total: number, suspendus: number, echecs: number }}
  */
 export function envoisConcernesParChangement(envoisEnAttente, ancienneId) {
   const lignes = (envoisEnAttente?.parEntreprise || [])
@@ -169,7 +178,55 @@ export function envoisConcernesParChangement(envoisEnAttente, ancienneId) {
   return {
     total: lignes.reduce((s, l) => s + (l.total || 0), 0),
     suspendus: lignes.reduce((s, l) => s + (l.suspendus || 0), 0),
+    echecs: lignes.reduce((s, l) => s + (l.echecs || 0), 0),
   }
+}
+
+// ─── Répartitions par destination (« 3 → LENA, 1 → canaux ») ──────────────────
+// Réponses de l'API : lancer (?simulation=true), suppression d'une entreprise
+// (409 details.redirection, destinations), « Rediriger les envois » d'une borne.
+// Une confirmation n'annonce jamais une seule destination quand plusieurs s'appliquent.
+
+/** Libellé d'une destination `{ type: 'entreprise_icrm'|'canal', nom, label?, supprimee? }`. */
+export function libelleDestination(destination) {
+  if (!destination) return '—'
+  if (destination.type === 'canal') {
+    return destination.label ? `canal « ${destination.label} »` : 'canaux de la borne'
+  }
+  return `« ${destination.nom || 'entreprise inconnue'} »${destination.supprimee ? ' (supprimée)' : ''}`
+}
+
+/**
+ * « 3 → « LENA », 1 → canaux de la borne (1 suspendu) » : une ligne par destination,
+ * avec les envois qui y resteront suspendus et les échecs définitifs.
+ * @param {Array<{ type, nom, total, suspendus?, echecs? }>} destinations
+ */
+export function resumeDestinations(destinations = []) {
+  return (destinations || []).map((d) => {
+    const extras = []
+    if (d.suspendus) extras.push(`${d.suspendus} suspendu${d.suspendus > 1 ? 's' : ''}`)
+    if (d.echecs) extras.push(`${d.echecs} en échec définitif`)
+    return `${d.total} → ${libelleDestination(d)}${extras.length > 0 ? ` (${extras.join(', ')})` : ''}`
+  }).join(', ')
+}
+
+/**
+ * Envois non livrés d'une borne qui ne visent PAS sa destination actuelle, en
+ * destinations (pour `resumeDestinations`) — bouton « Rediriger les envois ».
+ * @param {?{ parEntreprise: Array }} envoisEnAttente décompte de GET /api/bornes/:id
+ */
+export function envoisHorsDestination(envoisEnAttente, destinationActuelleId) {
+  return (envoisEnAttente?.parEntreprise || [])
+    .filter((l) => (l.entrepriseIcrmId ?? null) !== (destinationActuelleId ?? null))
+    .map((l) => ({
+      type: l.entrepriseIcrmId ? 'entreprise_icrm' : 'canal',
+      entrepriseIcrmId: l.entrepriseIcrmId ?? null,
+      nom: l.nom ?? null,
+      supprimee: Boolean(l.supprimee),
+      total: l.total || 0,
+      suspendus: l.suspendus || 0,
+      echecs: l.echecs || 0,
+    }))
 }
 
 /**

@@ -3,7 +3,7 @@ import AppLayout from '../../components/layout/AppLayout.jsx'
 import EntrepriseIcrmModal from '../../components/forms/EntrepriseIcrmModal.jsx'
 import ChoixModal from '../../components/ChoixModal.jsx'
 import { resumeTestCanal } from '../../components/forms/canalConfig.js'
-import { statutVerification, messageBornesSuspendues } from '../../components/forms/entrepriseIcrmConfig.js'
+import { statutVerification, messageBornesSuspendues, resumeDestinations } from '../../components/forms/entrepriseIcrmConfig.js'
 import {
   PRIMARY, IcoPlus,
   Toast, ErrorBanner, ConfirmModal, SkeletonTableRows, EmptyState, BadgeActif,
@@ -57,7 +57,10 @@ export default function EntreprisesIcrmPage() {
     const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? 's' : ''}`
     let message
     let type = 'success'
-    if (repris > 0) {
+    if (!modal.entreprise) {
+      // Nouvelle entreprise : à tester avant tout envoi
+      message = "Entreprise I-CRM créée. Cliquez « Tester » : elle ne recevra aucun enregistrement avant un test de connexion réussi."
+    } else if (repris > 0) {
       message = `Entreprise I-CRM réactivée : ${pluriel(repris, 'envoi')} suspendu${repris > 1 ? 's' : ''} relancé${repris > 1 ? 's' : ''}.`
     } else if (reponse?.avertissement) {
       message = `Entreprise I-CRM enregistrée — ${reponse.avertissement}`
@@ -107,7 +110,9 @@ export default function EntreprisesIcrmPage() {
       const n = d.bornesDesaffectees || 0
       const morceaux = ['Entreprise supprimée']
       if (n > 0) morceaux.push(`${n} borne${n > 1 ? 's' : ''} repassée${n > 1 ? 's' : ''} sur leurs canaux`)
-      if (d.envoisRediriges) morceaux.push(`${d.envoisRediriges} envoi(s) redirigé(s) vers les canaux`)
+      if (d.envoisRediriges) {
+        morceaux.push(`${d.envoisRediriges} envoi(s) redirigé(s) vers la destination actuelle de leur borne : ${resumeDestinations(d.destinations)}`)
+      }
       if (d.envoisSuspendus) morceaux.push(`${d.envoisSuspendus} envoi(s) gardé(s) suspendu(s)`)
       setToast({ message: `${morceaux.join(' — ')}.`, type: 'success' })
       setConfirm(null)
@@ -117,7 +122,13 @@ export default function EntreprisesIcrmPage() {
       const e = err.response?.data?.error
       if (err.response?.status === 409 && e?.code === 'ENTREPRISE_ICRM_EN_USAGE' && !force) {
         setConfirm(null)
-        setChoixSuppression({ entreprise, message: e.message, bornes: e.details?.bornes || [], envoisEnAttente: e.details?.envoisEnAttente || 0 })
+        setChoixSuppression({
+          entreprise,
+          message: e.message,
+          bornes: e.details?.bornes || [],
+          envoisEnAttente: e.details?.envoisEnAttente || 0,
+          redirection: e.details?.redirection || [],
+        })
       } else {
         setConfirm(null)
         setChoixSuppression(null)
@@ -169,7 +180,9 @@ export default function EntreprisesIcrmPage() {
           </p>
           <p>
             Une borne affectée à une entreprise lui envoie ses enregistrements, et à elle seule (ses canaux ne sont plus utilisés).
-            Entreprise désactivée : les envois de ses bornes sont suspendus jusqu'à sa réactivation.
+            Entreprise nouvelle (pas encore testée) ou désactivée : les envois de ses bornes sont suspendus jusqu'à un test réussi
+            ou sa réactivation. L'URL API doit viser un hôte I-CRM autorisé (ila26.fr, ila26.com, azurewebsites.net, code.run
+            par défaut).
           </p>
         </div>
 
@@ -317,9 +330,14 @@ export default function EntreprisesIcrmPage() {
                 <p>Bornes désaffectées : {choixSuppression.bornes.map((b) => b.idBorne).join(', ')}.</p>
               )}
               <p>
-                {choixSuppression.envoisEnAttente} envoi(s) pas encore livré(s) ciblent cette entreprise : ils ne
+                {choixSuppression.envoisEnAttente} envoi(s) non livré(s) ciblent cette entreprise : ils ne
                 lui seront jamais envoyés.
               </p>
+              {choixSuppression.redirection.length > 0 && (
+                <p data-testid="suppression-repartition">
+                  Redirigés, chacun irait vers la destination actuelle de SA borne : {resumeDestinations(choixSuppression.redirection)}.
+                </p>
+              )}
             </>
           )}
           choix={[
@@ -329,12 +347,16 @@ export default function EntreprisesIcrmPage() {
               testId: 'suppression-garder',
               onClick: () => supprimer(choixSuppression.entreprise, { force: true }),
             },
-            {
-              label: 'Supprimer et envoyer ces envois vers les canaux des bornes',
-              variante: 'danger',
-              testId: 'suppression-rediriger',
-              onClick: () => supprimer(choixSuppression.entreprise, { force: true, rediriger: true }),
-            },
+            ...(choixSuppression.envoisEnAttente > 0
+              ? [{
+                  label: choixSuppression.redirection.length > 0
+                    ? `Supprimer et rediriger vers la destination actuelle de chaque borne : ${resumeDestinations(choixSuppression.redirection)}`
+                    : 'Supprimer et rediriger vers la destination actuelle de chaque borne',
+                  variante: 'danger',
+                  testId: 'suppression-rediriger',
+                  onClick: () => supprimer(choixSuppression.entreprise, { force: true, rediriger: true }),
+                }]
+              : []),
           ]}
           onAnnuler={() => setChoixSuppression(null)}
           saving={deleting}
