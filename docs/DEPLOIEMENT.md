@@ -474,7 +474,9 @@ Procédure complète : **[INTEGRATION-ICRM.md](INTEGRATION-ICRM.md)**.
 
 Chaque entreprise (tenant) I-CRM est enregistrée **une fois** (menu « Entreprises I-CRM »,
 `/api/entreprises-icrm`) avec sa clé API, puis choisie dans la fiche de chaque borne
-(« Entreprise I-CRM destinataire »). Une entreprise active est **prioritaire sur les canaux**.
+(« Entreprise I-CRM destinataire »). Une borne affectée n'envoie **qu'à son entreprise** : jamais de
+repli sur ses canaux ; entreprise désactivée = envois **suspendus** (jobs reprogrammés toutes les
+10 min sans tentative comptée, relancés dès la réactivation).
 Détail : [INTEGRATION-ICRM.md](INTEGRATION-ICRM.md) §9.
 
 - **Migration** `20260927000000_entreprise_icrm_par_borne` (additive, idempotente) : table

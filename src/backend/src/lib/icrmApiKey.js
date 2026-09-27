@@ -38,6 +38,24 @@ export const MESSAGE_CLE_API_INVALIDE = 'Clé API I-CRM invalide : format attend
 export const MESSAGE_SECRET_INVALIDE = 'Secret API I-CRM invalide : 48 caractères alphanumériques attendus'
 export const MESSAGE_URL_HTTPS = "L'URL API I-CRM doit être en https (le secret transite dans les en-têtes)"
 
+// ─── Entreprise I-CRM d'une borne désactivée : envois SUSPENDUS ───────────────
+// Une borne affectée à une entreprise n'envoie JAMAIS ailleurs (ni canal, ni
+// variables d'environnement) : entreprise inactive ou supprimée = pause, le job
+// est reprogrammé sans compter de tentative (voir services/queueWorker.js).
+
+export const DELAI_REPRISE_SUSPENSION_MS = 10 * 60 * 1000
+
+// Fin commune des messages de suspension (sert aussi à retrouver les jobs suspendus)
+export const SUFFIXE_ENVOI_SUSPENDU = '— envoi suspendu'
+
+/** Motif de suspension enregistré dans le job et l'enregistrement (sans donnée personnelle). */
+export function messageEnvoiSuspendu(entreprise) {
+  const nom = entreprise?.nom || entreprise?.id || '?'
+  return entreprise?.deletedAt
+    ? `Entreprise I-CRM « ${nom} » supprimée mais encore affectée à la borne ${SUFFIXE_ENVOI_SUSPENDU}`
+    : `Entreprise I-CRM « ${nom} » désactivée ${SUFFIXE_ENVOI_SUSPENDU}`
+}
+
 // Échecs définitifs : réessayer ne changera rien (identifiants, URL, données).
 export const STATUTS_ICRM_DEFINITIFS = Object.freeze([401, 403, 404, 413, 422])
 

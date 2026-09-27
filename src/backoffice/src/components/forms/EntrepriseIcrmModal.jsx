@@ -6,6 +6,7 @@ import {
   estNouvelleCleEntreprise,
   validerSaisieEntreprise,
   construireRequeteEntreprise,
+  messageBornesSuspendues,
 } from './entrepriseIcrmConfig.js'
 
 /**
@@ -14,10 +15,12 @@ import {
  * Props:
  * - isOpen: boolean
  * - onClose: function
- * - onSave: function — appelée après succès avec l'entreprise renvoyée par l'API
+ * - onSave: function(entreprise, reponse) — appelée après succès avec l'entreprise
+ *   renvoyée par l'API et la réponse complète (ex. `jobsRepris` à la réactivation)
  * - initialEntreprise?: object — pour modification ; le secret n'est JAMAIS
  *   pré-rempli (l'API ne le renvoie pas). Seul l'identifiant public de la clé
- *   (apiKeyId, « emak_… ») est repris.
+ *   (apiKeyId, « emak_… ») est repris. `nbBornes` sert à avertir qu'une
+ *   désactivation suspend les envois de ces bornes.
  */
 export default function EntrepriseIcrmModal({ isOpen, ...props }) {
   if (!isOpen) return null
@@ -40,6 +43,8 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
 
   const nouvelleCle = estNouvelleCleEntreprise({ isEdit, apiKey, apiKeyInitiale })
   const secretFacultatif = isEdit && !nouvelleCle
+  // Désactiver une entreprise qui a des bornes suspend leurs envois (jamais de repli sur les canaux)
+  const bornesSuspendues = isEdit && !actif ? messageBornesSuspendues(initialEntreprise?.nbBornes) : null
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -54,7 +59,7 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
       const response = isEdit
         ? await api.put(`/api/entreprises-icrm/${initialEntreprise.id}`, corps)
         : await api.post('/api/entreprises-icrm', corps)
-      if (onSave) onSave(response.data?.data ?? response.data)
+      if (onSave) onSave(response.data?.data ?? response.data, response.data)
       onClose()
     } catch (err) {
       const e2 = err.response?.data?.error
@@ -202,9 +207,13 @@ function EntrepriseIcrmForm({ onClose, onSave, initialEntreprise = null }) {
             </label>
           </div>
           {!actif && (
-            <p className="text-xs text-orange-600 -mt-2">
-              Inactive : les bornes qui l'ont pour destination repassent sur leurs canaux I-CRM.
-            </p>
+            <div className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 -mt-2" role="status" data-testid="entreprise-desactivation">
+              {bornesSuspendues && <p className="font-semibold">⚠️ {bornesSuspendues}.</p>}
+              <p>
+                Désactivée, l'entreprise ne reçoit plus rien : les envois de ses bornes sont suspendus
+                (aucun envoi vers leurs canaux) et reprennent à sa réactivation.
+              </p>
+            </div>
           )}
 
           <div className="flex gap-3 pt-4 border-t border-gray-100">

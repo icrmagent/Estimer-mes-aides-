@@ -99,6 +99,29 @@ describe('EntreprisesIcrmPage', () => {
     expect(container.querySelector('tbody tr').textContent).toContain('Clé ou secret refusé')
   })
 
+  it('entreprise désactivée avec des bornes : « N bornes suspendues » dans la colonne Actif', async () => {
+    api.get.mockResolvedValue({ data: { success: true, data: [{ ...LENA, actif: false }] } })
+    await monter()
+    const ligne = container.querySelector('tbody tr').textContent
+    expect(ligne).toContain('Inactif')
+    expect(ligne).toContain("2 bornes suspendues tant que l'entreprise est désactivée")
+  })
+
+  it('réactivation depuis la fenêtre : toast avec le nombre d’envois suspendus relancés', async () => {
+    api.get.mockResolvedValue({ data: { success: true, data: [{ ...LENA, actif: false }] } })
+    api.put.mockResolvedValue({ data: { success: true, data: { ...LENA, actif: true }, jobsRepris: 4 } })
+    await monter()
+
+    await cliquer(bouton('Modifier'))
+    await cliquer(container.querySelector('#entreprise-actif'))
+    await act(async () => {
+      container.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    })
+
+    expect(api.put).toHaveBeenCalledWith('/api/entreprises-icrm/e1', expect.objectContaining({ actif: true }))
+    expect(container.textContent).toContain('Entreprise I-CRM réactivée : 4 envois suspendus relancés.')
+  })
+
   it('Supprimer : 409 (bornes affectées) → seconde confirmation → DELETE ?force=true', async () => {
     api.delete
       .mockRejectedValueOnce({

@@ -106,7 +106,7 @@ describe('EntrepriseIcrmModal — création', () => {
     expect(api.post).toHaveBeenCalledWith('/api/entreprises-icrm', {
       nom: 'LENA (France)', apiUrl: 'https://icrm.api.ila26.fr', actif: true, apiKey: CLE, token: SECRET,
     })
-    expect(onSave).toHaveBeenCalledWith(creee)
+    expect(onSave).toHaveBeenCalledWith(creee, { success: true, data: creee })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -160,12 +160,33 @@ describe('EntrepriseIcrmModal — édition', () => {
     await monter({ initialEntreprise: entreprise })
     await changer('#entreprise-nom', 'LENA')
     await cocher('#entreprise-actif')
-    expect(container.textContent).toContain('repassent sur leurs canaux')
+    const avertissement = $('[data-testid="entreprise-desactivation"]').textContent
+    expect(avertissement).toContain('envois de ses bornes sont suspendus')
+    expect(avertissement).toContain('aucun envoi vers leurs canaux')
+    expect(avertissement).not.toMatch(/repassent sur leurs canaux/)
     await soumettre()
 
     expect(api.put).toHaveBeenCalledWith('/api/entreprises-icrm/e1', {
       nom: 'LENA', apiUrl: 'https://icrm.api.ila26.fr', actif: false,
     })
+  })
+
+  it('désactiver une entreprise qui a des bornes : « N borne(s) suspendue(s) tant que l’entreprise est désactivée »', async () => {
+    await monter({ initialEntreprise: { ...entreprise, nbBornes: 3 } })
+    expect($('[data-testid="entreprise-desactivation"]')).toBeNull()
+
+    await cocher('#entreprise-actif')
+    expect($('[data-testid="entreprise-desactivation"]').textContent)
+      .toContain("3 bornes suspendues tant que l'entreprise est désactivée")
+
+    await cocher('#entreprise-actif')
+    expect($('[data-testid="entreprise-desactivation"]')).toBeNull()
+  })
+
+  it('désactivation d’une entreprise sans borne : pas de compte de bornes suspendues', async () => {
+    await monter({ initialEntreprise: { ...entreprise, nbBornes: 0 } })
+    await cocher('#entreprise-actif')
+    expect($('[data-testid="entreprise-desactivation"]').textContent).not.toMatch(/bornes? suspendue/)
   })
 
   it('nouvelle clé : le secret devient obligatoire, puis clé + secret envoyés', async () => {

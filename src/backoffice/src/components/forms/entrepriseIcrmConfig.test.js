@@ -7,6 +7,7 @@ import {
   optionsEntreprisesIcrm,
   statutVerification,
   destinationBorne,
+  messageBornesSuspendues,
 } from './entrepriseIcrmConfig.js'
 
 const CLE = 'emak_A1b2C3d4E5f6G7h8I9j0K1l2'
@@ -88,15 +89,24 @@ describe('libellés et options du choix de la borne', () => {
     expect(libelleEntrepriseIcrm(null)).toBe('')
   })
 
-  it('options : entreprises actives seulement, plus l’entreprise actuelle si elle est inactive', () => {
+  it('options : entreprises actives seulement, plus l’entreprise actuelle si elle est désactivée', () => {
     expect(optionsEntreprisesIcrm([lena, cae, inactive])).toEqual([
       { value: 'e1', label: 'LENA (France) — LENA (BORNE TACTILE)' },
       { value: 'e2', label: 'CAE España — non vérifiée' },
     ])
     const avecActuelle = optionsEntreprisesIcrm([lena, inactive], inactive)
     expect(avecActuelle.map((o) => o.value)).toEqual(['e1', 'e3'])
-    expect(avecActuelle[1].label).toMatch(/inactive$/)
+    expect(avecActuelle[1].label).toBe('Ancienne — X — désactivée')
     expect(optionsEntreprisesIcrm([lena], lena)).toHaveLength(1)
+  })
+})
+
+describe('messageBornesSuspendues', () => {
+  it('« N borne(s) suspendue(s) tant que l’entreprise est désactivée », rien sans borne', () => {
+    expect(messageBornesSuspendues(1)).toBe("1 borne suspendue tant que l'entreprise est désactivée")
+    expect(messageBornesSuspendues(3)).toBe("3 bornes suspendues tant que l'entreprise est désactivée")
+    expect(messageBornesSuspendues(0)).toBeNull()
+    expect(messageBornesSuspendues(undefined)).toBeNull()
   })
 })
 
@@ -114,7 +124,7 @@ describe('statutVerification', () => {
   })
 })
 
-describe('destinationBorne (même ordre que le worker)', () => {
+describe('destinationBorne (même règle que le worker)', () => {
   it('entreprise active prioritaire sur le canal', () => {
     expect(destinationBorne({ canalTransmission: 'icrm-lena', entrepriseIcrm: { nom: 'LENA', actif: true } }))
       .toEqual({ type: 'entreprise', libelle: 'LENA' })
@@ -126,9 +136,8 @@ describe('destinationBorne (même ordre que le worker)', () => {
     expect(destinationBorne({})).toEqual({ type: 'canal', libelle: 'Canaux de la borne' })
   })
 
-  it('entreprise inactive : canal, avec alerte', () => {
-    const d = destinationBorne({ canalTransmission: null, entrepriseIcrm: { nom: 'LENA', actif: false } })
-    expect(d.type).toBe('canal')
-    expect(d.alerte).toMatch(/LENA.*inactive/)
+  it('entreprise désactivée : toujours l’entreprise (jamais le canal), envois suspendus', () => {
+    expect(destinationBorne({ canalTransmission: 'icrm-lena', entrepriseIcrm: { nom: 'LENA', actif: false } }))
+      .toEqual({ type: 'entreprise', libelle: 'LENA', suspendu: true })
   })
 })

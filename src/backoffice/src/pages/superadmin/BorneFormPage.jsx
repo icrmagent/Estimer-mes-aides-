@@ -273,7 +273,7 @@ export default function BorneFormPage() {
             />
             <p className="text-xs text-gray-500 mt-1">
               {form.entrepriseIcrmId
-                ? "Ignoré tant que l'entreprise I-CRM choisie ci-dessus est active (repli si elle est désactivée)."
+                ? "Non utilisé tant qu'une entreprise I-CRM est choisie ci-dessus (même désactivée : ses envois sont alors suspendus)."
                 : "Identifiant du canal I-CRM utilisé pour l'envoi des leads. Les clés API se configurent dans la page Partage."}
             </p>
           </div>

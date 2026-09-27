@@ -45,7 +45,8 @@ automatiquement). `https` est obligatoire (seul `http://localhost` est toléré,
 ## 3. Configurer un canal (back-office)
 
 > Pour une nouvelle borne, préférer l'**entreprise I-CRM par borne** (§9) : une clé saisie une
-> seule fois pour toutes les bornes du tenant. Le canal reste utile en repli (§9.3).
+> seule fois pour toutes les bornes du tenant. Une borne affectée à une entreprise n'utilise plus
+> ses canaux, même si l'entreprise est désactivée (§9.3) ; le canal sert aux bornes sans entreprise.
 
 Prérequis : la clé API et son secret, délivrés par un administrateur I-CRM pour le tenant visé.
 Le secret n'est affiché **qu'une fois** par I-CRM : le transmettre par un canal sûr, jamais par e-mail en clair.
@@ -303,32 +304,54 @@ le statut du dernier test.
 ### 9.2 Choisir l'entreprise d'une borne
 
 Fiche de la borne (**Bornes → Modifier**, ou à la création) → **Entreprise I-CRM destinataire** :
-les entreprises actives, ou « Aucune (utiliser les canaux) ». Choix réservé au **SuperAdmin**
+les entreprises actives, ou « Aucune (utiliser les canaux) » — seul moyen de rendre la borne à ses
+canaux. Choix réservé au **SuperAdmin**
 (`PUT /api/bornes/:id { entrepriseIcrmId }` : 403 pour un AdminBorne qui tente de le changer ;
 renvoyer la valeur actuelle reste accepté). Une entreprise inconnue, supprimée ou inactive est
 refusée (400 `ENTREPRISE_ICRM_NOT_FOUND` / `ENTREPRISE_ICRM_INACTIVE`). La liste des bornes, la
-page **Partage CRM** et la page « Mes bornes » de l'AdminBorne affichent la destination.
+page **Partage CRM** et la page « Mes bornes » de l'AdminBorne affichent la destination, avec le
+badge **« Envois suspendus (entreprise désactivée) »** quand l'entreprise de la borne est désactivée.
 
-### 9.3 Ordre de résolution (worker)
+### 9.3 Résolution de la destination (worker)
 
 Pour chaque job de partage :
 
-1. **l'entreprise I-CRM de la borne**, si elle est renseignée, **active** et non supprimée → envoi
-   par clé API avec l'URL, la clé et le secret de l'entreprise (même émetteur, même payload §4,
-   mêmes en-têtes dont `Idempotency-Key`, mêmes réessais §5 que le canal clé API) ;
-2. sinon, **le canal** : celui dont le label = `canalTransmission`, sinon le premier canal actif
-   (comportement inchangé, `azure_ad` compris) ;
-3. sinon, les variables d'environnement `CRM_API_URL` / `CRM_API_KEY` (chemin historique).
+| Borne | Destination |
+|-------|-------------|
+| affectée à une entreprise **active** (non supprimée) | **cette entreprise**, par clé API avec son URL, sa clé et son secret (même émetteur, même payload §4, mêmes en-têtes dont `Idempotency-Key`, mêmes réessais §5 que le canal clé API) |
+| affectée à une entreprise **désactivée** | **envoi SUSPENDU** : rien ne part — ni vers l'entreprise, ni vers un canal, ni vers les variables d'environnement |
+| affectée à une entreprise **supprimée** (cas anormal : la suppression forcée désaffecte les bornes) | **envoi SUSPENDU**, comme désactivée, + avertissement dans les journaux (réaffecter la borne) |
+| **sans entreprise** (jamais affectée, « Aucune », ou désaffectée par une suppression forcée) | inchangé : le canal dont le label = `canalTransmission`, sinon le premier canal actif (`azure_ad` compris), sinon `CRM_API_URL` / `CRM_API_KEY` |
 
-- Une entreprise **désactivée** (ou supprimée) n'arrête pas les envois : la borne repasse sur ses
-  canaux (le worker le journalise en warn). Pour **suspendre** les envois d'une borne, lui retirer
-  aussi ses canaux actifs.
+⚠️ **Jamais de repli** d'une borne affectée vers ses canaux : un canal peut viser un autre tenant, ce
+serait livrer les leads d'une entreprise à une autre (décision de revue du 2026-09-27).
+
+**Envoi suspendu** (entreprise désactivée) :
+
+- le job reste en file : statut `echec_temporaire`, **tentatives inchangées** (une pause ne compte
+  jamais comme une tentative et ne mène jamais à `echec_definitif`), `prochainEssai` = maintenant
+  + 10 min, erreur « Entreprise I-CRM « <nom> » désactivée — envoi suspendu » ; l'enregistrement
+  reflète le job (`statutPartage` `echec_temporaire`, `derniereErreur`) ;
+- aucune notification Pusher d'échec ; journal warn « Job suspendu » (`destination:
+  entreprise_icrm`, `entrepriseIcrmId`, `borneId`) ;
+- **réactiver l'entreprise** (menu « Entreprises I-CRM » → Modifier → « Entreprise active ») : ses
+  jobs suspendus sont reprogrammés aussitôt (`jobsRepris` dans la réponse de `PUT`) et partent au
+  cycle suivant du worker (≤ 30 s) ; sans réactivation, ils sont réexaminés toutes les 10 min ;
+- choisir « Aucune » (ou une autre entreprise) dans la fiche de la borne : les jobs suspendus
+  suivent la nouvelle destination à leur prochain passage (≤ 10 min, ou tout de suite avec
+  **Mettre en file d'attente**) ;
+- la fenêtre de modification prévient avant la désactivation : « N borne(s) suspendue(s) tant que
+  l'entreprise est désactivée » ; le tableau des entreprises le rappelle dans la colonne Actif.
+
 - Au succès, l'enregistrement garde `crmEntrepriseIcrmId` (entreprise qui l'a reçu) en plus de
   `crmProjetId` / `crmProjetRef` ; la page Partage CRM l'affiche dans la colonne « Destination ».
 - Journaux : `destination` (`entreprise_icrm` / `canal` / `env`) et `entrepriseIcrmId` ou `canalId`
   — jamais la clé, le secret ni les valeurs saisies.
 - **Mettre en file d'attente** (`POST /api/partage/bornes/:id/lancer`) accepte une borne qui n'a
-  qu'une entreprise active, sans canal ; sans entreprise active, les erreurs historiques
+  qu'une entreprise, sans canal (`destination.type = entreprise_icrm`). Entreprise désactivée : les
+  jobs sont quand même mis en file, la réponse porte `destination.suspendu: true` et
+  `avertissement` (« Entreprise I-CRM « <nom> » désactivée : les envois sont suspendus jusqu'à sa
+  réactivation… ») ; le back-office l'affiche. Borne sans entreprise : les erreurs historiques
   `NO_ACTIVE_CHANNEL` / `CHANNEL_LABEL_MISMATCH` s'appliquent.
 
 ### 9.4 Supprimer une entreprise
@@ -346,12 +369,12 @@ Sans interruption d'envoi, pour chaque tenant :
    (ou une nouvelle clé émise par I-CRM), puis **Tester** : l'entreprise et le sous-type doivent être
    ceux des canaux.
 2. Dans la fiche de chaque borne du tenant, choisir l'entreprise. Dès l'enregistrement, les nouveaux
-   jobs partent vers l'entreprise ; les canaux ne servent plus qu'en repli.
+   jobs partent vers l'entreprise ; les canaux de la borne ne sont plus utilisés (même si
+   l'entreprise est désactivée : ses envois sont alors suspendus, §9.3).
 3. Contrôler sur **Partage CRM** (colonne « Destination » = 🏢 entreprise, jobs en succès).
-4. Facultatif, une fois tout vérifié : désactiver ou supprimer les canaux devenus inutiles. Les
-   garder actifs assure le repli si l'entreprise est désactivée ; les supprimer rend cette
-   désactivation bloquante (plus aucun envoi, erreur « Canal I-CRM non configuré » si les variables
-   d'environnement ne sont pas renseignées).
+4. Facultatif, une fois tout vérifié : désactiver ou supprimer les canaux devenus inutiles. Ils ne
+   resservent que si la borne repasse sur « Aucune », ou après une suppression forcée de
+   l'entreprise (§9.4).
 
 ⚠️ **Changer l'entreprise d'une borne** alors que des jobs sont en échec temporaire : ils seront
 réessayés vers la **nouvelle** entreprise. Un enregistrement dont le premier envoi a été reçu par

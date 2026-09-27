@@ -45,11 +45,12 @@ export default function EntrepriseIcrmSelect({
       <p id="borne-entreprise-icrm-aide" className="text-xs text-gray-500 mt-1">
         {disabled
           ? "Choisie par le Super Administrateur."
-          : "Les enregistrements de la borne sont envoyés à cette entreprise (prioritaire sur les canaux). Les entreprises se gèrent dans « Entreprises I-CRM »."}
+          : "Les enregistrements de la borne sont envoyés à cette entreprise, et à elle seule (ses canaux ne sont plus utilisés). Les entreprises se gèrent dans « Entreprises I-CRM »."}
       </p>
       {inactive && (
         <p className="text-xs text-orange-600 mt-1" role="status">
-          Cette entreprise est inactive : la borne utilise ses canaux tant qu'elle n'est pas réactivée ou remplacée.
+          Cette entreprise est désactivée : les envois de la borne sont suspendus (aucun envoi vers ses canaux)
+          jusqu'à sa réactivation, ou jusqu'au choix d'une autre entreprise ou de « Aucune ».
         </p>
       )}
     </div>

@@ -10,6 +10,7 @@ import {
 import { ConfirmModal, Toast, ErrorBanner, PRIMARY, SECONDARY } from '../../components/ui.jsx'
 import api from '../../services/api.js'
 import { subscribeToBorne } from '../../services/pusher.js'
+import { BadgeEnvoisSuspendus } from '../../components/DestinationBorne.jsx'
 
 const JOB_STATUTS = ['en_attente', 'en_cours', 'succes', 'echec_temporaire', 'echec_definitif']
 
@@ -167,13 +168,10 @@ export default function PartageJobsPage() {
     && canaux.length > 0
     && !canaux.some((c) => c.label === selectedBorne.canalTransmission)
 
-  // Entreprise I-CRM de la borne : si elle est active, c'est la destination (prioritaire sur les canaux)
-  const entrepriseDestination = selectedBorne?.entrepriseIcrm && selectedBorne.entrepriseIcrm.actif !== false
-    ? selectedBorne.entrepriseIcrm
-    : null
-  const entrepriseInactive = selectedBorne?.entrepriseIcrm && !entrepriseDestination
-    ? selectedBorne.entrepriseIcrm
-    : null
+  // Entreprise I-CRM de la borne : si elle est affectée, c'est la SEULE destination
+  // (désactivée → envois suspendus, jamais de repli sur les canaux — même règle que le worker)
+  const entrepriseDestination = selectedBorne?.entrepriseIcrm || null
+  const envoisSuspendus = Boolean(entrepriseDestination) && entrepriseDestination.actif === false
 
   const fetchBornes = useCallback(() => {
     // `loadingBornes` est initialisé à true : ce chargement a lieu au montage.
@@ -370,13 +368,16 @@ export default function PartageJobsPage() {
     const cible = entrepriseDestination
       ? `l'entreprise I-CRM « ${entrepriseDestination.nom} »`
       : `le canal « ${activeChannel?.label || selectedBorne?.canalTransmission || '(canal par défaut)'} »`
+    const suspension = envoisSuspendus
+      ? ` ⚠️ Cette entreprise est désactivée : les envois restent suspendus (rien ne part, pas même vers les canaux) jusqu'à sa réactivation.`
+      : ''
 
     setConfirm({
       title: 'Mettre en file d\'attente la transmission ?',
       message:
         enAttenteEtErreur != null
-          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.`
-          : `Les enregistrements non encore partagés seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.`,
+          ? `Les enregistrements non encore partagés (${enAttenteEtErreur}) seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.${suspension}`
+          : `Les enregistrements non encore partagés seront mis en file vers ${cible}. Le worker traite la file toutes les 30 secondes.${suspension}`,
       confirmLabel: 'Mettre en file',
       danger: false,
       onConfirm: doLancerTransmission,
@@ -390,10 +391,9 @@ export default function PartageJobsPage() {
     try {
       const res = await api.post(`/api/partage/bornes/${selectedBorneId}/lancer`)
       const result = res.data?.data || {}
-      setToast({
-        message: `${result.queued || 0} enregistrement(s) mis en file. Worker actif toutes les 30s.`,
-        type: 'success',
-      })
+      setToast(result.avertissement
+        ? { message: `${result.queued || 0} enregistrement(s) mis en file — ${result.avertissement}.`, type: 'error' }
+        : { message: `${result.queued || 0} enregistrement(s) mis en file. Worker actif toutes les 30s.`, type: 'success' })
       refreshAll()
     } catch (err) {
       const e = err.response?.data?.error
@@ -505,11 +505,14 @@ export default function PartageJobsPage() {
                   ? <span className="text-gray-400">—</span>
                   : entrepriseDestination
                     ? (
-                      <span
-                        className="font-medium text-purple-800"
-                        title={entrepriseDestination.nomIcrm ? `I-CRM : ${entrepriseDestination.nomIcrm}` : 'Entreprise I-CRM non vérifiée'}
-                      >
-                        🏢 Entreprise I-CRM « {entrepriseDestination.nom} »
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        <span
+                          className={`font-medium ${envoisSuspendus ? 'text-gray-500' : 'text-purple-800'}`}
+                          title={entrepriseDestination.nomIcrm ? `I-CRM : ${entrepriseDestination.nomIcrm}` : 'Entreprise I-CRM non vérifiée'}
+                        >
+                          🏢 Entreprise I-CRM « {entrepriseDestination.nom} »
+                        </span>
+                        {envoisSuspendus && <BadgeEnvoisSuspendus />}
                       </span>
                     )
                     : channelLabelMismatch
@@ -540,6 +543,7 @@ export default function PartageJobsPage() {
               style={{ background: SECONDARY, minHeight: '40px' }}
               title={
                 !selectedBorneId ? 'Sélectionnez une borne'
+                : envoisSuspendus ? 'Mettre en file d\'attente (envois suspendus : entreprise désactivée)'
                 : entrepriseDestination ? 'Mettre en file d\'attente'
                 : !hasActiveChannel ? 'Aucun canal actif'
                 : channelLabelMismatch ? 'Canal incohérent'
@@ -550,9 +554,10 @@ export default function PartageJobsPage() {
             </button>
           </div>
 
-          {selectedBorneId && entrepriseInactive && (
-            <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-              ⚠️ L'entreprise I-CRM « {entrepriseInactive.nom} » de cette borne est inactive : les enregistrements partent par les canaux ci-dessous.
+          {selectedBorneId && envoisSuspendus && (
+            <div className="mt-3 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2" role="status">
+              ⏸ L'entreprise I-CRM « {entrepriseDestination.nom} » de cette borne est désactivée : les envois sont suspendus
+              (rien ne part, pas même vers les canaux ci-dessous) et reprennent à sa réactivation — menu « Entreprises I-CRM ».
             </div>
           )}
 
@@ -622,7 +627,8 @@ export default function PartageJobsPage() {
           {entrepriseDestination && (
             <div className="mx-4 mt-3 text-xs text-purple-900 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
               Cette borne envoie ses enregistrements à l'entreprise I-CRM « {entrepriseDestination.nom} »
-              (menu « Entreprises I-CRM ») : ses canaux ne servent qu'en repli, si l'entreprise est désactivée.
+              (menu « Entreprises I-CRM ») : ses canaux ne sont pas utilisés, même si l'entreprise est désactivée.
+              Pour revenir aux canaux, choisir « Aucune » dans la fiche de la borne.
             </div>
           )}
           {loadingCanaux ? (
@@ -856,11 +862,11 @@ export default function PartageJobsPage() {
                         || enregistrementBorneCanalByEnregId.get(enregId)
                         || null
                       const canalForJob = labelFromJob ? canalLabelByLabel.get(labelFromJob) : null
-                      // Entreprise qui a reçu l'enregistrement, sinon celle (active) de la borne
+                      // Entreprise qui a reçu l'enregistrement, sinon celle de la borne (suspendue si désactivée)
                       const entrepriseRecue = job.enregistrement?.crmEntrepriseIcrm
                       const entrepriseBorne = job.enregistrement?.borne?.entrepriseIcrm
-                      const entrepriseJob = entrepriseRecue
-                        || (entrepriseBorne && entrepriseBorne.actif !== false ? entrepriseBorne : null)
+                      const entrepriseJob = entrepriseRecue || entrepriseBorne || null
+                      const jobSuspendu = !entrepriseRecue && entrepriseBorne?.actif === false
                       const isStuckEnCours = job.statut === 'en_cours'
                         && job.updatedAt
                         && (now - new Date(job.updatedAt).getTime()) > 5 * 60 * 1000
@@ -871,8 +877,11 @@ export default function PartageJobsPage() {
                           <td className="px-4 py-3 text-xs">
                             {entrepriseJob
                               ? (
-                                <span className="text-purple-800" title={entrepriseRecue ? 'Entreprise I-CRM qui a reçu l’enregistrement' : 'Entreprise I-CRM de la borne'}>
-                                  🏢 {entrepriseJob.nom}
+                                <span className="inline-flex flex-col items-start gap-1">
+                                  <span className={jobSuspendu ? 'text-gray-500' : 'text-purple-800'} title={entrepriseRecue ? 'Entreprise I-CRM qui a reçu l’enregistrement' : 'Entreprise I-CRM de la borne'}>
+                                    🏢 {entrepriseJob.nom}
+                                  </span>
+                                  {jobSuspendu && <BadgeEnvoisSuspendus />}
                                 </span>
                               )
                               : labelFromJob

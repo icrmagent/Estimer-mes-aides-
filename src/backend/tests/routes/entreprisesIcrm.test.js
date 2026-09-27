@@ -22,6 +22,7 @@ const mockPrisma = {
     update: jest.fn(),
   },
   borne: { findFirst: jest.fn(), updateMany: jest.fn() },
+  partageJob: { updateMany: jest.fn() },
   $transaction: jest.fn(),
 }
 
@@ -431,6 +432,37 @@ describe('PUT /api/entreprises-icrm/:id', () => {
   it('404 si l’entreprise est inconnue ou supprimée', async () => {
     const res = await request(app).put('/api/entreprises-icrm/inconnue').set(authSA).send({ nom: 'x' })
     expect(res.status).toBe(404)
+  })
+
+  it('désactivation : aucun job reprogrammé (les envois de ses bornes sont suspendus par le worker)', async () => {
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: false })
+    expect(res.status).toBe(200)
+    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
+    expect(res.body).not.toHaveProperty('jobsRepris')
+  })
+
+  it('réactivation : les jobs SUSPENDUS de ses bornes sont reprogrammés tout de suite', async () => {
+    mockPrisma.entrepriseIcrm.findFirst.mockResolvedValue(entrepriseEnBase({ actif: false }))
+    mockPrisma.partageJob.updateMany.mockResolvedValue({ count: 3 })
+
+    const res = await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: true })
+
+    expect(res.status).toBe(200)
+    expect(res.body.jobsRepris).toBe(3)
+    expect(mockPrisma.partageJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        statut: 'echec_temporaire',
+        erreur: { endsWith: '— envoi suspendu' },
+        enregistrement: { borne: { entrepriseIcrmId: ENT_ID } },
+      },
+      data: { prochainEssai: expect.any(Date) },
+    })
+    expect(mockPrisma.partageJob.updateMany.mock.calls[0][0].data.prochainEssai.getTime()).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('entreprise déjà active renvoyée active : rien n’est reprogrammé', async () => {
+    await request(app).put(`/api/entreprises-icrm/${ENT_ID}`).set(authSA).send({ actif: true, nom: 'LENA' })
+    expect(mockPrisma.partageJob.updateMany).not.toHaveBeenCalled()
   })
 })
 

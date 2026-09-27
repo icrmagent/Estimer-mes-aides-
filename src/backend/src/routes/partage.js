@@ -171,8 +171,10 @@ partageRouter.put('/bornes/:borneId/canal', jwtAuthV2, requireRole('SUPER_ADMIN'
 
 // ─── POST /api/partage/bornes/:borneId/lancer ────────────────────────────────
 // Prépare ou relance les jobs des enregistrements non partagés d'une borne.
-// Destination (même ordre que le worker) : l'entreprise I-CRM de la borne si elle
-// est active, sinon ses canaux actifs (canalTransmission puis premier actif).
+// Destination (même règle que le worker) : une borne affectée à une entreprise
+// I-CRM n'envoie qu'à elle — active : envoi ; désactivée : jobs mis en file mais
+// envois SUSPENDUS (avertissement renvoyé), jamais de repli sur les canaux.
+// Borne sans entreprise : ses canaux actifs (canalTransmission puis premier actif).
 
 partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const { borneId } = req.params
@@ -202,10 +204,21 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
     }
 
     const entreprise = borne.entrepriseIcrm
-    const versEntreprise = Boolean(entreprise && entreprise.actif && !entreprise.deletedAt)
+    const versEntreprise = Boolean(entreprise)
+    const suspendu = versEntreprise && (!entreprise.actif || Boolean(entreprise.deletedAt))
     const destination = versEntreprise
-      ? { type: 'entreprise_icrm', entrepriseIcrmId: entreprise.id, nom: entreprise.nom }
+      ? {
+          type: 'entreprise_icrm',
+          entrepriseIcrmId: entreprise.id,
+          nom: entreprise.nom,
+          ...(suspendu ? { suspendu: true } : {}),
+        }
       : { type: 'canal', label: borne.canalTransmission ?? null }
+    const avertissement = suspendu
+      ? `Entreprise I-CRM « ${entreprise.nom} » ${entreprise.deletedAt ? 'supprimée' : 'désactivée'} : `
+        + "les envois sont suspendus jusqu'à sa réactivation (aucun envoi vers les canaux)"
+      : null
+    const extra = avertissement ? { avertissement } : {}
 
     if (!versEntreprise && (!borne.canaux || borne.canaux.length === 0)) {
       return res.status(409).json({
@@ -239,7 +252,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
     if (enregistrements.length === 0) {
       return res.json({
         success: true,
-        data: { borneId, canalTransmission: borne.canalTransmission, destination, queued: 0, created: 0, relaunched: 0 },
+        data: { borneId, canalTransmission: borne.canalTransmission, destination, ...extra, queued: 0, created: 0, relaunched: 0 },
       })
     }
 
@@ -294,6 +307,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
         borneId,
         canalTransmission: borne.canalTransmission,
         destination,
+        ...extra,
         queued: enregistrements.length,
         created,
         relaunched,

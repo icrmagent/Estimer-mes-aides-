@@ -3,8 +3,9 @@
  *
  * Couvre : borne avec une entreprise I-CRM active et SANS canal (acceptée),
  * entreprise prioritaire sur un canalTransmission incohérent, entreprise
- * inactive ou supprimée = ignorée (erreurs historiques NO_ACTIVE_CHANNEL /
- * CHANNEL_LABEL_MISMATCH conservées), borne sur canal inchangée, mise en file
+ * désactivée ou supprimée = jobs mis en file mais envois SUSPENDUS
+ * (avertissement, jamais « canal »), borne sans entreprise : erreurs historiques
+ * NO_ACTIVE_CHANNEL / CHANNEL_LABEL_MISMATCH conservées, mise en file
  * (création / relance des jobs), destination renvoyée.
  */
 
@@ -112,25 +113,40 @@ describe('POST /api/partage/bornes/:borneId/lancer — entreprise I-CRM', () => 
   })
 
   it.each([
-    ['inactive', { ...ENTREPRISE, actif: false }],
-    ['supprimée', { ...ENTREPRISE, deletedAt: new Date() }],
-  ])('entreprise %s et aucun canal : 409 NO_ACTIVE_CHANNEL (inchangé)', async (_cas, entrepriseIcrm) => {
+    ['désactivée', { ...ENTREPRISE, actif: false }, /désactivée : les envois sont suspendus/],
+    ['supprimée', { ...ENTREPRISE, actif: false, deletedAt: new Date() }, /supprimée : les envois sont suspendus/],
+  ])('entreprise %s, sans canal : jobs mis en file + avertissement « envois suspendus »', async (_cas, entrepriseIcrm, message) => {
     mockPrisma.borne.findUnique.mockResolvedValue(borne({ entrepriseIcrm }))
+
     const res = await lancer()
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe('NO_ACTIVE_CHANNEL')
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({
+      queued: 2,
+      destination: { type: 'entreprise_icrm', entrepriseIcrmId: ENT_ID, nom: 'LENA (France)', suspendu: true },
+    })
+    expect(res.body.data.avertissement).toMatch(message)
+    expect(res.body.data.avertissement).toMatch(/aucun envoi vers les canaux/)
+    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
   })
 
-  it('entreprise inactive + canalTransmission incohérent : 409 CHANNEL_LABEL_MISMATCH (inchangé)', async () => {
+  it('entreprise désactivée + canal actif : jamais « canal » comme destination, avertissement renvoyé', async () => {
     mockPrisma.borne.findUnique.mockResolvedValue(borne({
       entrepriseIcrm: { ...ENTREPRISE, actif: false },
-      canalTransmission: 'ancien-canal',
-      canaux: [{ id: 'c1', label: 'autre' }],
+      canalTransmission: 'icrm-lena',
+      canaux: [{ id: 'c1', label: 'icrm-lena' }],
     }))
     const res = await lancer()
-    expect(res.status).toBe(409)
-    expect(res.body.error.code).toBe('CHANNEL_LABEL_MISMATCH')
+    expect(res.status).toBe(200)
+    expect(res.body.data.destination).toMatchObject({ type: 'entreprise_icrm', suspendu: true })
+    expect(res.body.data.avertissement).toMatch(/suspendus/)
+  })
+
+  it('entreprise active : pas d’avertissement ni de marque « suspendu »', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue(borne({ entrepriseIcrm: ENTREPRISE }))
+    const res = await lancer()
+    expect(res.body.data).not.toHaveProperty('avertissement')
+    expect(res.body.data.destination).not.toHaveProperty('suspendu')
   })
 })
 

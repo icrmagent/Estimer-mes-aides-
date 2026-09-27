@@ -52,7 +52,7 @@ Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §9.
   sous-type –, Modifier, Supprimer avec confirmation de désaffectation) et fenêtre de saisie (secret
   masqué, afficher/masquer, « laisser vide pour ne pas changer ») ; fiche borne : choix « Entreprise
   I-CRM destinataire » (« Aucune (utiliser les canaux) », lecture seule hors SuperAdmin, entreprise
-  inactive signalée) ; colonne « Destination I-CRM » dans les listes de bornes (SuperAdmin et
+  désactivée signalée) ; colonne « Destination I-CRM » dans les listes de bornes (SuperAdmin et
   AdminBorne) ; page Partage CRM : destination de la borne et de chaque job.
 - **Tests** : backend `tests/routes/entreprisesIcrm.test.js`, `tests/routes/bornesEntrepriseIcrm.test.js`,
   `tests/routes/partageLancer.test.js`, `tests/services/queueWorker.entrepriseIcrm.test.js`,
@@ -60,18 +60,39 @@ Détail : [docs/INTEGRATION-ICRM.md](docs/INTEGRATION-ICRM.md) §9.
   `EntrepriseIcrmModal.test.jsx`, `EntrepriseIcrmSelect.test.jsx`, `EntreprisesIcrmPage.test.jsx` (+41 tests).
 
 #### Modifié
-- **Worker** : destination d'un job = l'entreprise I-CRM de la borne si elle est active et non
-  supprimée, sinon le canal (`canalTransmission`, puis premier canal actif), sinon les variables
-  d'environnement. L'envoi par entreprise réutilise l'émetteur du canal clé API
+- **Worker** : destination d'un job = l'entreprise I-CRM de la borne si elle lui est affectée
+  (désactivée : envois suspendus, voir ci-dessous — jamais de repli), sinon le canal
+  (`canalTransmission`, puis premier canal actif), sinon les variables d'environnement. L'envoi par entreprise réutilise l'émetteur du canal clé API
   (`envoyerViaCleApiIcrm`, désormais paramétré par `{ apiUrl, apiKey, token }`) : même payload,
   mêmes en-têtes, même classification des réponses. Journaux : champ `destination`
   (`entreprise_icrm` / `canal` / `env`). Chemins canal clé API et `azure_ad` inchangés.
-- **`POST /api/partage/bornes/:id/lancer`** : accepte une borne qui n'a qu'une entreprise active (sans
-  canal) et renvoie `destination` ; sans entreprise active, `NO_ACTIVE_CHANNEL` /
+- **`POST /api/partage/bornes/:id/lancer`** : accepte une borne qui n'a qu'une entreprise (sans
+  canal) et renvoie `destination` ; sans entreprise, `NO_ACTIVE_CHANNEL` /
   `CHANNEL_LABEL_MISMATCH` inchangés.
 - **Test de connexion** : ping I-CRM factorisé dans `services/icrmPingService.js`, partagé par les
   canaux et les entreprises (réponses de `POST /api/canaux/:id/test` inchangées, sauf la fin du
   message 401 qui ne dit plus « du canal »).
+
+#### Modifié (décision de revue, 2026-09-27) — entreprise désactivée = envois suspendus
+- **Plus aucun repli** d'une borne affectée à une entreprise vers ses canaux ou l'environnement :
+  l'E2E montrait une borne CAE España livrant à LENA par son canal quand CAE était désactivée
+  (fuite de leads entre entreprises). Borne affectée à une entreprise **désactivée** (ou supprimée
+  sans avoir été désaffectée) : rien n'est envoyé ; le job reste `echec_temporaire`, **sans
+  tentative comptée** (jamais `echec_definitif` pour une pause), `prochainEssai` = +10 min, erreur
+  « Entreprise I-CRM « <nom> » désactivée — envoi suspendu » reprise par l'enregistrement ; aucune
+  notification Pusher d'échec ; journal « Job suspendu ». Borne sans entreprise : inchangé.
+- **Réactivation** (`PUT /api/entreprises-icrm/:id { actif: true }`) : les jobs suspendus de ses
+  bornes sont reprogrammés aussitôt (`jobsRepris` dans la réponse).
+- **`POST /api/partage/bornes/:id/lancer`** : entreprise désactivée → jobs mis en file quand même,
+  `destination.suspendu: true` et `avertissement` « … désactivée : les envois sont suspendus… ».
+- **Back-office** : badge « Envois suspendus (entreprise désactivée) » dans les listes de bornes et
+  la page Partage CRM (borne et jobs) ; avertissement « N borne(s) suspendue(s) tant que
+  l'entreprise est désactivée » dans la fenêtre de modification et le tableau des entreprises ;
+  toast « N envois suspendus relancés » à la réactivation ; toast d'avertissement au lancement.
+- **Tests** : +12 backend (pause du worker : aucun envoi ni repli canal / env / Azure, tentatives
+  inchangées, reprise à +10 min, jamais d'échec définitif, reprise après réactivation ;
+  reprogrammation à la réactivation ; avertissement du lancement ; motif de suspension) ; +8
+  back-office (badge, avertissements, toasts).
 
 ### 2026-09-26 — contrat I-CRM v1.1 : widget « Borne » → « Info borne »
 

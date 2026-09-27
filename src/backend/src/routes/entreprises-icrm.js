@@ -26,6 +26,7 @@ import {
   MESSAGE_CLE_API_INVALIDE,
   MESSAGE_SECRET_INVALIDE,
   MESSAGE_URL_HTTPS,
+  SUFFIXE_ENVOI_SUSPENDU,
   normaliserUrlApiIcrm,
   urlApiIcrmAcceptable,
 } from '../lib/icrmApiKey.js'
@@ -227,6 +228,8 @@ entreprisesIcrmRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (re
 // impose son secret : I-CRM émet toujours une clé avec un nouveau secret (même
 // règle que les canaux). Changer l'URL ou la clé efface l'entreprise / le
 // sous-type vérifiés (à retester) ; changer le secret seul efface le statut.
+// Désactiver l'entreprise SUSPEND les envois de ses bornes (aucun repli sur les
+// canaux, voir queueWorker) ; la réactiver reprogramme aussitôt les jobs suspendus.
 
 entreprisesIcrmRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const parsed = updateSchema.safeParse(req.body)
@@ -270,12 +273,35 @@ entreprisesIcrmRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN'), async (
     }
 
     const entreprise = await prisma.entrepriseIcrm.update({ where: { id }, data: patch })
+
+    // Réactivation : les jobs suspendus des bornes de l'entreprise repartent au
+    // prochain cycle du worker (30 s) au lieu d'attendre leur reprise (10 min).
+    let jobsRepris = 0
+    if (existante.actif === false && patch.actif === true) {
+      const reprise = await prisma.partageJob.updateMany({
+        where: {
+          statut: 'echec_temporaire',
+          erreur: { endsWith: SUFFIXE_ENVOI_SUSPENDU },
+          enregistrement: { borne: { entrepriseIcrmId: id } },
+        },
+        data: { prochainEssai: new Date() },
+      })
+      jobsRepris = reprise?.count ?? 0
+    }
+
     logger.info({
       message: '[ENTREPRISES-ICRM] Entreprise modifiée',
       entrepriseIcrmId: id,
       champs: Object.keys(parsed.data),
+      ...(patch.actif !== undefined && patch.actif !== existante.actif
+        ? { actif: patch.actif, jobsRepris }
+        : {}),
     })
-    return res.json({ success: true, data: versEntreprisePublique(entreprise) })
+    return res.json({
+      success: true,
+      data: versEntreprisePublique(entreprise),
+      ...(patch.actif === true && existante.actif === false ? { jobsRepris } : {}),
+    })
   } catch (err) {
     return erreurServeur(res, err, 'Modification')
   }

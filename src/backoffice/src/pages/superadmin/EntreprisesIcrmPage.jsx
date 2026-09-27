@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import AppLayout from '../../components/layout/AppLayout.jsx'
 import EntrepriseIcrmModal from '../../components/forms/EntrepriseIcrmModal.jsx'
 import { resumeTestCanal } from '../../components/forms/canalConfig.js'
-import { statutVerification } from '../../components/forms/entrepriseIcrmConfig.js'
+import { statutVerification, messageBornesSuspendues } from '../../components/forms/entrepriseIcrmConfig.js'
 import {
   PRIMARY, IcoPlus,
   Toast, ErrorBanner, ConfirmModal, SkeletonTableRows, EmptyState, BadgeActif,
@@ -49,8 +49,16 @@ export default function EntreprisesIcrmPage() {
     setEntreprises((prev) => prev.map((e) => (e.id === maj.id ? { ...e, ...maj } : e)))
   }
 
-  const handleSaved = () => {
-    setToast({ message: 'Entreprise I-CRM enregistrée. Cliquez « Tester » pour vérifier la clé.', type: 'success' })
+  const handleSaved = (entreprise, reponse) => {
+    const repris = reponse?.jobsRepris || 0
+    setToast({
+      message: repris > 0
+        ? `Entreprise I-CRM réactivée : ${repris} envoi${repris > 1 ? 's' : ''} suspendu${repris > 1 ? 's' : ''} relancé${repris > 1 ? 's' : ''}.`
+        : entreprise?.actif === false
+          ? 'Entreprise I-CRM enregistrée — désactivée : les envois de ses bornes sont suspendus.'
+          : 'Entreprise I-CRM enregistrée. Cliquez « Tester » pour vérifier la clé.',
+      type: 'success',
+    })
     charger()
   }
 
@@ -142,7 +150,10 @@ export default function EntreprisesIcrmPage() {
             {' '}<strong>2.</strong> Cliquez « Tester » : I-CRM renvoie l'entreprise et le sous-type liés à la clé.
             {' '}<strong>3.</strong> Dans la fiche de chaque borne, choisissez l'« Entreprise I-CRM destinataire ».
           </p>
-          <p>Une borne affectée à une entreprise active lui envoie ses enregistrements, sans passer par ses canaux.</p>
+          <p>
+            Une borne affectée à une entreprise lui envoie ses enregistrements, et à elle seule (ses canaux ne sont plus utilisés).
+            Entreprise désactivée : les envois de ses bornes sont suspendus jusqu'à sa réactivation.
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm overflow-x-auto">
@@ -208,7 +219,12 @@ export default function EntreprisesIcrmPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-xs text-gray-600">{entreprise.nbBornes ?? '—'}</td>
-                      <td className="px-4 py-3"><BadgeActif actif={entreprise.actif} /></td>
+                      <td className="px-4 py-3">
+                        <BadgeActif actif={entreprise.actif} />
+                        {entreprise.actif === false && messageBornesSuspendues(entreprise.nbBornes) && (
+                          <div className="text-xs text-orange-600 mt-1">⏸ {messageBornesSuspendues(entreprise.nbBornes)}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2 flex-wrap">
                           <button

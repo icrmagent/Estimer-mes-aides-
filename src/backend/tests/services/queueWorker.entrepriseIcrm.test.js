@@ -1,12 +1,15 @@
 /**
  * Tests unitaires — queueWorker.js, destination « entreprise I-CRM de la borne ».
  *
- * Ordre de résolution d'un job :
- *   1. borne.entrepriseIcrm (présente, active, non supprimée) → envoi par clé API
- *      avec l'URL / la clé / le secret de l'entreprise (même émetteur, même payload,
- *      mêmes en-têtes et même classification que le canal icrm_api_key) ;
- *   2. sinon le canal (canalTransmission, puis premier canal actif) — inchangé ;
- *   3. sinon les variables d'environnement — inchangé.
+ * Résolution d'un job :
+ *   - borne affectée à une entreprise ACTIVE → envoi par clé API avec l'URL / la
+ *     clé / le secret de l'entreprise (même émetteur, même payload, mêmes en-têtes
+ *     et même classification que le canal icrm_api_key) ;
+ *   - borne affectée à une entreprise DÉSACTIVÉE ou supprimée → envoi SUSPENDU :
+ *     rien n'est envoyé (ni canal, ni env), job reprogrammé dans 10 min sans
+ *     tentative comptée, jamais d'échec définitif ;
+ *   - borne sans entreprise → canal (canalTransmission, puis premier actif), sinon
+ *     variables d'environnement — inchangé.
  * Au succès par entreprise : crmEntrepriseIcrmId renseigné (traçabilité).
  * Journaux : type de destination, jamais le secret ni les valeurs saisies.
  */
@@ -35,7 +38,7 @@ jest.unstable_mockModule('../../src/lib/logger.js', () => ({ default: mockLogger
 
 global.fetch = jest.fn()
 
-const { processJob, buildIcrmEnregistrementPayload } = await import('../../src/services/queueWorker.js')
+const { processJob, buildIcrmEnregistrementPayload, MAX_TENTATIVES } = await import('../../src/services/queueWorker.js')
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -235,42 +238,124 @@ describe('processJob — l’entreprise I-CRM de la borne est prioritaire', () =
   })
 })
 
-describe('processJob — entreprise inactive ou supprimée : repli sur les canaux', () => {
+describe('processJob — entreprise désactivée ou supprimée : envoi SUSPENDU, jamais de repli', () => {
+  const DIX_MINUTES = 10 * 60 * 1000
+  const jobSuspendu = () => appelsUpdateJob('echec_temporaire')[0]?.[0]
+  const majEnregistrement = () => mockPrisma.enregistrement.update.mock.calls.map((c) => c[0])
+
   it.each([
-    ['inactive', { ...ENTREPRISE, actif: false }],
-    ['supprimée', { ...ENTREPRISE, deletedAt: new Date('2026-09-26T00:00:00Z') }],
-  ])('entreprise %s → canal clé API de la borne, sans crmEntrepriseIcrmId', async (_cas, entrepriseIcrm) => {
+    ['désactivée', { ...ENTREPRISE, actif: false }, 'Entreprise I-CRM « CAE España » désactivée — envoi suspendu'],
+    ['supprimée (encore affectée)', { ...ENTREPRISE, deletedAt: new Date('2026-09-26T00:00:00Z') },
+      'Entreprise I-CRM « CAE España » supprimée mais encore affectée à la borne — envoi suspendu'],
+  ])('entreprise %s : aucun envoi (ni entreprise, ni canal clé API, ni env), job reprogrammé dans 10 min', async (_cas, entrepriseIcrm, motif) => {
+    // La borne a AUSSI un canal clé API actif (autre entreprise) et l'env est renseigné : rien ne doit partir
     mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({ entrepriseIcrm }))
+    const avant = Date.now()
 
-    await processJob(makeJob())
+    await processJob(makeJob({ tentatives: 2 }))
 
-    const [url, options] = global.fetch.mock.calls[0]
-    expect(url).toBe(URL_CANAL)
-    expect(options.headers['X-Api-Key']).toBe(CLE_CANAL)
-    expect(options.headers['X-Api-Secret']).toBe(SECRET_CANAL)
-    expect(majPartage().data).not.toHaveProperty('crmEntrepriseIcrmId')
-    expect(majPartage().data).toMatchObject({ crmProjetId: '4321' })
+    expect(global.fetch).not.toHaveBeenCalled()
+    const { where, data } = jobSuspendu()
+    expect(where).toEqual({ id: 'job-uuid-1' })
+    expect(data).toMatchObject({ statut: 'echec_temporaire', tentatives: 2, erreur: motif })
+    expect(data.prochainEssai.getTime()).toBeGreaterThanOrEqual(avant + DIX_MINUTES)
+    expect(data.prochainEssai.getTime()).toBeLessThanOrEqual(Date.now() + DIX_MINUTES)
+    // L'enregistrement reflète le job ; son compteur de tentatives n'est pas touché
+    expect(majEnregistrement()).toEqual([{
+      where: { id: ENR_ID }, data: { statutPartage: 'echec_temporaire', derniereErreur: motif },
+    }])
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    expect(appelsUpdateJob('succes')).toHaveLength(0)
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled()
+    expect(mockNotifyEchec).not.toHaveBeenCalled()
+    expect(mockNotifySucces).not.toHaveBeenCalled()
 
-    const repli = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /repli sur les canaux/.test(l.message))
-    expect(repli).toMatchObject({ entrepriseIcrmId: ENT_ID, borneId: 'borne-uuid-1', jobId: 'job-uuid-1' })
-    const logSucces = mockLogger.info.mock.calls.map((c) => c[0]).find((l) => /Job succès/.test(l.message))
-    expect(logSucces).toMatchObject({ destination: 'canal', canalId: 'canal-cle-api' })
-    expect(tousLesLogs()).not.toContain(SECRET_ENT)
+    const log = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /Job suspendu/.test(l.message))
+    expect(log).toMatchObject({
+      status: 'suspendu', destination: 'entreprise_icrm', entrepriseIcrmId: ENT_ID, borneId: 'borne-uuid-1', tentatives: 2,
+    })
+    const logs = tousLesLogs()
+    expect(logs).not.toContain(SECRET_ENT)
+    expect(logs).not.toContain(SECRET_CANAL)
+    expect(logs).not.toMatch(/repli|fallback/)
   })
 
-  it('entreprise inactive, ni canal : variables d’environnement (chemin historique)', async () => {
+  it('entreprise supprimée encore affectée : avertissement dédié (borne à réaffecter)', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({
+      entrepriseIcrm: { ...ENTREPRISE, actif: false, deletedAt: new Date('2026-09-26T00:00:00Z') },
+    }))
+    await processJob(makeJob())
+    const warn = mockLogger.warn.mock.calls.map((c) => c[0]).find((l) => /supprimée — envoi suspendu, réaffecter/.test(l.message))
+    expect(warn).toMatchObject({ entrepriseIcrmId: ENT_ID, borneId: 'borne-uuid-1', jobId: 'job-uuid-1' })
+  })
+
+  it('entreprise désactivée, borne sans canal : pas de repli sur les variables d’environnement', async () => {
     mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({
       entrepriseIcrm: { ...ENTREPRISE, actif: false }, canaux: [], canalTransmission: null,
     }))
-    global.fetch.mockResolvedValue({ ok: true, json: async () => ({}) })
-
     await processJob(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(jobSuspendu().data.erreur).toMatch(/désactivée — envoi suspendu/)
+  })
 
-    const [url, options] = global.fetch.mock.calls[0]
-    expect(url).toBe('http://crm-legacy.example.com/api/customContacts?lang=fr')
-    expect(options.headers.Authorization).toBe('Bearer legacy-crm-key')
-    const logSucces = mockLogger.info.mock.calls.map((c) => c[0]).find((l) => /Job succès/.test(l.message))
-    expect(logSucces).toMatchObject({ destination: 'env' })
+  it('canal azure_ad sur la borne : jamais de refresh Azure ni d’appel customContacts pendant la pause', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({
+      entrepriseIcrm: { ...ENTREPRISE, actif: false },
+      canalTransmission: 'azure',
+      canaux: [{ id: 'canal-azure', label: 'azure', type: 'azure_ad', apiUrl: 'https://legacy.example', apiKey: 'rt', token: 'expire', actif: true }],
+    }))
+    await processJob(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(mockPrisma.canal.update).not.toHaveBeenCalled()
+  })
+
+  it('pause à la dernière tentative : jamais d’échec définitif (tentatives inchangées)', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({ entrepriseIcrm: { ...ENTREPRISE, actif: false } }))
+    await processJob(makeJob({ tentatives: MAX_TENTATIVES - 1, statut: 'echec_temporaire' }))
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    expect(jobSuspendu().data.tentatives).toBe(MAX_TENTATIVES - 1)
+  })
+
+  it('pauses répétées : le compteur ne bouge jamais', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({ entrepriseIcrm: { ...ENTREPRISE, actif: false } }))
+    for (let i = 0; i < MAX_TENTATIVES + 2; i += 1) {
+      await processJob(makeJob({ tentatives: 1, statut: 'echec_temporaire' }))
+    }
+    const pauses = appelsUpdateJob('echec_temporaire')
+    expect(pauses).toHaveLength(MAX_TENTATIVES + 2)
+    pauses.forEach(([args]) => expect(args.data.tentatives).toBe(1))
+    expect(appelsUpdateJob('echec_definitif')).toHaveLength(0)
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
+
+  it('réactivation : le cycle suivant envoie à l’entreprise (et à elle seule)', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValueOnce(makeEnregistrement({ entrepriseIcrm: { ...ENTREPRISE, actif: false } }))
+    await processJob(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+
+    // Entreprise réactivée : le job suspendu repasse (mêmes tentatives)
+    mockPrisma.enregistrement.findUnique.mockResolvedValueOnce(makeEnregistrement())
+    await processJob(makeJob({ statut: 'echec_temporaire', tentatives: 0 }))
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_ENTREPRISE)
+    expect(global.fetch.mock.calls[0][1].headers['X-Api-Key']).toBe(CLE_ENT)
+    expect(majPartage().data).toMatchObject({ statutPartage: 'partage', crmEntrepriseIcrmId: ENT_ID })
+  })
+
+  it('borne dont l’entreprise est retirée (entrepriseIcrmId null) : logique des canaux inchangée', async () => {
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(makeEnregistrement({ entrepriseIcrm: null }))
+    await processJob(makeJob())
+    expect(global.fetch.mock.calls[0][0]).toBe(URL_CANAL)
+  })
+
+  it('identifiant d’entreprise présent sans l’entreprise chargée (cas impossible avec la FK) : suspendu aussi', async () => {
+    const enr = makeEnregistrement({ entrepriseIcrm: null })
+    enr.borne.entrepriseIcrmId = ENT_ID
+    mockPrisma.enregistrement.findUnique.mockResolvedValue(enr)
+    await processJob(makeJob())
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(jobSuspendu().data.statut).toBe('echec_temporaire')
   })
 })
 

@@ -14,6 +14,8 @@ import {
   formaterSuccesNonConformeIcrm,
   codeErreurIcrm,
   CODE_REPONSE_NON_CONFORME,
+  DELAI_REPRISE_SUSPENSION_MS,
+  messageEnvoiSuspendu,
 } from '../lib/icrmApiKey.js'
 import { validateEmail, validateTelephone, validateCodePostal } from '../lib/contactFormats.js'
 
@@ -696,9 +698,61 @@ const DESTINATION_ENTREPRISE_ICRM = 'entreprise_icrm'
 const DESTINATION_CANAL = 'canal'
 const DESTINATION_ENV = 'env'
 
-/** L'entreprise I-CRM de la borne est une destination : présente, active et non supprimée. */
+/** L'entreprise I-CRM de la borne peut recevoir : active et non supprimée. */
 function entrepriseIcrmUtilisable(entreprise) {
   return Boolean(entreprise) && entreprise.actif === true && !entreprise.deletedAt
+}
+
+/**
+ * Envoi SUSPENDU : la borne est affectée à une entreprise I-CRM désactivée (ou
+ * supprimée sans avoir été désaffectée). Rien n'est envoyé — ni à l'entreprise,
+ * ni à un canal, ni aux variables d'environnement : ce serait livrer les leads
+ * d'une entreprise à une autre. Le job reste en file (echec_temporaire),
+ * SANS tentative comptée (jamais d'échec définitif pour une pause), et repasse
+ * dans DELAI_REPRISE_SUSPENSION_MS ; la réactivation de l'entreprise le
+ * reprogramme aussitôt (routes/entreprises-icrm.js). Aucune notification Pusher.
+ */
+async function suspendreJob(job, enregistrement, entreprise, jobStart) {
+  const motif = messageEnvoiSuspendu(entreprise)
+  const prochainEssai = new Date(Date.now() + DELAI_REPRISE_SUSPENSION_MS)
+
+  if (entreprise?.deletedAt) {
+    // Ne devrait pas arriver : la suppression forcée désaffecte les bornes
+    logger.warn({
+      message: '[QUEUE] Borne affectée à une entreprise I-CRM supprimée — envoi suspendu, réaffecter la borne',
+      entrepriseIcrmId: entreprise.id,
+      borneId: enregistrement.borne?.id ?? null,
+      jobId: job.id,
+    })
+  }
+
+  await prisma.partageJob.update({
+    where: { id: job.id },
+    data: {
+      statut: 'echec_temporaire',
+      tentatives: job.tentatives,
+      erreur: motif,
+      prochainEssai,
+      updatedAt: new Date(),
+    },
+  })
+  await prisma.enregistrement.update({
+    where: { id: job.enregistrementId },
+    data: { statutPartage: 'echec_temporaire', derniereErreur: motif },
+  })
+
+  logger.warn({
+    message: '[QUEUE] Job suspendu — entreprise I-CRM de la borne désactivée',
+    jobId: job.id,
+    enregistrementId: job.enregistrementId,
+    status: 'suspendu',
+    destination: DESTINATION_ENTREPRISE_ICRM,
+    entrepriseIcrmId: entreprise?.id ?? enregistrement.borne?.entrepriseIcrmId ?? null,
+    borneId: enregistrement.borne?.id ?? null,
+    tentatives: job.tentatives,
+    duration: Date.now() - jobStart,
+    prochainEssai: prochainEssai.toISOString(),
+  })
 }
 
 /**
@@ -772,7 +826,9 @@ async function processJob(job) {
             adminBorne: {
               select: { nom: true, prenom: true, email: true, raisonSociale: true, siret: true },
             },
-            // Entreprise I-CRM destinataire : prioritaire sur les canaux si active et non supprimée
+            // Entreprise I-CRM destinataire : si elle est affectée, c'est la SEULE destination
+            // (active → envoi ; désactivée ou supprimée → envoi suspendu, jamais de canal)
+            entrepriseIcrmId: true,
             entrepriseIcrm: {
               select: { id: true, nom: true, apiUrl: true, apiKey: true, token: true, actif: true, deletedAt: true },
             },
@@ -817,22 +873,22 @@ async function processJob(job) {
       return
     }
 
-    // Destination, dans l'ordre :
-    //   1. l'entreprise I-CRM de la borne (active, non supprimée) — clé API ;
-    //   2. sinon le canal choisi par canalTransmission (label), sinon le premier canal actif ;
-    //   3. sinon les variables d'environnement (chemin historique).
+    // Destination :
+    //   - borne AFFECTÉE à une entreprise I-CRM → cette entreprise, et elle seule :
+    //       active → envoi par clé API ; désactivée ou supprimée → envoi SUSPENDU
+    //       (jamais de repli sur un canal ni sur l'environnement : pas de fuite
+    //       des leads d'une entreprise vers une autre) ;
+    //   - borne sans entreprise → canal choisi par canalTransmission (label),
+    //       sinon premier canal actif, sinon variables d'environnement (inchangé).
     const entreprise = enregistrement.borne?.entrepriseIcrm
+    const borneAffectee = Boolean(entreprise || enregistrement.borne?.entrepriseIcrmId)
     const versEntreprise = entrepriseIcrmUtilisable(entreprise)
-    if (entreprise && !versEntreprise) {
-      logger.warn({
-        message: '[QUEUE] Entreprise I-CRM de la borne inactive ou supprimée — repli sur les canaux',
-        entrepriseIcrmId: entreprise.id,
-        borneId: enregistrement.borne?.id,
-        jobId: job.id,
-      })
+    if (borneAffectee && !versEntreprise) {
+      await suspendreJob(job, enregistrement, entreprise, jobStart)
+      return
     }
 
-    // Canaux consultés seulement sans entreprise utilisable
+    // Canaux consultés seulement pour une borne sans entreprise
     canal = versEntreprise ? null : choisirCanal(enregistrement, job)
     destinationLog = versEntreprise
       ? { destination: DESTINATION_ENTREPRISE_ICRM, entrepriseIcrmId: entreprise.id }

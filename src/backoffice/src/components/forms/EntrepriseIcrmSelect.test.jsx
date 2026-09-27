@@ -55,11 +55,13 @@ describe('EntrepriseIcrmSelect', () => {
     expect(onChange).toHaveBeenCalledWith('e2')
   })
 
-  it('entreprise actuelle inactive : toujours affichée et sélectionnée, avec un avertissement', async () => {
+  it('entreprise actuelle désactivée : toujours affichée et sélectionnée, avec l’avertissement « envois suspendus »', async () => {
     const select = await rendre({ value: 'e3', entrepriseActuelle: ANCIENNE })
     expect(select.value).toBe('e3')
-    expect(select.options[select.selectedIndex].textContent).toBe('Ancienne — non vérifiée — inactive')
-    expect(container.querySelector('[role="status"]').textContent).toMatch(/inactive/)
+    expect(select.options[select.selectedIndex].textContent).toBe('Ancienne — non vérifiée — désactivée')
+    const avertissement = container.querySelector('[role="status"]').textContent
+    expect(avertissement).toMatch(/désactivée : les envois de la borne sont suspendus/)
+    expect(avertissement).toMatch(/aucun envoi vers ses canaux/)
   })
 
   it('lecture seule (AdminBorne) : désactivé, avec la mention du SuperAdmin', async () => {

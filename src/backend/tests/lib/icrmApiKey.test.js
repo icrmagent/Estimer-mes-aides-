@@ -14,6 +14,9 @@ import {
   estCanalCleApi,
   normaliserUrlApiIcrm,
   urlApiIcrmAcceptable,
+  messageEnvoiSuspendu,
+  SUFFIXE_ENVOI_SUSPENDU,
+  DELAI_REPRISE_SUSPENSION_MS,
   urlPointAccesIcrm,
   enTetesCleApiIcrm,
   estStatutIcrmDefinitif,
@@ -219,5 +222,17 @@ describe('icrmApiKey — urlApiIcrmAcceptable (canaux et entreprises I-CRM)', ()
   it('en-têtes : une entreprise I-CRM (apiKey + token) donne les mêmes en-têtes qu’un canal', () => {
     const entreprise = { id: 'e1', nom: 'LENA', apiUrl: 'https://icrm.api.ila26.fr', apiKey: CLE, token: SECRET }
     expect(enTetesCleApiIcrm(entreprise)).toEqual({ Accept: 'application/json', 'X-Api-Key': CLE, 'X-Api-Secret': SECRET })
+  })
+})
+
+describe('icrmApiKey — envoi suspendu (entreprise I-CRM désactivée)', () => {
+  it('motif lisible, sans donnée personnelle, toujours terminé par le suffixe de suspension', () => {
+    expect(messageEnvoiSuspendu({ id: 'e1', nom: 'CAE España', actif: false }))
+      .toBe('Entreprise I-CRM « CAE España » désactivée — envoi suspendu')
+    expect(messageEnvoiSuspendu({ id: 'e1', nom: 'LENA', actif: false, deletedAt: new Date() }))
+      .toBe('Entreprise I-CRM « LENA » supprimée mais encore affectée à la borne — envoi suspendu')
+    expect(messageEnvoiSuspendu({ id: 'e1' }).endsWith(SUFFIXE_ENVOI_SUSPENDU)).toBe(true)
+    expect(messageEnvoiSuspendu(null).endsWith(SUFFIXE_ENVOI_SUSPENDU)).toBe(true)
+    expect(DELAI_REPRISE_SUSPENSION_MS).toBe(10 * 60 * 1000)
   })
 })

@@ -69,10 +69,19 @@ export function libelleEntrepriseIcrm(entreprise) {
   return `${entreprise.nom} — ${icrm}`
 }
 
+export const LIBELLE_ENVOIS_SUSPENDUS = 'Envois suspendus (entreprise désactivée)'
+
+/** Texte d'avertissement : bornes suspendues tant que l'entreprise est désactivée. */
+export function messageBornesSuspendues(nbBornes) {
+  const n = Number(nbBornes) || 0
+  if (n <= 0) return null
+  return `${n} borne${n > 1 ? 's' : ''} suspendue${n > 1 ? 's' : ''} tant que l'entreprise est désactivée`
+}
+
 /**
  * Options du choix « Entreprise I-CRM destinataire » d'une borne : entreprises
- * actives, plus l'entreprise actuelle de la borne si elle est devenue inactive
- * (sinon le choix afficherait « Aucune » alors que la borne est affectée).
+ * actives, plus l'entreprise actuelle de la borne si elle est désactivée (sinon
+ * le choix afficherait « Aucune » alors que la borne est affectée et suspendue).
  * @returns {Array<{ value: string, label: string }>}
  */
 export function optionsEntreprisesIcrm(entreprises = [], entrepriseActuelle = null) {
@@ -80,7 +89,7 @@ export function optionsEntreprisesIcrm(entreprises = [], entrepriseActuelle = nu
     .filter((e) => e && e.actif !== false)
     .map((e) => ({ value: e.id, label: libelleEntrepriseIcrm(e) }))
   if (entrepriseActuelle?.id && !options.some((o) => o.value === entrepriseActuelle.id)) {
-    options.push({ value: entrepriseActuelle.id, label: `${libelleEntrepriseIcrm(entrepriseActuelle)} — inactive` })
+    options.push({ value: entrepriseActuelle.id, label: `${libelleEntrepriseIcrm(entrepriseActuelle)} — désactivée` })
   }
   return options
 }
@@ -111,19 +120,21 @@ export function statutVerification(entreprise) {
 }
 
 /**
- * Destination des enregistrements d'une borne, pour l'affichage (même ordre
- * que le worker) : entreprise I-CRM active, sinon canal.
- * @returns {{ type: 'entreprise'|'canal', libelle: string, alerte?: string }}
+ * Destination des enregistrements d'une borne, pour l'affichage (même règle
+ * que le worker) : une borne affectée à une entreprise I-CRM n'envoie qu'à elle
+ * — désactivée, ses envois sont SUSPENDUS (jamais de repli sur les canaux) ;
+ * une borne sans entreprise utilise ses canaux.
+ * @returns {{ type: 'entreprise'|'canal', libelle: string, suspendu?: true }}
  */
 export function destinationBorne(borne) {
   const entreprise = borne?.entrepriseIcrm
-  if (entreprise && entreprise.actif !== false) {
-    return { type: 'entreprise', libelle: entreprise.nom }
+  if (entreprise) {
+    return {
+      type: 'entreprise',
+      libelle: entreprise.nom,
+      ...(entreprise.actif === false ? { suspendu: true } : {}),
+    }
   }
   const canal = borne?.canalTransmission
-  return {
-    type: 'canal',
-    libelle: canal ? `Canal « ${canal} »` : 'Canaux de la borne',
-    ...(entreprise ? { alerte: `Entreprise « ${entreprise.nom} » inactive : repli sur les canaux` } : {}),
-  }
+  return { type: 'canal', libelle: canal ? `Canal « ${canal} »` : 'Canaux de la borne' }
 }
