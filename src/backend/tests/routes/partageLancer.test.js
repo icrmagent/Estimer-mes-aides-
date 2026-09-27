@@ -132,6 +132,18 @@ describe('POST /api/partage/bornes/:borneId/lancer — vers la destination ACTUE
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1)
   })
 
+  it('job EN COURS d’envoi : laissé de côté (ni remis en file ni reciblé), compté dans `enCours`', async () => {
+    mockPrisma.borne.findUnique.mockResolvedValue(borne({ entrepriseIcrmId: ENT_ID }))
+    mockPrisma.partageJob.findMany.mockResolvedValue([{ id: 'j1', enregistrementId: 'e1', statut: 'en_cours', entrepriseIcrmId: null }])
+
+    const res = await lancer()
+
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ queued: 1, created: 1, relaunched: 0, enCours: 1 })
+    expect(relances()).toEqual([])
+    expect(creations()).toEqual([{ enregistrementId: 'e2', entrepriseIcrmId: ENT_ID }])
+  })
+
   it('scénario revue : échec définitif de l’ère des canaux (cible NULL) sur une borne affectée à LENA → relancé vers LENA, jamais les canaux', async () => {
     mockPrisma.borne.findUnique.mockResolvedValue(borne({
       entrepriseIcrmId: ENT_ID, canalTransmission: 'canal-autre-tenant', canaux: [{ id: 'c1', label: 'canal-autre-tenant' }],

@@ -292,10 +292,14 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       if (cible === null || cible === destinationActuelle) return destinationActuelle
       return rediriger ? destinationActuelle : cible
     }
-    const plan = enregistrements.map((enregistrement) => {
+    // Un job en cours d'envoi par le worker n'est pas touché : le remettre en file
+    // (et le recibler) pendant l'envoi fausserait la trace de sa destination.
+    const tous = enregistrements.map((enregistrement) => {
       const existant = latestJobByEnregistrement.get(enregistrement.id) ?? null
       return { enregistrement, existant, cible: cibleDe(existant) }
     })
+    const plan = tous.filter((p) => p.existant?.statut !== 'en_cours')
+    const enCours = tous.length - plan.length
 
     // Canaux requis seulement si des envois partent vers eux (ou s'il n'y a rien et
     // que la borne n'a pas d'entreprise : message historique)
@@ -359,6 +363,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       suspendus,
       jobsRecibles,
       autresCibles,
+      ...(enCours > 0 ? { enCours } : {}),
       ...(simulation ? { simulation: true } : {}),
     }
 
