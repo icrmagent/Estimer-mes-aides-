@@ -93,6 +93,9 @@ model Borne {
   adminBorne      AdminBorne?      @relation(fields: [adminBorneId], references: [id])
   ecranVeilleId   String?
   ecranVeille     EcranVeille?     @relation(fields: [ecranVeilleId], references: [id], onDelete: SetNull)
+  // Entreprise (tenant) I-CRM destinataire des enregistrements : prioritaire sur les canaux
+  entrepriseIcrmId String?
+  entrepriseIcrm   EntrepriseIcrm? @relation(fields: [entrepriseIcrmId], references: [id], onDelete: SetNull)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   deletedAt       DateTime?
@@ -103,6 +106,7 @@ model Borne {
   @@index([statut])
   @@index([adminBorneId])
   @@index([ecranVeilleId])
+  @@index([entrepriseIcrmId])
   @@index([deletedAt])
   @@map("bornes")
 }
@@ -257,6 +261,9 @@ model Enregistrement {
   // Opportunité créée dans I-CRM (canal icrm_api_key) : id et référence renvoyés par l'API
   crmProjetId        String?
   crmProjetRef       String?
+  // Entreprise I-CRM qui a reçu l'enregistrement (renseignée au succès d'un envoi par entreprise)
+  crmEntrepriseIcrmId String?
+  crmEntrepriseIcrm   EntrepriseIcrm?        @relation(fields: [crmEntrepriseIcrmId], references: [id], onDelete: SetNull)
   submissionId       String?                 @unique
   submission         Submission?             @relation(fields: [submissionId], references: [id])
   createdAt          DateTime                @default(now())
@@ -321,6 +328,32 @@ model Canal {
 
   @@index([borneId])
   @@map("canaux")
+}
+
+// Entreprise (tenant) I-CRM enregistrée une fois, puis choisie borne par borne
+// (Borne.entrepriseIcrmId). Authentification par clé API I-CRM, comme un canal
+// icrm_api_key : apiKey = identifiant de clé « emak_… » (public), token = secret
+// (écriture seule, jamais renvoyé par l'API — voir routes/entreprises-icrm.js).
+// nomIcrm / sousTypeIcrm = entreprise et sous-type renvoyés par le ping I-CRM.
+model EntrepriseIcrm {
+  id                   String           @id @default(uuid())
+  nom                  String
+  nomIcrm              String?
+  sousTypeIcrm         String?
+  apiUrl               String
+  apiKey               String
+  token                String
+  actif                Boolean          @default(true)
+  derniereVerification DateTime?
+  dernierStatut        String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  deletedAt            DateTime?
+  bornes               Borne[]
+  enregistrements      Enregistrement[]
+
+  @@index([deletedAt])
+  @@map("entreprises_icrm")
 }
 
 // ─── Security models ──────────────────────────────────────────────────────────

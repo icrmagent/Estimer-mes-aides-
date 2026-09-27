@@ -17,6 +17,7 @@ import { dashboardRouter } from './routes/dashboard.js'
 import { partageRouter } from './routes/partage.js'
 import { categoriesQuestionsRouter } from './routes/categories-questions.js'
 import { canauxRouter } from './routes/canaux.js'
+import { entreprisesIcrmRouter } from './routes/entreprises-icrm.js'
 import { ecransVeilleRouter } from './routes/ecrans-veille.js'
 import { csrfProtectionMiddleware, issueCsrfToken } from './middleware/csrfProtection.js'
 import { globalErrorHandler } from './lib/errorSanitizer.js'
@@ -264,6 +265,7 @@ backofficeRouter.use('/categories-questions', categoriesQuestionsRouter)
 backofficeRouter.use('/dashboard', dashboardRouter)
 backofficeRouter.use('/partage', partageRouter)           // /api/partage/jobs
 backofficeRouter.use('/canaux', canauxRouter)
+backofficeRouter.use('/entreprises-icrm', entreprisesIcrmRouter)
 backofficeRouter.use('/ecrans-veille', ecransVeilleRouter)
 
 // Mount backoffice router at /api (legacy paths) and /api/backoffice (new canonical prefix)

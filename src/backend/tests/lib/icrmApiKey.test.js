@@ -13,6 +13,7 @@ import {
   typeDeCanal,
   estCanalCleApi,
   normaliserUrlApiIcrm,
+  urlApiIcrmAcceptable,
   urlPointAccesIcrm,
   enTetesCleApiIcrm,
   estStatutIcrmDefinitif,
@@ -197,5 +198,26 @@ describe('icrmApiKey — conformité des réponses 2xx au contrat v1', () => {
     expect(html).toMatch(/vérifier l'URL API/)
     expect(formaterSuccesNonConformeIcrm(201, { secret: 'x' })).toMatch(/ni status ni projet_id/)
     expect(formaterSuccesNonConformeIcrm(201, { secret: 'x' })).not.toContain('secret')
+  })
+})
+
+describe('icrmApiKey — urlApiIcrmAcceptable (canaux et entreprises I-CRM)', () => {
+  it('https partout, http seulement vers localhost ; le reste est refusé', () => {
+    expect(urlApiIcrmAcceptable('https://icrm.api.ila26.fr')).toBe(true)
+    expect(urlApiIcrmAcceptable('https://icrm.api.es.ila26.com/api/')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://localhost:8000')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://127.0.0.1:3998')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://[::1]:8000')).toBe(true)
+    expect(urlApiIcrmAcceptable('http://icrm.api.ila26.fr')).toBe(false)
+    expect(urlApiIcrmAcceptable('http://localhost.evil.example')).toBe(false)
+    expect(urlApiIcrmAcceptable('ftp://icrm.api.ila26.fr')).toBe(false)
+    expect(urlApiIcrmAcceptable('pas une url')).toBe(false)
+    expect(urlApiIcrmAcceptable('')).toBe(false)
+    expect(urlApiIcrmAcceptable(undefined)).toBe(false)
+  })
+
+  it('en-têtes : une entreprise I-CRM (apiKey + token) donne les mêmes en-têtes qu’un canal', () => {
+    const entreprise = { id: 'e1', nom: 'LENA', apiUrl: 'https://icrm.api.ila26.fr', apiKey: CLE, token: SECRET }
+    expect(enTetesCleApiIcrm(entreprise)).toEqual({ Accept: 'application/json', 'X-Api-Key': CLE, 'X-Api-Secret': SECRET })
   })
 })

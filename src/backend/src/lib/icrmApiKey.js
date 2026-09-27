@@ -12,9 +12,14 @@
  *   apiKey = identifiant de clé (public, affichable)
  *   token  = secret (jamais renvoyé par l'API, jamais journalisé)
  *
+ * Une « entreprise I-CRM » (table `entreprises_icrm`, routes/entreprises-icrm.js)
+ * stocke les mêmes trois valeurs (apiUrl, apiKey, token) : toutes les fonctions
+ * ci-dessous acceptent indifféremment un canal ou une entreprise.
+ *
  * Ce module ne fait aucun appel réseau : il centralise les constantes, la
  * normalisation d'URL, les en-têtes et la classification des statuts HTTP,
- * partagés par le queue worker et la route de test des canaux.
+ * partagés par le queue worker, la route de test des canaux et celle des
+ * entreprises I-CRM (appel réseau du ping : services/icrmPingService.js).
  */
 
 export const CANAL_TYPE_AZURE_AD = 'azure_ad'
@@ -27,6 +32,11 @@ export const ICRM_EMA_API_PATH = '/api/external/estimer-mes-aides/v1'
 export const ICRM_API_KEY_ID_REGEX = /^emak_[A-Za-z0-9]{24}$/
 // Secret : montré une seule fois par I-CRM, stocké ici en écriture seule.
 export const ICRM_API_SECRET_REGEX = /^[A-Za-z0-9]{48}$/
+
+// Messages de validation (routes canaux et entreprises I-CRM) : ne citent jamais la valeur saisie.
+export const MESSAGE_CLE_API_INVALIDE = 'Clé API I-CRM invalide : format attendu « emak_ » suivi de 24 caractères alphanumériques'
+export const MESSAGE_SECRET_INVALIDE = 'Secret API I-CRM invalide : 48 caractères alphanumériques attendus'
+export const MESSAGE_URL_HTTPS = "L'URL API I-CRM doit être en https (le secret transite dans les en-têtes)"
 
 // Échecs définitifs : réessayer ne changera rien (identifiants, URL, données).
 export const STATUTS_ICRM_DEFINITIFS = Object.freeze([401, 403, 404, 413, 422])
@@ -55,12 +65,29 @@ export function normaliserUrlApiIcrm(apiUrl) {
     .replace(/\/+$/, '')
 }
 
+/**
+ * Le secret part dans un en-tête HTTP : https obligatoire, http toléré seulement
+ * vers localhost (développement, mock I-CRM local).
+ */
+export function urlApiIcrmAcceptable(apiUrl) {
+  try {
+    const url = new URL(apiUrl)
+    if (url.protocol === 'https:') return true
+    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  } catch {
+    return false
+  }
+}
+
 /** URL complète d'un point d'accès du contrat (ex. '/ping', '/enregistrements'). */
 export function urlPointAccesIcrm(apiUrl, chemin) {
   return `${normaliserUrlApiIcrm(apiUrl)}${ICRM_EMA_API_PATH}${chemin}`
 }
 
-/** En-têtes d'authentification + JSON. Ne jamais journaliser le résultat. */
+/**
+ * En-têtes d'authentification + JSON. Ne jamais journaliser le résultat.
+ * @param {{ apiKey: string, token: string }} canal canal icrm_api_key ou entreprise I-CRM
+ */
 export function enTetesCleApiIcrm(canal, extra = {}) {
   return {
     Accept: 'application/json',

@@ -591,7 +591,9 @@ function erreurPartage(message, { definitif = false, httpStatus = null, code = n
 }
 
 /**
- * Envoie un enregistrement à I-CRM via un canal `icrm_api_key`.
+ * Envoie un enregistrement à I-CRM avec une clé API. Seul émetteur du contrat v1,
+ * partagé par les deux destinations « clé API » : un canal `icrm_api_key` et
+ * l'entreprise I-CRM de la borne (mêmes identifiants apiUrl / apiKey / token).
  * Aucun appel Azure (pas de getValidToken). Les redirections ne sont pas suivies
  * (le secret ne doit jamais partir vers un autre hôte).
  *
@@ -599,15 +601,22 @@ function erreurPartage(message, { definitif = false, httpStatus = null, code = n
  * 2xx (front en repli SPA, page de proxy, mauvaise URL de base) ne prouve pas que
  * l'opportunité existe et ne doit jamais marquer l'enregistrement « partagé ».
  *
+ * @param {{ apiUrl: string, apiKey: string, token: string, id?: string }} identifiants
+ *   canal icrm_api_key ou entreprise I-CRM
+ * @param {Object} enregistrement
+ * @param {Object} [contexteLog] champs de journalisation identifiant la destination :
+ *   `{ canalId }` (défaut) ou `{ entrepriseIcrmId }` — jamais de secret
  * @returns {{ crmProjetId: string, crmProjetRef: string|null, statutIcrm: string,
  *             httpStatus: number, warnings: Array }}
  * @throws Error avec `definitif=true` pour 401/403/404/413/422/3xx et 2xx non conforme
  *         (pas de réessai) ; sans `definitif` (backoff) pour un 2xx au corps illisible
  */
-async function envoyerViaCleApiIcrm(canal, enregistrement) {
-  if (!normaliserUrlApiIcrm(canal.apiUrl) || !canal.apiKey || !canal.token) {
+async function envoyerViaCleApiIcrm(identifiants, enregistrement, contexteLog = { canalId: identifiants?.id ?? null }) {
+  if (!normaliserUrlApiIcrm(identifiants.apiUrl) || !identifiants.apiKey || !identifiants.token) {
     throw erreurPartage(
-      'Canal I-CRM (clé API) incomplet : URL API, clé ou secret manquant — compléter le canal dans le back-office',
+      contexteLog.entrepriseIcrmId
+        ? "Entreprise I-CRM incomplète : URL API, clé ou secret manquant — compléter l'entreprise dans le back-office (menu Entreprises I-CRM)"
+        : 'Canal I-CRM (clé API) incomplet : URL API, clé ou secret manquant — compléter le canal dans le back-office',
       { definitif: true },
     )
   }
@@ -618,7 +627,7 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
     logger.warn({
       message: '[QUEUE] Valeurs retirées du bloc contact (format ou longueur refusés par I-CRM) — transmises dans reponses',
       enregistrementId: enregistrement.id,
-      canalId: canal.id ?? null,
+      ...contexteLog,
       contactEcarte,
     })
   }
@@ -629,9 +638,9 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
   let res
   let corps
   try {
-    res = await fetch(urlPointAccesIcrm(canal.apiUrl, '/enregistrements'), {
+    res = await fetch(urlPointAccesIcrm(identifiants.apiUrl, '/enregistrements'), {
       method: 'POST',
-      headers: enTetesCleApiIcrm(canal, {
+      headers: enTetesCleApiIcrm(identifiants, {
         'Content-Type': 'application/json',
         'Idempotency-Key': enregistrement.id,
       }),
@@ -680,6 +689,38 @@ async function envoyerViaCleApiIcrm(canal, enregistrement) {
   })
 }
 
+// ─── Destination d'un job ─────────────────────────────────────────────────────
+
+// Valeur du champ `destination` des journaux du worker (jamais de secret)
+const DESTINATION_ENTREPRISE_ICRM = 'entreprise_icrm'
+const DESTINATION_CANAL = 'canal'
+const DESTINATION_ENV = 'env'
+
+/** L'entreprise I-CRM de la borne est une destination : présente, active et non supprimée. */
+function entrepriseIcrmUtilisable(entreprise) {
+  return Boolean(entreprise) && entreprise.actif === true && !entreprise.deletedAt
+}
+
+/**
+ * Canal actif de la borne : celui dont le label = canalTransmission, sinon le
+ * premier canal actif (le plus récent) ; undefined si la borne n'en a aucun.
+ */
+function choisirCanal(enregistrement, job) {
+  const canalLabel = enregistrement.borne?.canalTransmission
+  const matchedByLabel = canalLabel
+    ? enregistrement.borne?.canaux?.find(c => c.label === canalLabel)
+    : null
+  if (canalLabel && !matchedByLabel) {
+    logger.warn({
+      message: '[QUEUE] canalTransmission ne correspond à aucun canal actif — fallback sur premier canal',
+      canalLabel,
+      borneId: enregistrement.borne?.id,
+      jobId: job.id,
+    })
+  }
+  return matchedByLabel ?? enregistrement.borne?.canaux?.[0]
+}
+
 let workerInterval = null
 let isRunning = false
 
@@ -700,6 +741,9 @@ function computeNextRetry(tentatives) {
  */
 async function processJob(job) {
   const jobStart = Date.now()
+  // Destination retenue (canal choisi, et champs de journalisation sans secret)
+  let canal = null
+  let destinationLog = null
 
   // Marquer le job comme en cours
   await prisma.partageJob.update({
@@ -727,6 +771,10 @@ async function processJob(job) {
             // Liste fermée : jamais passwordHash, actif ni les autres colonnes.
             adminBorne: {
               select: { nom: true, prenom: true, email: true, raisonSociale: true, siret: true },
+            },
+            // Entreprise I-CRM destinataire : prioritaire sur les canaux si active et non supprimée
+            entrepriseIcrm: {
+              select: { id: true, nom: true, apiUrl: true, apiKey: true, token: true, actif: true, deletedAt: true },
             },
             canaux: {
               where: { actif: true },
@@ -769,27 +817,38 @@ async function processJob(job) {
       return
     }
 
-    // Sélectionner le canal par canalTransmission (label) si défini, sinon premier canal actif
-    const canalLabel = enregistrement.borne?.canalTransmission
-    const matchedByLabel = canalLabel
-      ? enregistrement.borne?.canaux?.find(c => c.label === canalLabel)
-      : null
-    if (canalLabel && !matchedByLabel) {
+    // Destination, dans l'ordre :
+    //   1. l'entreprise I-CRM de la borne (active, non supprimée) — clé API ;
+    //   2. sinon le canal choisi par canalTransmission (label), sinon le premier canal actif ;
+    //   3. sinon les variables d'environnement (chemin historique).
+    const entreprise = enregistrement.borne?.entrepriseIcrm
+    const versEntreprise = entrepriseIcrmUtilisable(entreprise)
+    if (entreprise && !versEntreprise) {
       logger.warn({
-        message: '[QUEUE] canalTransmission ne correspond à aucun canal actif — fallback sur premier canal',
-        canalLabel,
+        message: '[QUEUE] Entreprise I-CRM de la borne inactive ou supprimée — repli sur les canaux',
+        entrepriseIcrmId: entreprise.id,
         borneId: enregistrement.borne?.id,
         jobId: job.id,
       })
     }
-    const canal = matchedByLabel ?? enregistrement.borne?.canaux?.[0]
 
-    // Canal « Clé API I-CRM » : opportunité complète, sans Azure AD.
+    // Canaux consultés seulement sans entreprise utilisable
+    canal = versEntreprise ? null : choisirCanal(enregistrement, job)
+    destinationLog = versEntreprise
+      ? { destination: DESTINATION_ENTREPRISE_ICRM, entrepriseIcrmId: entreprise.id }
+      : canal
+        ? { destination: DESTINATION_CANAL, canalId: canal.id ?? null }
+        : { destination: DESTINATION_ENV }
+
+    // Entreprise I-CRM ou canal « Clé API I-CRM » : opportunité complète, sans
+    // Azure AD, par le même émetteur (envoyerViaCleApiIcrm).
     // Tout autre canal (azure_ad, ou lignes antérieures à la colonne `type`)
     // suit le chemin historique ci-dessous, inchangé.
     let envoiCleApi = null
-    if (canal && estCanalCleApi(canal)) {
-      envoiCleApi = await envoyerViaCleApiIcrm(canal, enregistrement)
+    if (versEntreprise) {
+      envoiCleApi = await envoyerViaCleApiIcrm(entreprise, enregistrement, { entrepriseIcrmId: entreprise.id })
+    } else if (canal && estCanalCleApi(canal)) {
+      envoiCleApi = await envoyerViaCleApiIcrm(canal, enregistrement, { canalId: canal.id ?? null })
     } else {
       const crmUrl = canal?.apiUrl || process.env.CRM_API_URL
       const crmKey = canal
@@ -845,10 +904,12 @@ async function processJob(job) {
         data: {
           statutPartage: 'partage',
           partageAt: new Date(),
-          // Traçabilité de l'opportunité créée (canal icrm_api_key uniquement)
+          // Traçabilité de l'opportunité créée (envoi par clé API uniquement)
           ...(envoiCleApi
             ? { crmProjetId: envoiCleApi.crmProjetId, crmProjetRef: envoiCleApi.crmProjetRef }
             : {}),
+          // … et de l'entreprise I-CRM qui l'a reçue (envoi par entreprise uniquement)
+          ...(versEntreprise ? { crmEntrepriseIcrmId: entreprise.id } : {}),
         },
       }),
     ])
@@ -862,6 +923,7 @@ async function processJob(job) {
         jobId: job.id,
         enregistrementId: job.enregistrementId,
         canalId: canal?.id ?? null,
+        ...destinationLog,
         crmProjetId: envoiCleApi.crmProjetId,
         nbWarnings: envoiCleApi.warnings.length,
         warnings: envoiCleApi.warnings.slice(0, 50).map((w) => ({
@@ -890,6 +952,7 @@ async function processJob(job) {
       enregistrementId: job.enregistrementId,
       status: 'succes',
       duration: Date.now() - jobStart,
+      ...destinationLog,
       ...(envoiCleApi
         ? {
             canalType: CANAL_TYPE_ICRM_API_KEY,
@@ -948,6 +1011,7 @@ async function processJob(job) {
         status: 'echec_definitif',
         tentatives: newTentatives,
         duration: Date.now() - jobStart,
+        ...destinationLog,
         error: err.message,
         ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })
@@ -981,6 +1045,7 @@ async function processJob(job) {
         maxTentatives: MAX_TENTATIVES,
         duration: Date.now() - jobStart,
         prochainEssai: prochainEssai.toISOString(),
+        ...destinationLog,
         error: err.message,
         ...(err.httpStatus ? { httpStatus: err.httpStatus, codeIcrm: err.codeIcrm ?? null } : {}),
       })

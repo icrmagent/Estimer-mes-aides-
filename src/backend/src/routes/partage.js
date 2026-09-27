@@ -53,7 +53,17 @@ partageRouter.get('/jobs', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, re
             borneId: true,
             statutPartage: true,
             createdAt: true,
-            borne: { select: { id: true, idBorne: true, adresse: true, canalTransmission: true } },
+            // Entreprise I-CRM qui a effectivement reçu l'enregistrement (envoi par entreprise)
+            crmEntrepriseIcrm: { select: { id: true, nom: true } },
+            borne: {
+              select: {
+                id: true,
+                idBorne: true,
+                adresse: true,
+                canalTransmission: true,
+                entrepriseIcrm: { select: { id: true, nom: true, actif: true } },
+              },
+            },
           },
         },
       },
@@ -161,6 +171,8 @@ partageRouter.put('/bornes/:borneId/canal', jwtAuthV2, requireRole('SUPER_ADMIN'
 
 // ─── POST /api/partage/bornes/:borneId/lancer ────────────────────────────────
 // Prépare ou relance les jobs des enregistrements non partagés d'une borne.
+// Destination (même ordre que le worker) : l'entreprise I-CRM de la borne si elle
+// est active, sinon ses canaux actifs (canalTransmission puis premier actif).
 
 partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) => {
   const { borneId } = req.params
@@ -176,6 +188,9 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
           where: { actif: true },
           select: { id: true, label: true },
         },
+        entrepriseIcrm: {
+          select: { id: true, nom: true, actif: true, deletedAt: true },
+        },
       },
     })
 
@@ -186,7 +201,13 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       })
     }
 
-    if (!borne.canaux || borne.canaux.length === 0) {
+    const entreprise = borne.entrepriseIcrm
+    const versEntreprise = Boolean(entreprise && entreprise.actif && !entreprise.deletedAt)
+    const destination = versEntreprise
+      ? { type: 'entreprise_icrm', entrepriseIcrmId: entreprise.id, nom: entreprise.nom }
+      : { type: 'canal', label: borne.canalTransmission ?? null }
+
+    if (!versEntreprise && (!borne.canaux || borne.canaux.length === 0)) {
       return res.status(409).json({
         success: false,
         error: {
@@ -196,7 +217,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       })
     }
 
-    if (borne.canalTransmission && !borne.canaux.some((c) => c.label === borne.canalTransmission)) {
+    if (!versEntreprise && borne.canalTransmission && !borne.canaux.some((c) => c.label === borne.canalTransmission)) {
       return res.status(409).json({
         success: false,
         error: {
@@ -218,7 +239,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
     if (enregistrements.length === 0) {
       return res.json({
         success: true,
-        data: { borneId, canalTransmission: borne.canalTransmission, queued: 0, created: 0, relaunched: 0 },
+        data: { borneId, canalTransmission: borne.canalTransmission, destination, queued: 0, created: 0, relaunched: 0 },
       })
     }
 
@@ -272,6 +293,7 @@ partageRouter.post('/bornes/:borneId/lancer', jwtAuthV2, requireRole('SUPER_ADMI
       data: {
         borneId,
         canalTransmission: borne.canalTransmission,
+        destination,
         queued: enregistrements.length,
         created,
         relaunched,

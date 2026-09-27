@@ -32,9 +32,14 @@ const createBorneSchema = z.object({
   formulaireId: z.string().uuid().optional(),
   adminBorneId: z.string().uuid().optional(),
   ecranVeilleId: z.string().uuid().nullable().optional(),
+  // Entreprise I-CRM destinataire (null = canaux). Affectation réservée au SuperAdmin.
+  entrepriseIcrmId: z.string().uuid("Identifiant d'entreprise I-CRM invalide").nullable().optional(),
 })
 
 const updateBorneSchema = createBorneSchema.omit({ idBorne: true }).partial()
+
+// Entreprise I-CRM exposée avec la borne : jamais l'URL, la clé ni le secret.
+const ENTREPRISE_ICRM_SELECT = { id: true, nom: true, nomIcrm: true, sousTypeIcrm: true, actif: true }
 
 const updateStatutSchema = z.object({
   statut: z.enum(['actif', 'inactif']),
@@ -92,6 +97,25 @@ async function generateUniqueIdBorne() {
   return `BORNE-${randomUUID().toUpperCase()}`
 }
 
+/**
+ * Vérifie qu'une entreprise I-CRM peut devenir la destination d'une borne :
+ * existante, non supprimée et active.
+ * @returns {null|{ status: number, code: string, message: string }} null si utilisable
+ */
+async function refusEntrepriseIcrm(entrepriseIcrmId) {
+  const entreprise = await prisma.entrepriseIcrm.findFirst({
+    where: { id: entrepriseIcrmId, deletedAt: null },
+    select: { id: true, actif: true },
+  })
+  if (!entreprise) {
+    return { status: 400, code: 'ENTREPRISE_ICRM_NOT_FOUND', message: 'Entreprise I-CRM introuvable' }
+  }
+  if (!entreprise.actif) {
+    return { status: 400, code: 'ENTREPRISE_ICRM_INACTIVE', message: "L'entreprise I-CRM choisie est inactive" }
+  }
+  return null
+}
+
 // ─── GET /api/bornes ──────────────────────────────────────────────────────────
 
 bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), async (req, res) => {
@@ -125,6 +149,7 @@ bornesRouter.get('/', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), asyn
           adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
           formulaire: { select: { id: true, label: true, version: true, statut: true } },
           ecranVeille: { select: { id: true, nom: true, actif: true } },
+          entrepriseIcrm: { select: ENTREPRISE_ICRM_SELECT },
         },
       }),
       prisma.borne.count({ where }),
@@ -164,6 +189,13 @@ bornesRouter.post('/', jwtAuthV2, requireRole('SUPER_ADMIN'), async (req, res) =
     }
   }
 
+  if (parsed.data.entrepriseIcrmId) {
+    const refus = await refusEntrepriseIcrm(parsed.data.entrepriseIcrmId)
+    if (refus) {
+      return res.status(refus.status).json({ success: false, error: { code: refus.code, message: refus.message } })
+    }
+  }
+
   try {
     const data = {
       ...parsed.data,
@@ -188,6 +220,7 @@ bornesRouter.get('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
         adminBorne: { select: { id: true, nom: true, prenom: true, email: true } },
         formulaire: { select: { id: true, label: true, version: true, statut: true } },
         ecranVeille: { select: { id: true, nom: true, actif: true } },
+        entrepriseIcrm: { select: ENTREPRISE_ICRM_SELECT },
       },
     })
 
@@ -232,6 +265,48 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
     }
   }
 
+  // Entreprise I-CRM destinataire : choix réservé au SuperAdmin. Renvoyer la
+  // valeur actuelle (formulaire complet réémis) n'est pas un changement : accepté
+  // pour tous et sans revalidation (l'entreprise a pu être désactivée depuis).
+  let entrepriseIcrmModifiee = false
+  if (parsed.data.entrepriseIcrmId !== undefined) {
+    try {
+      const demandee = parsed.data.entrepriseIcrmId ?? null
+      let actuelle
+      if (req.borne) {
+        actuelle = req.borne.entrepriseIcrmId ?? null
+      } else {
+        const courante = await prisma.borne.findFirst({
+          where: { id: req.params.id, deletedAt: null },
+          select: { entrepriseIcrmId: true },
+        })
+        if (!courante) {
+          return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Borne introuvable' } })
+        }
+        actuelle = courante.entrepriseIcrmId ?? null
+      }
+
+      if (demandee === actuelle) {
+        delete parsed.data.entrepriseIcrmId
+      } else if (req.user.role !== 'SUPER_ADMIN') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: "Seul le SuperAdmin peut choisir l'entreprise I-CRM destinataire" },
+        })
+      } else {
+        if (demandee) {
+          const refus = await refusEntrepriseIcrm(demandee)
+          if (refus) {
+            return res.status(refus.status).json({ success: false, error: { code: refus.code, message: refus.message } })
+          }
+        }
+        entrepriseIcrmModifiee = true
+      }
+    } catch (err) {
+      return handlePrismaError(err, res)
+    }
+  }
+
   // Task 36.9 — If formulaireId is being set, verify the formulaire is published
   if (parsed.data.formulaireId) {
     const formulaire = await prisma.formulaire.findUnique({
@@ -260,6 +335,14 @@ bornesRouter.put('/:id', jwtAuthV2, requireRole('SUPER_ADMIN', 'ADMIN_BORNE'), c
 
     if (parsed.data.ecranVeilleId !== undefined) {
       await publishEvent(`borne-${req.params.id}`, 'ecran-veille.maj', { ecranVeilleId: parsed.data.ecranVeilleId })
+    }
+
+    if (entrepriseIcrmModifiee) {
+      logger.info({
+        message: '[BORNES] Entreprise I-CRM destinataire modifiée',
+        borneId: req.params.id,
+        entrepriseIcrmId: parsed.data.entrepriseIcrmId ?? null,
+      })
     }
 
     return res.json({ success: true, data: borne })
